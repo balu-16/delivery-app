@@ -2,6 +2,19 @@ export const INVENTORY_CONFIG_DEFAULTS = {
   catalogLowStockThreshold: 5,
   inventoryExpirySoonDays: 7,
 } as const;
+/** Fee slabs are ascending order-value ceilings; the last slab may use null for "above". */
+export interface DeliveryFeeSlab {
+  maxOrderValuePaise: string | null;
+  feePaise: string;
+}
+export interface CodEligibility {
+  minCompletedPrepaidOrders: number;
+}
+export interface FeeTaxRule {
+  appliesTo: 'DELIVERY' | 'HANDLING' | 'SMALL_CART' | 'SURGE' | 'ALL';
+  taxBps: number;
+  split: 'CGST_SGST' | 'IGST';
+}
 export interface ConfigValues {
   inventoryReservationTtlSeconds: number;
   inventoryAdjustmentApprovalUnits: number;
@@ -9,6 +22,25 @@ export interface ConfigValues {
   catalogLowStockThreshold: number;
   catalogMaxPerOrder: number;
   catalogAllowedGstBps: number[];
+  maxCartLines: number;
+  minOrderPaise: string;
+  maxOrderPaise: string;
+  maxCodPaise: string;
+  deliveryFeeSlabs: DeliveryFeeSlab[];
+  freeDeliveryThresholdPaise: string;
+  handlingFeePaise: string;
+  smallCartThresholdPaise: string;
+  smallCartFeePaise: string;
+  surgeFeePaise: string;
+  paymentWindowSeconds: number;
+  couponValidationAttemptsPerWindow: number;
+  refundDestinationPolicy: 'original' | 'original_then_wallet' | 'wallet';
+  promoSpendCapBps: number;
+  topupMinPaise: string;
+  topupMaxPaise: string;
+  topupMonthlyCapPaise: string;
+  codEligibility: CodEligibility;
+  feeTaxRules: FeeTaxRule[];
   catalogPriceApprovalCount: number;
   catalogPriceApprovalPercent: number;
   catalogImportMaxBytes: number;

@@ -9,8 +9,19 @@ import {
   type AppConfig,
   type ConfigKey,
   type ConfigValues,
+  type DeliveryFeeSlab,
   type FeatureFlagKey,
 } from '../contracts/config.js';
+
+const paise = z.string().regex(/^[0-9]+$/, 'paise must be a nonnegative decimal string');
+const feeSlabs = z
+  .array(
+    z
+      .object({ maxOrderValuePaise: paise.nullable(), feePaise: paise })
+      .strict() satisfies z.ZodType<DeliveryFeeSlab, unknown>,
+  )
+  .min(1)
+  .max(20);
 
 const definitions = {
   inventoryReservationTtlSeconds: z.number().int().positive().default(900),
@@ -33,6 +44,42 @@ const definitions = {
     .default([0, 500, 1200, 1800, 2800]),
   catalogPriceApprovalCount: z.number().int().positive().default(20),
   catalogPriceApprovalPercent: z.number().int().min(0).max(10000).default(20),
+  maxCartLines: z.number().int().positive().default(50),
+  minOrderPaise: paise.default('0'),
+  maxOrderPaise: paise.default('50000000'),
+  maxCodPaise: paise.default('500000'),
+  deliveryFeeSlabs: feeSlabs.default([
+    { maxOrderValuePaise: '20000', feePaise: '4000' },
+    { maxOrderValuePaise: null, feePaise: '2000' },
+  ]),
+  freeDeliveryThresholdPaise: paise.default('59900'),
+  handlingFeePaise: paise.default('500'),
+  smallCartThresholdPaise: paise.default('19900'),
+  smallCartFeePaise: paise.default('1500'),
+  surgeFeePaise: paise.default('0'),
+  paymentWindowSeconds: z.number().int().positive().max(86400).default(900),
+  couponValidationAttemptsPerWindow: z.number().int().positive().default(10),
+  refundDestinationPolicy: z
+    .enum(['original', 'original_then_wallet', 'wallet'])
+    .default('original_then_wallet'),
+  promoSpendCapBps: z.number().int().min(0).max(10000).default(10000),
+  topupMinPaise: paise.default('10000'),
+  topupMaxPaise: paise.default('1000000'),
+  topupMonthlyCapPaise: paise.default('10000000'),
+  codEligibility: z
+    .object({ minCompletedPrepaidOrders: z.number().int().min(0).max(1000) })
+    .strict()
+    .default({ minCompletedPrepaidOrders: 0 }),
+  feeTaxRules: z
+    .array(
+      z.object({
+        appliesTo: z.enum(['DELIVERY', 'HANDLING', 'SMALL_CART', 'SURGE', 'ALL']),
+        taxBps: z.number().int().min(0).max(10000),
+        split: z.enum(['CGST_SGST', 'IGST']),
+      }),
+    )
+    .max(20)
+    .default([]),
   catalogImportMaxBytes: z.number().int().positive().default(10485760),
   catalogImportMaxRows: z.number().int().positive().default(10000),
   catalogImportBatchSize: z.number().int().min(1).max(1000).default(100),
@@ -73,6 +120,42 @@ const configSchema = z
         path: ['mapMatrixTopK'],
         message: 'top K exceeds matrix pair limit',
       });
+    if (v.minOrderPaise > v.maxOrderPaise)
+      ctx.addIssue({ code: 'custom', path: ['minOrderPaise'], message: 'minimum exceeds maximum' });
+    if (v.topupMinPaise > v.topupMaxPaise)
+      ctx.addIssue({ code: 'custom', path: ['topupMinPaise'], message: 'minimum exceeds maximum' });
+    if (v.paymentWindowSeconds > v.inventoryReservationTtlSeconds)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['paymentWindowSeconds'],
+        message: 'payment window must not outlive reservation TTL',
+      });
+    let previous: string | null = null;
+    let nullSeen = false;
+    for (const [index, slab] of v.deliveryFeeSlabs.entries()) {
+      if (slab.maxOrderValuePaise === null) {
+        if (index !== v.deliveryFeeSlabs.length - 1)
+          ctx.addIssue({
+            code: 'custom',
+            path: ['deliveryFeeSlabs'],
+            message: 'open-ended slab must be last',
+          });
+        nullSeen = true;
+      } else if (previous !== null && slab.maxOrderValuePaise <= previous) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['deliveryFeeSlabs'],
+          message: 'slab ceilings must strictly ascend',
+        });
+      }
+      if (slab.maxOrderValuePaise !== null) previous = slab.maxOrderValuePaise;
+      if (nullSeen && slab.maxOrderValuePaise !== null)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['deliveryFeeSlabs'],
+          message: 'slab after open-ended slab',
+        });
+    }
   });
 
 /** DB versions are checked on every read, so invalidation loss cannot preserve stale policy. */

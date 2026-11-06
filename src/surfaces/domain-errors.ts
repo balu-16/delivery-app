@@ -25,6 +25,10 @@ export class DomainErrorInterceptor implements NestInterceptor {
             'MEDIA_NOT_FOUND',
             'ADDRESS_NOT_SERVICEABLE',
             'STORE_NOT_FOUND',
+            'ORDER_NOT_FOUND',
+            'CART_NOT_FOUND',
+            'PAYMENT_NOT_FOUND',
+            'INVOICE_NOT_READY',
           ].includes(code)
         )
           status = 404;
@@ -42,6 +46,12 @@ export class DomainErrorInterceptor implements NestInterceptor {
             'IMPORT_TOO_MANY_ROWS',
             'INVALID_INPUT',
             'INVALID_QUANTITY',
+            'INVALID_MONEY',
+            'INVALID_QUOTE_REQUEST',
+            'COUPON_INVALID',
+            'MIN_ORDER_NOT_MET',
+            'MAX_ORDER_EXCEEDED',
+            'INVALID_COUPON_CODE',
           ].includes(code)
         )
           status = 400;
@@ -63,6 +73,25 @@ export class DomainErrorInterceptor implements NestInterceptor {
             'RESOURCE_CONFLICT',
             'RECEIPT_REQUIRED',
             'REPORT_NOT_READY',
+            'PRICE_CHANGED',
+            'QUOTE_EXPIRED',
+            'QUOTE_CONSUMED',
+            'COUPON_EXPIRED',
+            'COUPON_EXHAUSTED',
+            'COUPON_NOT_ELIGIBLE',
+            'COUPON_LIMIT_REACHED',
+            'WALLET_INSUFFICIENT',
+            'WALLET_DISABLED',
+            'COD_NOT_ELIGIBLE',
+            'COD_LIMIT_EXCEEDED',
+            'AMOUNT_MISMATCH',
+            'PAYMENT_STATE_INVALID',
+            'REFUND_STATE_INVALID',
+            'ILLEGAL_STATE_TRANSITION',
+            'ADDRESS_CHANGE_NOT_ALLOWED',
+            'CART_INTENT_CONSUMED',
+            'REFUND_LIMIT_EXCEEDED',
+            'PAYMENT_WINDOW_EXPIRED',
           ].includes(code)
         )
           status = 409;

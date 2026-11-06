@@ -149,6 +149,17 @@
       "testFiles": []
     },
     {
+      "id": "InvoiceRendererPort-html",
+      "sourceSection": "16",
+      "phase": "P6",
+      "status": "planned",
+      "port": "InvoiceRendererPort",
+      "provider": "html",
+      "real": true,
+      "methods": ["render"],
+      "testFiles": []
+    },
+    {
       "id": "StoragePort-s3",
       "sourceSection": "7",
       "phase": "P3",

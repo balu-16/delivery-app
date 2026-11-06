@@ -14,3 +14,6 @@ openapi/
 .agents/
 .codex/
 .aws/
+
+# Session-local agent state
+.zcode/
