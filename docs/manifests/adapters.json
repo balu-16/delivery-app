@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "AuthVerifierPort-cognito",
+      "sourceSection": "7",
+      "phase": "P1",
+      "status": "implemented",
+      "port": "AuthVerifierPort",
+      "provider": "cognito",
+      "real": true,
+      "methods": ["verify"],
+      "testFiles": ["test/unit/identity/cognito-token.spec.ts"],
+      "liveAcceptance": "pending owner-provided resources"
+    },
+    {
+      "id": "AuthVerifierPort-local",
+      "sourceSection": "7",
+      "phase": "P1",
+      "status": "implemented",
+      "port": "AuthVerifierPort",
+      "provider": "local",
+      "real": false,
+      "methods": ["verify", "issue"],
+      "testFiles": [
+        "test/integration/identity/dev-auth.spec.ts",
+        "test/unit/identity/identity-guard.spec.ts"
+      ]
+    },
+    {
+      "id": "IdentityAdminPort-cognito",
+      "sourceSection": "7",
+      "phase": "P1",
+      "status": "implemented",
+      "port": "IdentityAdminPort",
+      "provider": "cognito",
+      "real": true,
+      "methods": [
+        "create",
+        "find",
+        "addToGroup",
+        "removeFromGroup",
+        "disable",
+        "enable",
+        "forcePasswordReset",
+        "delete"
+      ],
+      "testFiles": [
+        "test/unit/identity/cognito-admin.spec.ts",
+        "test/unit/identity/resilient-admin.spec.ts"
+      ],
+      "liveAcceptance": "pending owner-provided resources"
+    },
+    {
+      "id": "IdentityAdminPort-local",
+      "sourceSection": "7",
+      "phase": "P1",
+      "status": "implemented",
+      "port": "IdentityAdminPort",
+      "provider": "local",
+      "real": false,
+      "methods": [
+        "create",
+        "find",
+        "addToGroup",
+        "removeFromGroup",
+        "disable",
+        "enable",
+        "forcePasswordReset",
+        "delete"
+      ],
+      "testFiles": ["test/integration/identity/identity.spec.ts"]
+    },
+    {
+      "id": "MapsPort-ola",
+      "sourceSection": "7",
+      "phase": "P2",
+      "status": "implemented",
+      "port": "MapsPort",
+      "provider": "ola",
+      "real": true,
+      "methods": [
+        "autocomplete",
+        "placeDetails",
+        "geocode",
+        "reverseGeocode",
+        "directions",
+        "distanceMatrix"
+      ],
+      "testFiles": ["test/unit/serviceability/maps.spec.ts"],
+      "liveAcceptance": "pending owner-provided resources",
+      "fixtureSource": "https://maps.olakrutrim.com/openapi/ola-maps-apis-oas.yaml"
+    },
+    {
+      "id": "MapsPort-fake",
+      "sourceSection": "7",
+      "phase": "P2",
+      "status": "implemented",
+      "port": "MapsPort",
+      "provider": "fake",
+      "real": false,
+      "methods": [
+        "autocomplete",
+        "placeDetails",
+        "geocode",
+        "reverseGeocode",
+        "directions",
+        "distanceMatrix"
+      ],
+      "testFiles": [
+        "test/unit/serviceability/serviceability.spec.ts",
+        "test/e2e/foundation-journey.spec.ts"
+      ]
+    },
+    {
+      "id": "PaymentGatewayPort-razorpay",
+      "sourceSection": "7",
+      "phase": "P6",
+      "status": "planned",
+      "port": "PaymentGatewayPort",
+      "provider": "razorpay",
+      "real": true,
+      "methods": [
+        "createOrder",
+        "verifyCheckoutSignature",
+        "verifyWebhook",
+        "fetchPayment",
+        "refund",
+        "fetchSettlements"
+      ],
+      "testFiles": []
+    },
+    {
+      "id": "PaymentGatewayPort-fake",
+      "sourceSection": "7",
+      "phase": "P6",
+      "status": "planned",
+      "port": "PaymentGatewayPort",
+      "provider": "fake",
+      "real": false,
+      "methods": [
+        "createOrder",
+        "verifyCheckoutSignature",
+        "verifyWebhook",
+        "fetchPayment",
+        "refund",
+        "fetchSettlements"
+      ],
+      "testFiles": []
+    },
+    {
+      "id": "StoragePort-s3",
+      "sourceSection": "7",
+      "phase": "P3",
+      "status": "planned",
+      "port": "StoragePort",
+      "provider": "s3",
+      "real": true,
+      "methods": ["createUploadTarget", "getReadUrl", "delete", "head"],
+      "testFiles": []
+    },
+    {
+      "id": "StoragePort-local",
+      "sourceSection": "7",
+      "phase": "P3",
+      "status": "planned",
+      "port": "StoragePort",
+      "provider": "local",
+      "real": false,
+      "methods": ["createUploadTarget", "getReadUrl", "delete", "head"],
+      "testFiles": []
+    },
+    {
+      "id": "EmailPort-ses",
+      "sourceSection": "7",
+      "phase": "P9",
+      "status": "planned",
+      "port": "EmailPort",
+      "provider": "ses",
+      "real": true,
+      "methods": ["send"],
+      "testFiles": []
+    },
+    {
+      "id": "EmailPort-smtp",
+      "sourceSection": "7",
+      "phase": "P9",
+      "status": "planned",
+      "port": "EmailPort",
+      "provider": "smtp",
+      "real": false,
+      "methods": ["send"],
+      "testFiles": []
+    },
+    {
+      "id": "PushPort-fcm",
+      "sourceSection": "7",
+      "phase": "P9",
+      "status": "planned",
+      "port": "PushPort",
+      "provider": "fcm",
+      "real": true,
+      "methods": ["send"],
+      "testFiles": []
+    },
+    {
+      "id": "PushPort-fake",
+      "sourceSection": "7",
+      "phase": "P9",
+      "status": "planned",
+      "port": "PushPort",
+      "provider": "fake",
+      "real": false,
+      "methods": ["send"],
+      "testFiles": []
+    },
+    {
+      "id": "SmsPort-disabled",
+      "sourceSection": "7",
+      "phase": "P9",
+      "status": "planned",
+      "port": "SmsPort",
+      "provider": "disabled",
+      "real": false,
+      "methods": ["send"],
+      "testFiles": []
+    },
+    {
+      "id": "SearchPort-postgres",
+      "sourceSection": "7",
+      "phase": "P3",
+      "status": "planned",
+      "port": "SearchPort",
+      "provider": "postgres",
+      "real": true,
+      "methods": ["indexProduct", "searchProducts", "suggest"],
+      "testFiles": []
+    },
+    {
+      "id": "CallMaskingPort-disabled",
+      "sourceSection": "14",
+      "phase": "P2",
+      "status": "implemented",
+      "port": "CallMaskingPort",
+      "provider": "disabled",
+      "real": false,
+      "methods": ["createCall"],
+      "testFiles": ["test/unit/serviceability/contact.spec.ts"]
+    },
+    {
+      "id": "PrivateUploadPort-local",
+      "sourceSection": "D10",
+      "phase": "P1",
+      "status": "implemented",
+      "port": "PrivateUploadPort",
+      "provider": "local",
+      "real": false,
+      "methods": ["createTarget", "assertOwnedRegistered", "signedRead"],
+      "testFiles": ["test/integration/identity/private-media.spec.ts"]
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "SYS-01",
+      "sourceSection": "12",
+      "phase": "P4",
+      "status": "planned",
+      "description": "`0 ≤ reserved_qty ≤ on_hand_qty` for every stock row; **never oversell**.",
+      "testFiles": []
+    },
+    {
+      "id": "SYS-02",
+      "sourceSection": "12",
+      "phase": "P6",
+      "status": "planned",
+      "description": "Inventory ledger sums match `on_hand_qty`; wallet ledger sums match balances.",
+      "testFiles": []
+    },
+    {
+      "id": "SYS-03",
+      "sourceSection": "12",
+      "phase": "P5",
+      "status": "planned",
+      "description": "An order total equals the sum of its frozen line items, fees, taxes and discounts, **to the paisa**.",
+      "testFiles": []
+    },
+    {
+      "id": "SYS-04",
+      "sourceSection": "12",
+      "phase": "P6",
+      "status": "planned",
+      "description": "A payment is captured **at most once** per order for the same amount; a refund never exceeds captured minus already refunded.",
+      "testFiles": []
+    },
+    {
+      "id": "SYS-05",
+      "sourceSection": "12",
+      "phase": "P8",
+      "status": "planned",
+      "description": "A delivery task has **at most one active rider**; a rider has at most `max_concurrent_tasks` (config).",
+      "testFiles": []
+    },
+    {
+      "id": "SYS-06",
+      "sourceSection": "12",
+      "phase": "P8",
+      "status": "planned",
+      "description": "An order has at most one active delivery task and one pick task.",
+      "testFiles": []
+    },
+    {
+      "id": "SYS-07",
+      "sourceSection": "12",
+      "phase": "P5",
+      "status": "planned",
+      "description": "A coupon redemption count never exceeds its limits, even under concurrent checkouts.",
+      "testFiles": []
+    },
+    {
+      "id": "SYS-08",
+      "sourceSection": "12",
+      "phase": "P0",
+      "status": "planned",
+      "description": "Every state change has a history row and an outbox event in the same transaction.",
+      "testFiles": []
+    },
+    {
+      "id": "SYS-09",
+      "sourceSection": "12",
+      "phase": "P6",
+      "status": "planned",
+      "description": "Invoice numbers are gapless and unique per (legal entity, financial year); issued invoices are immutable (corrections are credit notes).",
+      "testFiles": []
+    },
+    {
+      "id": "SYS-10",
+      "sourceSection": "12",
+      "phase": "P10",
+      "status": "planned",
+      "description": "Subscription order generation is idempotent per `(subscription_id, delivery_date)`.",
+      "testFiles": []
+    }
+  ]
+}

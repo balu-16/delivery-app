@@ -1,0 +1,16 @@
+node_modules/
+.pnpm-store/
+.env
+.env.*
+!.env.example
+dist/
+coverage/
+artifacts/
+openapi/
+.local/
+*.log
+
+# Per-machine agent and cloud metadata
+.agents/
+.codex/
+.aws/

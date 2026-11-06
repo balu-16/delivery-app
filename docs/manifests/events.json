@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "USER_BLOCKED",
+      "eventType": "identity.user_blocked",
+      "sourceSection": "5.4",
+      "phase": "P1",
+      "status": "implemented",
+      "producers": ["identity"],
+      "consumers": [],
+      "plannedConsumers": ["audit", "notifications"],
+      "schemaVersion": 1
+    },
+    {
+      "id": "STORE_STATUS_CHANGED",
+      "eventType": "store.status_changed",
+      "sourceSection": "5.4",
+      "phase": "P2",
+      "status": "implemented",
+      "producers": ["stores"],
+      "consumers": [],
+      "plannedConsumers": ["serviceability-cache", "notifications"],
+      "schemaVersion": 1
+    },
+    {
+      "id": "ZONE_CHANGED",
+      "eventType": "ZONE_CHANGED",
+      "sourceSection": "5.4",
+      "phase": "P2",
+      "status": "planned",
+      "producers": ["stores"],
+      "consumers": ["serviceability-cache"]
+    },
+    {
+      "id": "LOW_STOCK",
+      "eventType": "LOW_STOCK",
+      "sourceSection": "5.4",
+      "phase": "P4",
+      "status": "planned",
+      "producers": ["inventory"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "ORDER_CREATED",
+      "eventType": "ORDER_CREATED",
+      "sourceSection": "5.4",
+      "phase": "P6",
+      "status": "planned",
+      "producers": ["orders"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "ORDER_CONFIRMED",
+      "eventType": "ORDER_CONFIRMED",
+      "sourceSection": "5.4",
+      "phase": "P6",
+      "status": "planned",
+      "producers": ["orders"],
+      "consumers": ["picking", "dispatch", "notifications"]
+    },
+    {
+      "id": "ORDER_PICKING",
+      "eventType": "ORDER_PICKING",
+      "sourceSection": "5.4",
+      "phase": "P7",
+      "status": "planned",
+      "producers": ["picking"],
+      "consumers": ["dispatch", "notifications"]
+    },
+    {
+      "id": "ORDER_PACKED",
+      "eventType": "ORDER_PACKED",
+      "sourceSection": "5.4",
+      "phase": "P7",
+      "status": "planned",
+      "producers": ["picking"],
+      "consumers": ["dispatch", "notifications"]
+    },
+    {
+      "id": "ORDER_OUT_FOR_DELIVERY",
+      "eventType": "ORDER_OUT_FOR_DELIVERY",
+      "sourceSection": "5.4",
+      "phase": "P8",
+      "status": "planned",
+      "producers": ["dispatch"],
+      "consumers": ["notifications", "tracking"]
+    },
+    {
+      "id": "ORDER_DELIVERED",
+      "eventType": "ORDER_DELIVERED",
+      "sourceSection": "5.4",
+      "phase": "P8",
+      "status": "planned",
+      "producers": ["dispatch"],
+      "consumers": ["invoicing", "earnings", "notifications"]
+    },
+    {
+      "id": "ORDER_CANCELLED",
+      "eventType": "ORDER_CANCELLED",
+      "sourceSection": "5.4",
+      "phase": "P6",
+      "status": "planned",
+      "producers": ["orders"],
+      "consumers": ["picking", "dispatch", "notifications"]
+    },
+    {
+      "id": "REFUND_PROCESSED",
+      "eventType": "REFUND_PROCESSED",
+      "sourceSection": "5.4",
+      "phase": "P6",
+      "status": "planned",
+      "producers": ["payments"],
+      "consumers": ["notifications", "invoicing"]
+    },
+    {
+      "id": "SUBSCRIPTION_SKIPPED",
+      "eventType": "SUBSCRIPTION_SKIPPED",
+      "sourceSection": "5.4",
+      "phase": "P10",
+      "status": "planned",
+      "producers": ["subscriptions"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "SUBSCRIPTION_GENERATION_COMPLETED",
+      "eventType": "SUBSCRIPTION_GENERATION_COMPLETED",
+      "sourceSection": "5.4",
+      "phase": "P10",
+      "status": "planned",
+      "producers": ["subscriptions"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "USER_UNBLOCKED",
+      "eventType": "identity.user_unblocked",
+      "sourceSection": "5.4",
+      "phase": "P1",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["identity"],
+      "consumers": [],
+      "note": "Provider synchronization is a separate durable identity operation; audit is written synchronously in the same transaction."
+    },
+    {
+      "id": "ROLE_GRANTED",
+      "eventType": "identity.role_granted",
+      "sourceSection": "5.4",
+      "phase": "P1",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["identity"],
+      "consumers": [],
+      "note": "Provider synchronization is a separate durable identity operation; audit is written synchronously in the same transaction."
+    },
+    {
+      "id": "ROLE_REMOVED",
+      "eventType": "identity.role_removed",
+      "sourceSection": "5.4",
+      "phase": "P1",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["identity"],
+      "consumers": [],
+      "note": "Provider synchronization is a separate durable identity operation; audit is written synchronously in the same transaction."
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint and boundaries
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          pnpm lint 2>&1 | tee artifacts/lint.log
+      - name: Check formatting
+        run: pnpm format:check
+      - name: Typecheck
+        run: |
+          set -o pipefail
+          pnpm typecheck 2>&1 | tee artifacts/typecheck.log
+      - name: Unit, integration, concurrency and end-to-end tests with coverage
+        run: |
+          set -o pipefail
+          # The integration project includes empty/populated migration and rollback tests.
+          pnpm test:coverage --json --outputFile=artifacts/tests.json 2>&1 | tee artifacts/tests.log
+      - name: Audit dependencies
+        run: |
+          set -o pipefail
+          pnpm audit --audit-level high 2>&1 | tee artifacts/audit.log
+      - name: Build application and export OpenAPI
+        run: |
+          set -o pipefail
+          pnpm openapi:export 2>&1 | tee artifacts/openapi.log
+          node scripts/verify-manifests.mjs 2>&1 | tee artifacts/openapi-manifests.log
+      - name: Build container
+        run: |
+          set -o pipefail
+          docker build -t delivery-platform:ci . 2>&1 | tee artifacts/docker-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-logs
+          path: artifacts/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: openapi
+          path: openapi/
+          if-no-files-found: error

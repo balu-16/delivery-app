@@ -1,0 +1,13 @@
+minimumReleaseAgeExclude:
+  - '@nestjs/common@12.4.0'
+  - '@nestjs/core@12.4.0'
+  - '@nestjs/platform-fastify@12.4.0'
+  - '@nestjs/swagger@12.1.1'
+allowBuilds:
+  '@scarf/scarf': false
+  msgpackr-extract: false
+  esbuild: true
+  '@parcel/watcher': false
+  cpu-features: false
+  protobufjs: false
+  ssh2: false

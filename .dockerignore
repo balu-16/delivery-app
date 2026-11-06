@@ -1,0 +1,14 @@
+.git
+.agents
+.codex
+.aws
+node_modules
+coverage
+dist
+artifacts
+openapi
+.local
+.env
+.env.*
+!.env.example
+*.log

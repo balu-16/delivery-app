@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "DEV-AUTH-TOKEN",
+      "sourceSection": "7.4",
+      "phase": "P1",
+      "status": "implemented",
+      "method": "POST",
+      "path": "/dev/auth/token",
+      "scope": "local-provider-only outside production",
+      "roles": [],
+      "testFiles": ["test/integration/identity/dev-auth.spec.ts"]
+    },
+    {
+      "id": "DEV-PRIVATE-UPLOAD",
+      "sourceSection": "D10",
+      "phase": "P1",
+      "status": "implemented",
+      "method": "PUT",
+      "path": "/dev/private-media/{mediaId}",
+      "scope": "short-lived single-upload local capability",
+      "roles": [],
+      "testFiles": ["test/integration/identity/private-media.spec.ts"]
+    },
+    {
+      "id": "DEV-PRIVATE-READ",
+      "sourceSection": "D10",
+      "phase": "P1",
+      "status": "implemented",
+      "method": "GET",
+      "path": "/dev/private-media/{mediaId}",
+      "scope": "short-lived purpose-bound local read capability",
+      "roles": [],
+      "testFiles": ["test/integration/identity/private-media.spec.ts"]
+    }
+  ]
+}

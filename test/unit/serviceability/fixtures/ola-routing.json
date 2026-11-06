@@ -1,0 +1,10 @@
+{
+  "source": "https://maps.olakrutrim.com/apidocs",
+  "checked": "2026-11-06",
+  "provenance": "Minimal fields transcribed from documented Directions and Distance Matrix Basic response examples; not a captured live response.",
+  "directions": { "routes": [{ "legs": [{ "distance": 3836, "duration": 698 }] }], "status": "OK" },
+  "matrix": {
+    "rows": [{ "elements": [{ "duration": 719, "distance": 3224, "status": "OK" }] }],
+    "status": "SUCCESS"
+  }
+}

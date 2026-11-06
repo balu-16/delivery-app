@@ -1,0 +1,355 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "SRC-01",
+      "sourceSection": "1",
+      "phase": "P0",
+      "status": "planned",
+      "description": "Your role",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 23
+    },
+    {
+      "id": "SRC-02",
+      "sourceSection": "2",
+      "phase": "P0",
+      "status": "planned",
+      "description": "Mission and scope",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 35
+    },
+    {
+      "id": "SRC-03",
+      "sourceSection": "3",
+      "phase": "P0",
+      "status": "planned",
+      "description": "Operating rules (read carefully)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 75
+    },
+    {
+      "id": "SRC-04",
+      "sourceSection": "4",
+      "phase": "P0",
+      "status": "planned",
+      "description": "Fixed technical decisions (do not re-litigate; deviate only via ADR with strong reason)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 94
+    },
+    {
+      "id": "SRC-05",
+      "sourceSection": "5",
+      "phase": "P0",
+      "status": "planned",
+      "description": "Architecture: modular monolith with hard boundaries",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 127
+    },
+    {
+      "id": "SRC-06",
+      "sourceSection": "6",
+      "phase": "P0",
+      "status": "planned",
+      "description": "Runtime roles and bootstrap",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 197
+    },
+    {
+      "id": "SRC-07",
+      "sourceSection": "7",
+      "phase": "P0",
+      "status": "planned",
+      "description": "Ports and adapters (complete list)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 212
+    },
+    {
+      "id": "SRC-08",
+      "sourceSection": "8",
+      "phase": "P0",
+      "status": "planned",
+      "description": "Configuration and environment contract",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 243
+    },
+    {
+      "id": "SRC-09",
+      "sourceSection": "9",
+      "phase": "P0",
+      "status": "planned",
+      "description": "API and code conventions",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 315
+    },
+    {
+      "id": "SRC-10",
+      "sourceSection": "10",
+      "phase": "P0",
+      "status": "planned",
+      "description": "Data model (PostgreSQL)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 343
+    },
+    {
+      "id": "SRC-11",
+      "sourceSection": "11",
+      "phase": "P0",
+      "status": "planned",
+      "description": "State machines (implement with the state machine kit; unit-test every legal and illegal transition)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 371
+    },
+    {
+      "id": "SRC-12",
+      "sourceSection": "12",
+      "phase": "P0",
+      "status": "planned",
+      "description": "System invariants (must always hold; each has a test, several have concurrency tests)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 399
+    },
+    {
+      "id": "SRC-13",
+      "sourceSection": "13",
+      "phase": "P1",
+      "status": "planned",
+      "description": "Identity and access module",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 414
+    },
+    {
+      "id": "SRC-14",
+      "sourceSection": "14",
+      "phase": "P2",
+      "status": "planned",
+      "description": "Addresses, stores, zones and serviceability",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 437
+    },
+    {
+      "id": "SRC-15",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "planned",
+      "description": "Catalog, search and media",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 456
+    },
+    {
+      "id": "SRC-16",
+      "sourceSection": "16",
+      "phase": "P5",
+      "status": "planned",
+      "description": "Pricing engine, fees, taxes and invoicing",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 473
+    },
+    {
+      "id": "SRC-17",
+      "sourceSection": "17",
+      "phase": "P4",
+      "status": "planned",
+      "description": "Inventory",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 489
+    },
+    {
+      "id": "SRC-18",
+      "sourceSection": "18",
+      "phase": "P5",
+      "status": "planned",
+      "description": "Cart and coupons",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 508
+    },
+    {
+      "id": "SRC-19",
+      "sourceSection": "19",
+      "phase": "P6",
+      "status": "planned",
+      "description": "Wallet (feature-flagged: `wallet_enabled`)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 527
+    },
+    {
+      "id": "SRC-20",
+      "sourceSection": "20",
+      "phase": "P6",
+      "status": "planned",
+      "description": "Checkout, payments and refunds",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 542
+    },
+    {
+      "id": "SRC-21",
+      "sourceSection": "21",
+      "phase": "P6",
+      "status": "planned",
+      "description": "Orders and cancellations",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 583
+    },
+    {
+      "id": "SRC-22",
+      "sourceSection": "22",
+      "phase": "P7",
+      "status": "planned",
+      "description": "Store operations (picking, packing, handover)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 609
+    },
+    {
+      "id": "SRC-23",
+      "sourceSection": "23",
+      "phase": "P8",
+      "status": "planned",
+      "description": "Dispatch, riders, tracking, ETA, earnings and COD",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 628
+    },
+    {
+      "id": "SRC-24",
+      "sourceSection": "24",
+      "phase": "P9",
+      "status": "planned",
+      "description": "Platform services",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 670
+    },
+    {
+      "id": "SRC-25",
+      "sourceSection": "25",
+      "phase": "P10",
+      "status": "planned",
+      "description": "Subscriptions (Country Delight style)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 696
+    },
+    {
+      "id": "SRC-26",
+      "sourceSection": "26",
+      "phase": "P13",
+      "status": "planned",
+      "description": "Security requirements",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 716
+    },
+    {
+      "id": "SRC-27",
+      "sourceSection": "27",
+      "phase": "P13",
+      "status": "planned",
+      "description": "Reliability patterns",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 732
+    },
+    {
+      "id": "SRC-28",
+      "sourceSection": "28",
+      "phase": "P13",
+      "status": "planned",
+      "description": "Observability",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 747
+    },
+    {
+      "id": "SRC-29",
+      "sourceSection": "29",
+      "phase": "P13",
+      "status": "planned",
+      "description": "Performance and data management",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 758
+    },
+    {
+      "id": "SRC-30",
+      "sourceSection": "30",
+      "phase": "P13",
+      "status": "planned",
+      "description": "Testing strategy (tests are part of the deliverable, not an afterthought)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 771
+    },
+    {
+      "id": "SRC-31",
+      "sourceSection": "31",
+      "phase": "P13",
+      "status": "planned",
+      "description": "Documentation, tooling and delivery artefacts",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 788
+    },
+    {
+      "id": "SRC-32",
+      "sourceSection": "32",
+      "phase": "P13",
+      "status": "planned",
+      "description": "Delivery phases (execute in order; each ends green and committed)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 799
+    },
+    {
+      "id": "SRC-33",
+      "sourceSection": "33",
+      "phase": "P13",
+      "status": "planned",
+      "description": "Definition of Done (whole project)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 822
+    },
+    {
+      "id": "SRC-34",
+      "sourceSection": "34",
+      "phase": "P13",
+      "status": "planned",
+      "description": "Consolidated edge-case checklist (each item must map to a named test; track in `docs/EDGE_CASES.md`)",
+      "sourceFile": "delivery-platform-agent-prompt.md",
+      "sourceLine": 835
+    },
+    {
+      "id": "P0-LOCAL",
+      "sourceSection": "32.P0",
+      "phase": "P0",
+      "status": "verified",
+      "description": "Local foundation gate: all six roles, real dependency readiness, durable relay/replay and idempotency fencing, queues, raw-body isolation, migrations and seed replay. Container build and hosted CI remain external.",
+      "testFiles": [
+        "test/integration/runtime/real-roles.spec.ts",
+        "test/integration/runtime/raw-body.spec.ts",
+        "test/integration/platform/outbox-recovery.spec.ts",
+        "test/integration/platform/concern-queues.spec.ts",
+        "test/concurrency/platform/idempotency.spec.ts",
+        "test/integration/platform/migration.spec.ts",
+        "test/integration/platform/seed.spec.ts"
+      ]
+    },
+    {
+      "id": "P1-LOCAL",
+      "sourceSection": "32.P1",
+      "phase": "P1",
+      "status": "verified",
+      "description": "Local identity gate: token contract fixtures, current account/role policy, durable provisioning/synchronization, audited typed config, maker-checker and private KYC capabilities. Live Cognito and production S3 acceptance remain external/later-phase.",
+      "testFiles": [
+        "test/unit/identity/cognito-token.spec.ts",
+        "test/integration/identity/permission-matrix.spec.ts",
+        "test/integration/identity/identity.spec.ts",
+        "test/integration/identity/private-media.spec.ts",
+        "test/concurrency/identity/identity-concurrency.spec.ts"
+      ]
+    },
+    {
+      "id": "P2-LOCAL",
+      "sourceSection": "32.P2",
+      "phase": "P2",
+      "status": "verified",
+      "description": "Local serviceability gate: PostGIS boundaries/overlaps, hours/holidays, capacity/default-address races, ownership, maps contract/degradation and store-signal evaluation. Ola fixtures follow published documentation; live credentials remain untested.",
+      "testFiles": [
+        "test/integration/serviceability/zone-address.spec.ts",
+        "test/unit/serviceability/hours.spec.ts",
+        "test/unit/serviceability/maps.spec.ts",
+        "test/integration/runtime/store-scheduler.spec.ts",
+        "test/e2e/foundation-journey.spec.ts"
+      ]
+    }
+  ]
+}
