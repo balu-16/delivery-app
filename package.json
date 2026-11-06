@@ -29,11 +29,15 @@
     "devtokens": "node --env-file-if-exists=.env --import tsx scripts/devtokens.ts",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --selectProjects unit integration concurrency e2e --runInBand --coverage",
     "test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js --selectProjects e2e --runInBand",
+    "test:storage": "pnpm build && node scripts/storage-smoke.mjs",
     "prepare": "node scripts/prepare-hooks.mjs",
     "format:check": "prettier --check src test scripts db docs/manifests '*.json' '*.yml' '*.yaml' '*.cjs' '*.mjs' '.github/**/*.yml'"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "3.1162.0",
+    "@aws-sdk/client-s3": "3.1162.0",
+    "@aws-sdk/s3-presigned-post": "3.1162.0",
+    "@aws-sdk/s3-request-presigner": "3.1162.0",
     "@fastify/cors": "11.4.1",
     "@fastify/static": "10.1.10",
     "@nestjs/common": "12.4.0",
@@ -44,6 +48,7 @@
     "bullmq": "6.7.0",
     "class-transformer": "0.5.1",
     "class-validator": "0.15.1",
+    "csv-parse": "7.0.3",
     "fastify": "5.12.8",
     "fastify-raw-body": "6.0.3",
     "ioredis": "6.0.0",

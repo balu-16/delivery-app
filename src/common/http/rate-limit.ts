@@ -19,6 +19,8 @@ export function routeLimit(path: string, env: Env): { name: string; limit: numbe
     return undefined;
   if (/\/(?:auth|places)(?:\/|$)/.test(path))
     return { name: 'auth', limit: env.RATE_LIMIT_AUTH_PER_MIN };
+  if (/\/search(?:\/|$)/.test(path))
+    return { name: 'search', limit: env.RATE_LIMIT_SEARCH_PER_MIN };
   if (/\/location(?:\/|$)/.test(path))
     return { name: 'location', limit: env.RATE_LIMIT_LOCATION_PER_MIN };
   return { name: 'default', limit: env.RATE_LIMIT_DEFAULT_PER_MIN };

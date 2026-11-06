@@ -152,23 +152,25 @@
       "id": "StoragePort-s3",
       "sourceSection": "7",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "port": "StoragePort",
       "provider": "s3",
       "real": true,
-      "methods": ["createUploadTarget", "getReadUrl", "delete", "head"],
-      "testFiles": []
+      "methods": ["target", "inspect", "promote", "remove", "open", "putPrivate"],
+      "testFiles": ["test/unit/catalog/storage.spec.ts", "test/integration/catalog/media.spec.ts"],
+      "liveAcceptance": "pending owner-created AWS/CDN resources"
     },
     {
       "id": "StoragePort-local",
       "sourceSection": "7",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "port": "StoragePort",
       "provider": "local",
       "real": false,
-      "methods": ["createUploadTarget", "getReadUrl", "delete", "head"],
-      "testFiles": []
+      "methods": ["target", "inspect", "promote", "remove", "open", "putPrivate"],
+      "testFiles": ["test/unit/catalog/storage.spec.ts", "test/integration/catalog/media.spec.ts"],
+      "liveAcceptance": "local provider contract verified"
     },
     {
       "id": "EmailPort-ses",
@@ -229,12 +231,13 @@
       "id": "SearchPort-postgres",
       "sourceSection": "7",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "port": "SearchPort",
       "provider": "postgres",
       "real": true,
       "methods": ["indexProduct", "searchProducts", "suggest"],
-      "testFiles": []
+      "testFiles": ["test/integration/catalog/catalog.spec.ts"],
+      "note": "SearchPort aliases the existing PostgreSQL catalog query provider."
     },
     {
       "id": "CallMaskingPort-disabled",
@@ -257,6 +260,18 @@
       "real": false,
       "methods": ["createTarget", "assertOwnedRegistered", "signedRead"],
       "testFiles": ["test/integration/identity/private-media.spec.ts"]
+    },
+    {
+      "id": "PrivateUploadPort-s3",
+      "sourceSection": "15/D10",
+      "phase": "P3",
+      "status": "implemented",
+      "port": "PrivateUploadPort",
+      "provider": "s3",
+      "real": true,
+      "methods": ["createTarget", "assertOwnedRegistered", "signedRead"],
+      "testFiles": ["test/integration/catalog/s3-private.spec.ts"],
+      "liveAcceptance": "pending owner-created AWS S3 resources"
     }
   ]
 }

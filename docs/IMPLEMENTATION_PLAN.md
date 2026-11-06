@@ -1,6 +1,6 @@
 # Delivery platform implementation plan
 
-Prepared: 6 November 2026. Status: P0–P2 implementation and cleanup reviewed; local acceptance evidence and external checks are recorded in [PROGRESS.md](PROGRESS.md).
+Prepared: 6 November 2026. Status: P0–P4 implementation and cleanup reviewed; local acceptance evidence and external checks are recorded in [PROGRESS.md](PROGRESS.md).
 
 Source: [delivery-platform-agent-prompt.md](../delivery-platform-agent-prompt.md), version 1.0. This plan preserves its full backend scope and P0–P13 acceptance sequence. The owner explicitly authorized parallel implementation with one phase per subagent; acceptance remains ordered by dependency. Decisions below resolve contradictions or fill implementation gaps and become ADRs before dependent work. Actual completion evidence belongs in PROGRESS.md.
 
@@ -449,4 +449,4 @@ Some routes are described only as operations in the source. Choose conventional 
 
 The first implementation session should complete P0's compatibility spike and toolchain/config slice, then the first real DB-backed test aggregate through transaction → idempotency → history/outbox → worker → observable result. Its acceptance test should deliberately crash between publish and acknowledgement and prove one business effect.
 
-P0 role isolation and the combined P0–P2 local test gate now have evidence in [PROGRESS.md](PROGRESS.md). Container/hosted CI and live-provider acceptance remain explicit external gates. P3 catalog/search is the next implementation phase; keep P0–P13 status visible and do not treat a local foundation pass as whole-project completion.
+P0 role isolation and the combined P0–P4 local test gate now have evidence in [PROGRESS.md](PROGRESS.md). Container/hosted CI and live-provider acceptance remain explicit external gates. P5 cart/pricing/coupons is the next implementation phase; keep P0–P13 status visible and do not treat a local foundation pass as whole-project completion.

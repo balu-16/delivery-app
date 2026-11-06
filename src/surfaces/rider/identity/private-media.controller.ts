@@ -25,7 +25,7 @@ export class PrivateMediaController {
     @Headers('authorization') authorization: string | undefined,
     @Req() request: FastifyRequest,
   ): Promise<void> {
-    if (!this.storage) throw new ServiceUnavailableException();
+    if (!(this.storage instanceof LocalPrivateUploads)) throw new ServiceUnavailableException();
     const match = /^Bearer (\S+)$/.exec(authorization ?? '');
     if (!match?.[1]) throw new NotFoundException();
     try {
@@ -39,7 +39,7 @@ export class PrivateMediaController {
     @Query('capability') capability: string,
     @Res() reply: FastifyReply,
   ): Promise<void> {
-    if (!this.storage) throw new ServiceUnavailableException();
+    if (!(this.storage instanceof LocalPrivateUploads)) throw new ServiceUnavailableException();
     try {
       const media = await this.storage.read(mediaId, capability);
       await reply

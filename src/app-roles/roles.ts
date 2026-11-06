@@ -15,6 +15,9 @@ import {
 import { StoresModule } from '../modules/stores/stores.module.js';
 import { StoreSignalsScheduler } from './store-signals-scheduler.js';
 import { IdentitySyncWorkerModule } from '../modules/identity/identity-worker.module.js';
+import { CatalogImportWorkerModule } from '../modules/catalog/catalog.module.js';
+import { MediaWorkerModule } from '../modules/media/media-worker.module.js';
+import { InventoryWorkerModule } from '../modules/inventory/inventory-worker.module.js';
 
 export const surfaceModules = {
   customer: CustomerSurfaceModule,
@@ -37,7 +40,15 @@ export class RoleModule {
       imports: [
         RuntimeConfigModule.forRoot(env),
         probes ? PlatformModule.forMetadata(env, probes) : PlatformModule.forRoot(env),
-        ...(worker ? [StoresModule, IdentitySyncWorkerModule] : []),
+        ...(worker
+          ? [
+              StoresModule,
+              IdentitySyncWorkerModule,
+              CatalogImportWorkerModule,
+              MediaWorkerModule,
+              InventoryWorkerModule,
+            ]
+          : []),
         ...surfacesFor(env.APP_ROLE).map((surface) => surfaceModules[surface]),
       ],
       controllers: [HealthController, MetricsController],

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { LogController } from 'fastify';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { PayloadTooLargeException, ValidationPipe } from '@nestjs/common';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { RoleModule } from './app-roles/roles.js';
 import type { Env } from './config/env.schema.js';
@@ -49,7 +49,8 @@ export async function createApplication(
       if (
         request.headers['content-type']?.split(';')[0]?.trim().toLowerCase() ===
           'application/octet-stream' &&
-        (request.method !== 'PUT' || !/^\/dev\/private-media\/[^/?]+(?:\?|$)/.test(request.url))
+        (request.method !== 'PUT' ||
+          !/^\/dev\/(?:private|catalog)-media\/[^/?]+(?:\?|$)/.test(request.url))
       ) {
         reply
           .header('x-request-id', request.id)
@@ -60,8 +61,20 @@ export async function createApplication(
     });
     fastify.addContentTypeParser(
       'application/octet-stream',
-      { parseAs: 'buffer', bodyLimit: env.PRIVATE_UPLOAD_MAX_BYTES },
-      (_request, body, done) => done(null, body),
+      {
+        parseAs: 'buffer',
+        bodyLimit: Math.max(env.PRIVATE_UPLOAD_MAX_BYTES, env.CATALOG_UPLOAD_MAX_BYTES),
+      },
+      (request, body, done) => {
+        const limit = request.url.startsWith('/dev/private-media/')
+          ? env.PRIVATE_UPLOAD_MAX_BYTES
+          : env.CATALOG_UPLOAD_MAX_BYTES;
+        if (body.length > limit) {
+          done(new PayloadTooLargeException());
+          return;
+        }
+        done(null, body);
+      },
     );
   }
   fastify.addHook('onRequest', async (request, reply) => {
@@ -131,6 +144,7 @@ export async function createApplication(
   app.enableCors({
     origin: env.CORS_ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()),
     credentials: true,
+    exposedHeaders: ['ETag', 'X-Request-Id', 'Retry-After'],
   });
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),

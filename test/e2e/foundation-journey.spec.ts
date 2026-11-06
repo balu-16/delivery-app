@@ -31,6 +31,7 @@ beforeAll(async () => {
     NODE_ENV: 'test',
     AUTH_PROVIDER: 'local',
     DATABASE_URL: services.databaseUrl,
+    LOCAL_CATALOG_STORAGE_DIR: join(privateDirectory, 'catalog'),
   };
   await run(process.execPath, ['--import', 'tsx', 'scripts/seed.ts'], { env: seedEnv });
   // A retry of the documented setup cannot duplicate seed roles, identities or stores.
@@ -43,6 +44,7 @@ beforeAll(async () => {
       DATABASE_URL: services.databaseUrl,
       REDIS_URL: services.redisUrl,
       LOCAL_PRIVATE_STORAGE_DIR: privateDirectory,
+      LOCAL_CATALOG_STORAGE_DIR: join(privateDirectory, 'catalog'),
       RATE_LIMIT_DEFAULT_PER_MIN: '5000',
       RATE_LIMIT_AUTH_PER_MIN: '5000',
     }),
@@ -108,6 +110,26 @@ it('runs the seeded customer, store and admin journey through real HTTP adapters
   });
   expect(serviceable.statusCode).toBe(200);
   expect(serviceable.json()).toMatchObject({ serviceable: true, reasons: [] });
+  const catalog = await http.inject({ method: 'GET', url: '/v1/customer/catalog/home', headers });
+  expect(catalog.statusCode).toBe(200);
+  expect(catalog.headers['cache-control']).toBe('private, no-cache');
+  const items = catalog.json().items as Array<{
+    availability: string;
+    remaining?: string;
+    images: string[];
+  }>;
+  expect(items.length).toBeGreaterThan(0);
+  expect(items[0]?.availability).toBe('IN_STOCK');
+  expect(items[0]).not.toHaveProperty('remaining');
+  const unchanged = await http.inject({
+    method: 'GET',
+    url: '/v1/customer/catalog/home',
+    headers: { ...headers, 'if-none-match': String(catalog.headers.etag) },
+  });
+  expect(unchanged.statusCode).toBe(304);
+  const image = await http.inject({ method: 'GET', url: items[0]!.images[0]! });
+  expect(image.statusCode).toBe(200);
+  expect(image.headers['content-type']).toBe('image/png');
   const staff = await http.inject({
     method: 'GET',
     url: '/v1/store/me',

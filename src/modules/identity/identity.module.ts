@@ -3,6 +3,8 @@ import { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-
 import { ConfigService as RuntimeConfig } from '../../config/config.service.js';
 import { PLATFORM_DATABASE } from '../../platform/contracts/runtime.js';
 import type { DatabaseHandle } from '../../platform/database/database.js';
+import { S3Client } from '@aws-sdk/client-s3';
+import { S3PrivateUploads } from '../../adapters/storage/s3-private.js';
 import { LocalPrivateUploads } from '../../adapters/storage/local-private.js';
 import { APP_CONFIG, type AppConfig } from '../app-config/contracts/config.js';
 import { PRIVATE_UPLOADS, RIDER_DOCUMENTS, type PrivateUploadPort } from './contracts/uploads.js';
@@ -120,7 +122,19 @@ import { WorkforceProvisioning } from './infrastructure/workforce-provisioning.j
               config.get('PRIVATE_UPLOAD_URL_TTL_SECONDS'),
               config.get('PRIVATE_READ_URL_TTL_SECONDS'),
             )
-          : null,
+          : new S3PrivateUploads(
+              handle.db,
+              new S3Client({
+                region: config.get('AWS_REGION'),
+                ...(config.get('S3_ENDPOINT')
+                  ? { endpoint: config.get('S3_ENDPOINT'), forcePathStyle: true }
+                  : {}),
+              }),
+              config.get('S3_PRIVATE_BUCKET')!,
+              config.get('PRIVATE_UPLOAD_MAX_BYTES'),
+              config.get('PRIVATE_UPLOAD_URL_TTL_SECONDS'),
+              config.get('PRIVATE_READ_URL_TTL_SECONDS'),
+            ),
     },
     {
       provide: RIDER_DOCUMENTS,

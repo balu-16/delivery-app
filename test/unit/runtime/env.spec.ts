@@ -28,6 +28,10 @@ describe('runtime environment', () => {
       /LOCAL_PRIVATE_STORAGE_DIR/,
     );
     expect(() => readEnv({ PRIVATE_UPLOAD_MAX_BYTES: '0' })).toThrow(/PRIVATE_UPLOAD_MAX_BYTES/);
+    expect(() => readEnv({ LOCAL_CATALOG_STORAGE_DIR: 'relative/path' })).toThrow(
+      /LOCAL_CATALOG_STORAGE_DIR/,
+    );
+    expect(() => readEnv({ CATALOG_UPLOAD_MAX_BYTES: '0' })).toThrow(/CATALOG_UPLOAD_MAX_BYTES/);
   });
 });
 
@@ -52,6 +56,7 @@ describe('production environment', () => {
     COGNITO_ADMIN_CLIENT_ID: 'admin',
     S3_MEDIA_BUCKET: 'media-bucket',
     S3_PRIVATE_BUCKET: 'private-bucket',
+    CDN_BASE_URL: 'https://cdn.example.com',
     SES_FROM_ADDRESS: 'sender@example.com',
     FCM_SERVICE_ACCOUNT_JSON_SECRET: 'managed-secret-ref',
     RAZORPAY_KEY_ID: 'rzp_live_example',
@@ -77,6 +82,12 @@ describe('production environment', () => {
     expect(() => readEnv({ ...production, EMAIL_PROVIDER: 'smtp' })).toThrow(/EMAIL_PROVIDER/);
     expect(() => readEnv({ ...production, APP_BASE_URL: 'http://api.example.com' })).toThrow(
       /APP_BASE_URL/,
+    );
+    expect(() => readEnv({ ...production, CDN_BASE_URL: 'https://secret@example.com' })).toThrow(
+      /CDN_BASE_URL/,
+    );
+    expect(() => readEnv({ ...production, S3_PRIVATE_BUCKET: 'media-bucket' })).toThrow(
+      /S3_PRIVATE_BUCKET/,
     );
   });
 });

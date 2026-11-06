@@ -1,3 +1,4 @@
+import { INVENTORY_CONFIG_DEFAULTS } from '../contracts/config.js';
 import { z } from 'zod';
 import { sql } from 'kysely';
 import { uuidV7 } from '../../../common/ids/ids.js';
@@ -12,6 +13,30 @@ import {
 } from '../contracts/config.js';
 
 const definitions = {
+  inventoryReservationTtlSeconds: z.number().int().positive().default(900),
+  inventoryAdjustmentApprovalUnits: z.number().int().positive().default(100),
+  inventoryExpirySoonDays: z
+    .number()
+    .int()
+    .positive()
+    .default(INVENTORY_CONFIG_DEFAULTS.inventoryExpirySoonDays),
+  catalogLowStockThreshold: z
+    .number()
+    .int()
+    .positive()
+    .default(INVENTORY_CONFIG_DEFAULTS.catalogLowStockThreshold),
+  catalogMaxPerOrder: z.number().int().positive().default(10),
+  catalogAllowedGstBps: z
+    .array(z.number().int().min(0).max(10000))
+    .min(1)
+    .max(50)
+    .default([0, 500, 1200, 1800, 2800]),
+  catalogPriceApprovalCount: z.number().int().positive().default(20),
+  catalogPriceApprovalPercent: z.number().int().min(0).max(10000).default(20),
+  catalogImportMaxBytes: z.number().int().positive().default(10485760),
+  catalogImportMaxRows: z.number().int().positive().default(10000),
+  catalogImportBatchSize: z.number().int().min(1).max(1000).default(100),
+  catalogSuggestCacheSeconds: z.number().int().min(1).max(3600).default(30),
   addressMaxPerUser: z.number().int().positive().default(10),
   addressPinMismatchMetres: z.number().positive().default(100),
   zoneMinAreaM2: z.number().positive().default(1),

@@ -66,13 +66,16 @@ const envBaseSchema = z
     MAPS_MATRIX_TOP_K: positiveInteger(5),
     RATE_LIMIT_DEFAULT_PER_MIN: positiveInteger(120),
     RATE_LIMIT_AUTH_PER_MIN: positiveInteger(20),
+    RATE_LIMIT_SEARCH_PER_MIN: positiveInteger(30),
     RATE_LIMIT_LOCATION_PER_MIN: positiveInteger(30),
     // Extras: HTTP body hard cap, bearer secret for operational metrics.
     HTTP_BODY_LIMIT_BYTES: positiveInteger(1048576),
     PRIVATE_UPLOAD_MAX_BYTES: positiveInteger(5242880),
+    CATALOG_UPLOAD_MAX_BYTES: positiveInteger(20971520),
     PRIVATE_UPLOAD_URL_TTL_SECONDS: positiveInteger(300),
     PRIVATE_READ_URL_TTL_SECONDS: positiveInteger(60),
     LOCAL_PRIVATE_STORAGE_DIR: z.string().default(resolve(process.cwd(), '.local/private')),
+    LOCAL_CATALOG_STORAGE_DIR: z.string().default(resolve(process.cwd(), '.local/catalog')),
     METRICS_BEARER_TOKEN: optional,
   })
   .strict();
@@ -103,6 +106,8 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
     .filter(Boolean);
   if (!isAbsolute(env.LOCAL_PRIVATE_STORAGE_DIR))
     fail('LOCAL_PRIVATE_STORAGE_DIR', 'Expected an absolute path');
+  if (!isAbsolute(env.LOCAL_CATALOG_STORAGE_DIR))
+    fail('LOCAL_CATALOG_STORAGE_DIR', 'Expected an absolute path');
   if (
     origins.length === 0 ||
     origins.some((origin) => {
@@ -155,7 +160,27 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
       fail('OLA_MAPS_BASE_URL', 'Expected a provider HTTP(S) base URL');
     }
   }
-  if (env.STORAGE_PROVIDER === 's3') need(['S3_MEDIA_BUCKET', 'S3_PRIVATE_BUCKET']);
+  if (env.STORAGE_PROVIDER === 's3') {
+    need(['S3_MEDIA_BUCKET', 'S3_PRIVATE_BUCKET', 'CDN_BASE_URL']);
+    if (env.S3_MEDIA_BUCKET === env.S3_PRIVATE_BUCKET)
+      fail('S3_PRIVATE_BUCKET', 'Public media and private objects require separate buckets');
+    for (const key of ['CDN_BASE_URL', 'S3_ENDPOINT'] as const) {
+      if (!env[key]) continue;
+      try {
+        const parsed = new URL(env[key]);
+        if (
+          !['http:', 'https:'].includes(parsed.protocol) ||
+          parsed.username ||
+          parsed.password ||
+          parsed.search ||
+          parsed.hash
+        )
+          fail(key, 'Expected an HTTP(S) base URL without credentials, query or fragment');
+      } catch {
+        fail(key, 'Expected an HTTP(S) base URL');
+      }
+    }
+  }
   if (env.EMAIL_PROVIDER === 'ses') need(['SES_FROM_ADDRESS']);
   if (env.PUSH_PROVIDER === 'fcm') need(['FCM_SERVICE_ACCOUNT_JSON_SECRET']);
   if (env.NODE_ENV === 'production') {

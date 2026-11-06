@@ -33,6 +33,28 @@
       "scope": "short-lived purpose-bound local read capability",
       "roles": [],
       "testFiles": ["test/integration/identity/private-media.spec.ts"]
+    },
+    {
+      "id": "LOCAL-CATALOG-UPLOAD",
+      "phase": "P3",
+      "method": "PUT",
+      "path": "/dev/catalog-media/{id}",
+      "scope": "local storage provider; short-lived one-upload staging capability",
+      "status": "implemented",
+      "sourceSection": "15",
+      "roles": [],
+      "testFiles": ["test/integration/catalog/media.spec.ts"]
+    },
+    {
+      "id": "LOCAL-CATALOG-IMAGE",
+      "phase": "P3",
+      "method": "GET",
+      "path": "/media/{id}",
+      "scope": "registered product image only; private keys are inaccessible",
+      "status": "implemented",
+      "sourceSection": "15",
+      "roles": [],
+      "testFiles": ["test/integration/catalog/media.spec.ts"]
     }
   ]
 }

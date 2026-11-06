@@ -1,13 +1,13 @@
-# Implemented architecture: P0–P2
+# Implemented architecture: P0–P4
 
 The backend is a modular NestJS/Fastify application with one image and six runtime roles. A single audience composition registry drives both route loading and per-audience OpenAPI generation, preventing documentation and runtime routes from drifting apart.
 
 ```mermaid
 flowchart TD
   HTTP[Customer / rider / store / admin HTTP] --> GUARD[Token, account, role and resource policy]
-  GUARD --> MODULES[Identity / config / stores / addresses / serviceability]
+  GUARD --> MODULES[Identity / stores / addresses / catalog / inventory]
   MODULES --> PG[(PostgreSQL + PostGIS)]
-  MODULES --> PORTS[Auth / maps / private media ports]
+  MODULES --> PORTS[Auth / maps / storage / search ports]
   PORTS --> LOCAL[Local or real adapters]
   PG --> OUTBOX[Leased event delivery obligations]
   OUTBOX --> REDIS[(Redis + BullMQ)]
@@ -21,6 +21,10 @@ PostgreSQL owns account status/roles, addresses, capacity, state histories, idem
 
 Workers are enabled only on `all`/`worker`. Identity synchronization preserves per-user operation ordering, reconciles ambiguous provisioning, retries compensation and calls providers outside database transactions. Store availability polling catches up from durable signals. Generic concern queues support bounded concurrency, retry/DLQ replay and IST job schedulers.
 
-Serviceability uses PostGIS `ST_Covers`, explicit zone priority and distance; external maps do not decide zone membership. Confirmed catalog/order/stock/payment workflows are not implemented until P3–P8. Current domain/event contracts prepare those integrations without publishing fake business endpoints.
+Serviceability uses PostGIS `ST_Covers`, explicit zone priority and distance; external maps do not decide zone membership. Catalog resolves the store from an owned address, then joins publication, current temporal prices and eligible batch availability. SearchPort shares the existing PostgreSQL query provider. Suggestion caches use revisions and upcoming price/shelf-life boundaries.
+
+Inventory serializes operation/reservation, sorted stock and batch locks. Every movement has a retained reference and immutable ledger entry; on-hand/reserved reconcile with batches. HELD payment holds expire, COMMITTED allocations survive, and picks/shorts resolve once. Expired or damaged allocated stock is reallocated or produces a durable obligation for later commerce/fulfillment compensation.
+
+Imports use BullMQ hints backed by durable jobs, leases and batch checkpoints; database scans recover lost Redis jobs. Media promotion and private report writes record cleanup intents before external I/O and fence cleanup against registration. The existing image runs imports/media/inventory maintenance only on `all`/`worker`. Orders, payments and fulfillment remain P6–P8 work.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the target architecture and the [progress record](PROGRESS.md) for acceptance evidence and remaining provider checks.

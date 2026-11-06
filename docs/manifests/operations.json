@@ -137,25 +137,6 @@
       "tokenUse": "access"
     },
     {
-      "id": "AdminIdentityController_create",
-      "sourceSection": "13",
-      "phase": "P1",
-      "status": "implemented",
-      "surface": "admin",
-      "method": "POST",
-      "path": "/v1/admin/users/workforce",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "administrative",
-      "rateLimit": "default",
-      "idempotency": "stable pool/email provisioning saga and input hash",
-      "testFiles": [
-        "test/e2e/foundation-journey.spec.ts",
-        "test/integration/identity/permission-matrix.spec.ts",
-        "test/integration/identity/identity.spec.ts"
-      ],
-      "tokenUse": "access"
-    },
-    {
       "id": "AdminIdentityController_block",
       "sourceSection": "13",
       "phase": "P1",
@@ -232,6 +213,25 @@
       "tokenUse": "access"
     },
     {
+      "id": "AdminIdentityController_create",
+      "sourceSection": "13",
+      "phase": "P1",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "POST",
+      "path": "/v1/admin/users/workforce",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "stable pool/email provisioning saga and input hash",
+      "testFiles": [
+        "test/e2e/foundation-journey.spec.ts",
+        "test/integration/identity/permission-matrix.spec.ts",
+        "test/integration/identity/identity.spec.ts"
+      ],
+      "tokenUse": "access"
+    },
+    {
       "id": "CustomerIdentityController_bootstrap",
       "sourceSection": "13",
       "phase": "P1",
@@ -259,7 +259,7 @@
       "method": "DELETE",
       "path": "/v1/customer/me",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "one pending erasure request per user",
       "testFiles": [
@@ -278,7 +278,7 @@
       "method": "GET",
       "path": "/v1/customer/me",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "read-only",
       "testFiles": [
@@ -297,7 +297,7 @@
       "method": "PATCH",
       "path": "/v1/customer/me",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "resource constraints; no generic HTTP key on this operation",
       "testFiles": [
@@ -316,7 +316,7 @@
       "method": "POST",
       "path": "/v1/customer/me/consents",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "unique user/type/version",
       "testFiles": [
@@ -335,7 +335,7 @@
       "method": "GET",
       "path": "/v1/rider/me",
       "roles": ["RIDER"],
-      "scope": "own rider profile; pending riders allowed",
+      "scope": "self",
       "rateLimit": "default",
       "idempotency": "read-only",
       "testFiles": [
@@ -354,7 +354,7 @@
       "method": "POST",
       "path": "/v1/rider/onboarding/documents",
       "roles": ["RIDER"],
-      "scope": "own rider profile; pending riders allowed",
+      "scope": "self",
       "rateLimit": "default",
       "idempotency": "resource constraints; no generic HTTP key on this operation",
       "testFiles": [
@@ -374,7 +374,7 @@
       "method": "POST",
       "path": "/v1/rider/onboarding/documents/upload-url",
       "roles": ["RIDER"],
-      "scope": "own rider profile; pending riders allowed",
+      "scope": "self",
       "rateLimit": "default",
       "idempotency": "resource constraints; no generic HTTP key on this operation",
       "testFiles": [
@@ -394,7 +394,7 @@
       "method": "POST",
       "path": "/v1/rider/onboarding/profile",
       "roles": ["RIDER"],
-      "scope": "own rider profile; pending riders allowed",
+      "scope": "self",
       "rateLimit": "default",
       "idempotency": "resource constraints; no generic HTTP key on this operation",
       "testFiles": [
@@ -413,7 +413,7 @@
       "method": "GET",
       "path": "/v1/store/me",
       "roles": ["PICKER", "STORE_MANAGER"],
-      "scope": "store assignment",
+      "scope": "current store assignment",
       "rateLimit": "default",
       "idempotency": "read-only",
       "testFiles": [
@@ -828,7 +828,7 @@
       "method": "GET",
       "path": "/v1/customer/addresses",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "read-only",
       "testFiles": [
@@ -846,7 +846,7 @@
       "method": "POST",
       "path": "/v1/customer/addresses",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "resource constraints; no generic HTTP key on this operation",
       "testFiles": [
@@ -864,7 +864,7 @@
       "method": "DELETE",
       "path": "/v1/customer/addresses/{id}",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "resource constraints; no generic HTTP key on this operation",
       "testFiles": [
@@ -882,7 +882,7 @@
       "method": "PATCH",
       "path": "/v1/customer/addresses/{id}",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "expected address version; stale mutation conflicts",
       "testFiles": [
@@ -900,7 +900,7 @@
       "method": "POST",
       "path": "/v1/customer/addresses/{id}/default",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "resource constraints; no generic HTTP key on this operation",
       "testFiles": [
@@ -918,7 +918,7 @@
       "method": "GET",
       "path": "/v1/customer/places/autocomplete",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "auth",
       "idempotency": "read-only",
       "testFiles": [
@@ -936,7 +936,7 @@
       "method": "GET",
       "path": "/v1/customer/places/details",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "auth",
       "idempotency": "read-only",
       "testFiles": [
@@ -954,7 +954,7 @@
       "method": "GET",
       "path": "/v1/customer/places/reverse",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "auth",
       "idempotency": "read-only",
       "testFiles": [
@@ -972,7 +972,7 @@
       "method": "GET",
       "path": "/v1/customer/serviceability",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "read-only",
       "testFiles": [
@@ -990,7 +990,7 @@
       "method": "POST",
       "path": "/v1/store/status",
       "roles": ["STORE_MANAGER"],
-      "scope": "store assignment",
+      "scope": "current store assignment",
       "rateLimit": "default",
       "idempotency": "resource constraints; no generic HTTP key on this operation",
       "testFiles": [
@@ -1000,606 +1000,877 @@
       "tokenUse": "access"
     },
     {
-      "id": "GET-v1-admin-brands",
+      "id": "adminApproveCatalogChange",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "GET",
-      "path": "/v1/admin/brands",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "read-only",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-admin-brands",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "POST",
-      "path": "/v1/admin/brands",
+      "path": "/v1/admin/catalog/approvals/{id}/approve",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "immutable approval request with at most one committed execution",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "DELETE-v1-admin-brands-id",
+      "id": "adminAddAssortment",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
-      "method": "DELETE",
-      "path": "/v1/admin/brands/{id}",
+      "method": "POST",
+      "path": "/v1/admin/catalog/assortment",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "GET-v1-admin-brands-id",
+      "id": "adminListBrands",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "GET",
-      "path": "/v1/admin/brands/{id}",
+      "path": "/v1/admin/catalog/brands",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "PATCH-v1-admin-brands-id",
+      "id": "adminCreateBrand",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
-      "method": "PATCH",
-      "path": "/v1/admin/brands/{id}",
+      "method": "POST",
+      "path": "/v1/admin/catalog/brands",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "POST-v1-admin-catalog-imports",
+      "id": "adminDeleteBrand",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "DELETE",
+      "path": "/v1/admin/catalog/brands/{id}",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminGetBrand",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "GET",
+      "path": "/v1/admin/catalog/brands/{id}",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "read-only",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminUpdateBrand",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "PUT",
+      "path": "/v1/admin/catalog/brands/{id}",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminListCategories",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "GET",
+      "path": "/v1/admin/catalog/categories",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "read-only",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminCreateCategory",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "POST",
+      "path": "/v1/admin/catalog/categories",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminDeleteCategory",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "DELETE",
+      "path": "/v1/admin/catalog/categories/{id}",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminGetCategory",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "GET",
+      "path": "/v1/admin/catalog/categories/{id}",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "read-only",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminUpdateCategory",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "PUT",
+      "path": "/v1/admin/catalog/categories/{id}",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminCreateCatalogImport",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
       "surface": "admin",
       "method": "POST",
       "path": "/v1/admin/catalog/imports",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "immutable file bytes + store + mode fingerprint; cross-admin replay",
+      "testFiles": [
+        "test/integration/catalog/import.spec.ts",
+        "test/integration/catalog/queue-report.spec.ts"
+      ],
+      "tokenUse": "access"
     },
     {
-      "id": "GET-v1-admin-catalog-imports-id",
+      "id": "adminGetCatalogImport",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "GET",
       "path": "/v1/admin/catalog/imports/{id}",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/catalog/import.spec.ts",
+        "test/integration/catalog/queue-report.spec.ts"
+      ],
+      "tokenUse": "access"
     },
     {
-      "id": "GET-v1-admin-categories",
+      "id": "adminGetCatalogImportReport",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "GET",
-      "path": "/v1/admin/categories",
+      "path": "/v1/admin/catalog/imports/{id}/report",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/import.spec.ts",
+        "test/integration/catalog/queue-report.spec.ts"
+      ]
     },
     {
-      "id": "POST-v1-admin-categories",
+      "id": "adminApproveCatalogImport",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "POST",
-      "path": "/v1/admin/categories",
+      "path": "/v1/admin/catalog/imports/approvals/{id}/approve",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "immutable approval request with at most one committed execution",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/import.spec.ts",
+        "test/integration/catalog/queue-report.spec.ts"
+      ]
     },
     {
-      "id": "DELETE-v1-admin-categories-id",
+      "id": "adminRegisterCatalogMedia",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "POST",
+      "path": "/v1/admin/catalog/media/{id}/register",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "owner/purpose-bound immutable media registration",
+      "tokenUse": "access",
+      "testFiles": ["test/integration/catalog/media.spec.ts", "test/unit/catalog/storage.spec.ts"]
+    },
+    {
+      "id": "adminCreateCatalogMediaTarget",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "POST",
+      "path": "/v1/admin/catalog/media/targets",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "owner/purpose-bound immutable media registration",
+      "tokenUse": "access",
+      "testFiles": ["test/integration/catalog/media.spec.ts", "test/unit/catalog/storage.spec.ts"]
+    },
+    {
+      "id": "adminSetPrice",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "POST",
+      "path": "/v1/admin/catalog/prices",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminListProducts",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "GET",
+      "path": "/v1/admin/catalog/products",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "read-only",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminCreateProduct",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "POST",
+      "path": "/v1/admin/catalog/products",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminDeleteProduct",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
       "surface": "admin",
       "method": "DELETE",
-      "path": "/v1/admin/categories/{id}",
+      "path": "/v1/admin/catalog/products/{id}",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "GET-v1-admin-categories-id",
+      "id": "adminGetProduct",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "GET",
-      "path": "/v1/admin/categories/{id}",
+      "path": "/v1/admin/catalog/products/{id}",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "PATCH-v1-admin-categories-id",
+      "id": "adminUpdateProduct",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "PATCH",
-      "path": "/v1/admin/categories/{id}",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-admin-media-register",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "POST",
-      "path": "/v1/admin/media/register",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-admin-media-upload-target",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "POST",
-      "path": "/v1/admin/media/upload-target",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
-      "id": "GET-v1-admin-products",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "GET",
-      "path": "/v1/admin/products",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "read-only",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-admin-products",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "POST",
-      "path": "/v1/admin/products",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
-      "id": "DELETE-v1-admin-products-id",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "DELETE",
-      "path": "/v1/admin/products/{id}",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
-      "id": "GET-v1-admin-products-id",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "GET",
-      "path": "/v1/admin/products/{id}",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "read-only",
-      "testFiles": []
-    },
-    {
-      "id": "PATCH-v1-admin-products-id",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "PATCH",
-      "path": "/v1/admin/products/{id}",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-admin-products-id-publish",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "POST",
-      "path": "/v1/admin/products/{id}/publish",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-admin-products-id-unpublish",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "POST",
-      "path": "/v1/admin/products/{id}/unpublish",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
-      "id": "GET-v1-admin-search-synonyms",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "GET",
-      "path": "/v1/admin/search/synonyms",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "read-only",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-admin-search-synonyms",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "POST",
-      "path": "/v1/admin/search/synonyms",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
-      "id": "PUT-v1-admin-stores-storeId-prices-variantId",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "PUT",
-      "path": "/v1/admin/stores/{storeId}/prices/{variantId}",
+      "path": "/v1/admin/catalog/products/{id}",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "GET-v1-admin-variants",
+      "id": "adminPublishProduct",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
-      "surface": "admin",
-      "method": "GET",
-      "path": "/v1/admin/variants",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "read-only",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-admin-variants",
-      "sourceSection": "15",
-      "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "POST",
-      "path": "/v1/admin/variants",
+      "path": "/v1/admin/catalog/products/{id}/publish",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "DELETE-v1-admin-variants-id",
+      "id": "adminUnpublishProduct",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
-      "method": "DELETE",
-      "path": "/v1/admin/variants/{id}",
+      "method": "POST",
+      "path": "/v1/admin/catalog/products/{id}/unpublish",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "GET-v1-admin-variants-id",
+      "id": "adminListSynonyms",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "GET",
-      "path": "/v1/admin/variants/{id}",
+      "path": "/v1/admin/catalog/synonyms",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "PATCH-v1-admin-variants-id",
+      "id": "adminSetSynonym",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
-      "method": "PATCH",
-      "path": "/v1/admin/variants/{id}",
+      "method": "PUT",
+      "path": "/v1/admin/catalog/synonyms",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
     },
     {
-      "id": "GET-v1-customer-catalog-categories-id-products",
+      "id": "adminListVariants",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "GET",
+      "path": "/v1/admin/catalog/variants",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "read-only",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminCreateVariant",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "POST",
+      "path": "/v1/admin/catalog/variants",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminDeleteVariant",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "DELETE",
+      "path": "/v1/admin/catalog/variants/{id}",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminGetVariant",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "GET",
+      "path": "/v1/admin/catalog/variants/{id}",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "read-only",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "adminUpdateVariant",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "PUT",
+      "path": "/v1/admin/catalog/variants/{id}",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "administrative resource constraints; no generic HTTP key",
+      "tokenUse": "access",
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ]
+    },
+    {
+      "id": "customerCatalogCategory",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
       "surface": "customer",
       "method": "GET",
       "path": "/v1/customer/catalog/categories/{id}/products",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ],
+      "tokenUse": "access"
     },
     {
-      "id": "GET-v1-customer-catalog-home",
+      "id": "customerCatalogHome",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "customer",
       "method": "GET",
       "path": "/v1/customer/catalog/home",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ],
+      "tokenUse": "access"
     },
     {
-      "id": "GET-v1-customer-catalog-products-id",
+      "id": "customerCatalogProduct",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "customer",
       "method": "GET",
       "path": "/v1/customer/catalog/products/{id}",
       "roles": ["CUSTOMER"],
-      "scope": "self",
+      "scope": "self; selected owned address",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ],
+      "tokenUse": "access"
     },
     {
-      "id": "GET-v1-customer-search",
+      "id": "customerCatalogSearch",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "customer",
       "method": "GET",
       "path": "/v1/customer/search",
       "roles": ["CUSTOMER"],
-      "scope": "self",
-      "rateLimit": "default",
+      "scope": "self; selected owned address",
+      "rateLimit": "search",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ],
+      "tokenUse": "access"
     },
     {
-      "id": "GET-v1-customer-search-suggest",
+      "id": "customerCatalogSuggest",
       "sourceSection": "15",
       "phase": "P3",
-      "status": "planned",
+      "status": "implemented",
       "surface": "customer",
       "method": "GET",
       "path": "/v1/customer/search/suggest",
       "roles": ["CUSTOMER"],
-      "scope": "self",
-      "rateLimit": "default",
+      "scope": "self; selected owned address",
+      "rateLimit": "search",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts"
+      ],
+      "tokenUse": "access"
     },
     {
-      "id": "POST-v1-admin-inventory-adjustments-id-approve",
+      "id": "adminInventoryApproveAdjustment",
       "sourceSection": "17",
       "phase": "P4",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "POST",
       "path": "/v1/admin/inventory/adjustments/{id}/approve",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative audience plus current STORE_MANAGER assignment at affected store; distinct checker",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "Idempotency-Key scoped to actor; binds one immutable approval ID and replays execution",
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"],
+      "tokenUse": "access"
     },
     {
-      "id": "GET-v1-admin-inventory-ledger",
+      "id": "adminInventoryLedger",
       "sourceSection": "17",
       "phase": "P4",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "GET",
       "path": "/v1/admin/inventory/ledger",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"],
+      "tokenUse": "access"
     },
     {
-      "id": "GET-v1-admin-inventory-reports",
+      "id": "adminInventoryReport",
       "sourceSection": "17",
       "phase": "P4",
-      "status": "planned",
+      "status": "implemented",
       "surface": "admin",
       "method": "GET",
-      "path": "/v1/admin/inventory/reports",
+      "path": "/v1/admin/inventory/report",
       "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
+      "scope": "administrative",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "tokenUse": "access",
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"]
     },
     {
-      "id": "GET-v1-store-inventory",
+      "id": "adminInventoryShelfLifeList",
       "sourceSection": "17",
       "phase": "P4",
-      "status": "planned",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "GET",
+      "path": "/v1/admin/inventory/shelf-life",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "read-only",
+      "tokenUse": "access",
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"]
+    },
+    {
+      "id": "adminInventoryShelfLifeSet",
+      "sourceSection": "17",
+      "phase": "P4",
+      "status": "implemented",
+      "surface": "admin",
+      "method": "POST",
+      "path": "/v1/admin/inventory/shelf-life",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "administrative",
+      "rateLimit": "default",
+      "idempotency": "Idempotency-Key scoped to current actor/store/operation; permanent business reference",
+      "tokenUse": "access",
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"]
+    },
+    {
+      "id": "storeInventoryList",
+      "sourceSection": "17",
+      "phase": "P4",
+      "status": "implemented",
       "surface": "store",
       "method": "GET",
       "path": "/v1/store/inventory",
       "roles": ["PICKER", "STORE_MANAGER"],
-      "scope": "store",
+      "scope": "current store assignment",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"],
+      "tokenUse": "access"
     },
     {
-      "id": "POST-v1-store-inventory-adjustments",
+      "id": "storeInventoryAdjust",
       "sourceSection": "17",
       "phase": "P4",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/inventory/adjustments",
-      "roles": ["PICKER", "STORE_MANAGER"],
-      "scope": "store",
+      "roles": ["STORE_MANAGER"],
+      "scope": "current store assignment",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "Idempotency-Key scoped to current actor/store/operation; permanent business reference",
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"],
+      "tokenUse": "access"
     },
     {
-      "id": "POST-v1-store-inventory-cycle-counts",
+      "id": "storeInventoryApproveCount",
       "sourceSection": "17",
       "phase": "P4",
-      "status": "planned",
+      "status": "implemented",
+      "surface": "store",
+      "method": "POST",
+      "path": "/v1/store/inventory/approvals/{id}/approve",
+      "roles": ["STORE_MANAGER"],
+      "scope": "current store assignment",
+      "rateLimit": "default",
+      "idempotency": "Idempotency-Key scoped to actor; binds one immutable approval ID and replays execution",
+      "tokenUse": "access",
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"]
+    },
+    {
+      "id": "storeInventoryCount",
+      "sourceSection": "17",
+      "phase": "P4",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/inventory/cycle-counts",
-      "roles": ["PICKER", "STORE_MANAGER"],
-      "scope": "store",
+      "roles": ["STORE_MANAGER"],
+      "scope": "current store assignment",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "Idempotency-Key scoped to current actor/store/operation; permanent business reference",
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"],
+      "tokenUse": "access"
     },
     {
-      "id": "GET-v1-store-inventory-expiring",
+      "id": "storeInventoryExpiring",
       "sourceSection": "17",
       "phase": "P4",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "GET",
       "path": "/v1/store/inventory/expiring",
       "roles": ["PICKER", "STORE_MANAGER"],
-      "scope": "store",
+      "scope": "current store assignment",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"],
+      "tokenUse": "access"
     },
     {
-      "id": "GET-v1-store-inventory-low-stock",
+      "id": "storeInventoryLowStock",
       "sourceSection": "17",
       "phase": "P4",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "GET",
       "path": "/v1/store/inventory/low-stock",
       "roles": ["PICKER", "STORE_MANAGER"],
-      "scope": "store",
+      "scope": "current store assignment",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"],
+      "tokenUse": "access"
     },
     {
-      "id": "POST-v1-store-inventory-receipts",
+      "id": "storeInventoryQuality",
       "sourceSection": "17",
       "phase": "P4",
-      "status": "planned",
+      "status": "implemented",
+      "surface": "store",
+      "method": "POST",
+      "path": "/v1/store/inventory/quality",
+      "roles": ["STORE_MANAGER"],
+      "scope": "current store assignment",
+      "rateLimit": "default",
+      "idempotency": "Idempotency-Key scoped to current actor/store/operation; permanent business reference",
+      "tokenUse": "access",
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"]
+    },
+    {
+      "id": "storeInventoryReceive",
+      "sourceSection": "17",
+      "phase": "P4",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/inventory/receipts",
       "roles": ["PICKER", "STORE_MANAGER"],
-      "scope": "store",
+      "scope": "current store assignment",
       "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "idempotency": "Idempotency-Key scoped to current actor/store/operation; permanent business reference",
+      "testFiles": ["test/concurrency/inventory/reservation.spec.ts"],
+      "tokenUse": "access"
     },
     {
       "id": "DELETE-v1-customer-cart",
@@ -2428,20 +2699,6 @@
       "testFiles": []
     },
     {
-      "id": "GET-v1-rider-tasks-current",
-      "sourceSection": "23",
-      "phase": "P8",
-      "status": "planned",
-      "surface": "rider",
-      "method": "GET",
-      "path": "/v1/rider/tasks/current",
-      "roles": ["RIDER"],
-      "scope": "self",
-      "rateLimit": "default",
-      "idempotency": "read-only",
-      "testFiles": []
-    },
-    {
       "id": "POST-v1-rider-tasks-id-arrived",
       "sourceSection": "23",
       "phase": "P8",
@@ -2540,6 +2797,20 @@
       "testFiles": []
     },
     {
+      "id": "GET-v1-rider-tasks-current",
+      "sourceSection": "23",
+      "phase": "P8",
+      "status": "planned",
+      "surface": "rider",
+      "method": "GET",
+      "path": "/v1/rider/tasks/current",
+      "roles": ["RIDER"],
+      "scope": "self",
+      "rateLimit": "default",
+      "idempotency": "read-only",
+      "testFiles": []
+    },
+    {
       "id": "DELETE-v1-admin-device-tokens",
       "sourceSection": "24.1",
       "phase": "P9",
@@ -2610,6 +2881,20 @@
       "testFiles": []
     },
     {
+      "id": "POST-v1-admin-notifications-id-read",
+      "sourceSection": "24.1",
+      "phase": "P9",
+      "status": "planned",
+      "surface": "admin",
+      "method": "POST",
+      "path": "/v1/admin/notifications/{id}/read",
+      "roles": ["ADMIN", "SUPER_ADMIN"],
+      "scope": "elevated",
+      "rateLimit": "default",
+      "idempotency": "required for money/stock effects",
+      "testFiles": []
+    },
+    {
       "id": "POST-v1-admin-notifications-read-all",
       "sourceSection": "24.1",
       "phase": "P9",
@@ -2635,20 +2920,6 @@
       "scope": "elevated",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-admin-notifications-id-read",
-      "sourceSection": "24.1",
-      "phase": "P9",
-      "status": "planned",
-      "surface": "admin",
-      "method": "POST",
-      "path": "/v1/admin/notifications/{id}/read",
-      "roles": ["ADMIN", "SUPER_ADMIN"],
-      "scope": "elevated",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
       "testFiles": []
     },
     {
@@ -2722,6 +2993,20 @@
       "testFiles": []
     },
     {
+      "id": "POST-v1-customer-notifications-id-read",
+      "sourceSection": "24.1",
+      "phase": "P9",
+      "status": "planned",
+      "surface": "customer",
+      "method": "POST",
+      "path": "/v1/customer/notifications/{id}/read",
+      "roles": ["CUSTOMER"],
+      "scope": "self",
+      "rateLimit": "default",
+      "idempotency": "required for money/stock effects",
+      "testFiles": []
+    },
+    {
       "id": "POST-v1-customer-notifications-read-all",
       "sourceSection": "24.1",
       "phase": "P9",
@@ -2747,20 +3032,6 @@
       "scope": "self",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-customer-notifications-id-read",
-      "sourceSection": "24.1",
-      "phase": "P9",
-      "status": "planned",
-      "surface": "customer",
-      "method": "POST",
-      "path": "/v1/customer/notifications/{id}/read",
-      "roles": ["CUSTOMER"],
-      "scope": "self",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
       "testFiles": []
     },
     {
@@ -2834,6 +3105,20 @@
       "testFiles": []
     },
     {
+      "id": "POST-v1-rider-notifications-id-read",
+      "sourceSection": "24.1",
+      "phase": "P9",
+      "status": "planned",
+      "surface": "rider",
+      "method": "POST",
+      "path": "/v1/rider/notifications/{id}/read",
+      "roles": ["RIDER"],
+      "scope": "self",
+      "rateLimit": "default",
+      "idempotency": "required for money/stock effects",
+      "testFiles": []
+    },
+    {
       "id": "POST-v1-rider-notifications-read-all",
       "sourceSection": "24.1",
       "phase": "P9",
@@ -2859,20 +3144,6 @@
       "scope": "self",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
-    },
-    {
-      "id": "POST-v1-rider-notifications-id-read",
-      "sourceSection": "24.1",
-      "phase": "P9",
-      "status": "planned",
-      "surface": "rider",
-      "method": "POST",
-      "path": "/v1/rider/notifications/{id}/read",
-      "roles": ["RIDER"],
-      "scope": "self",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
       "testFiles": []
     },
     {
@@ -2946,6 +3217,20 @@
       "testFiles": []
     },
     {
+      "id": "POST-v1-store-notifications-id-read",
+      "sourceSection": "24.1",
+      "phase": "P9",
+      "status": "planned",
+      "surface": "store",
+      "method": "POST",
+      "path": "/v1/store/notifications/{id}/read",
+      "roles": ["PICKER", "STORE_MANAGER"],
+      "scope": "store",
+      "rateLimit": "default",
+      "idempotency": "required for money/stock effects",
+      "testFiles": []
+    },
+    {
       "id": "POST-v1-store-notifications-read-all",
       "sourceSection": "24.1",
       "phase": "P9",
@@ -2974,20 +3259,6 @@
       "testFiles": []
     },
     {
-      "id": "POST-v1-store-notifications-id-read",
-      "sourceSection": "24.1",
-      "phase": "P9",
-      "status": "planned",
-      "surface": "store",
-      "method": "POST",
-      "path": "/v1/store/notifications/{id}/read",
-      "roles": ["PICKER", "STORE_MANAGER"],
-      "scope": "store",
-      "rateLimit": "default",
-      "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
       "id": "GET-v1-customer-subscriptions",
       "sourceSection": "25",
       "phase": "P10",
@@ -3013,20 +3284,6 @@
       "scope": "self",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
-    },
-    {
-      "id": "GET-v1-customer-subscriptions-calendar",
-      "sourceSection": "25",
-      "phase": "P10",
-      "status": "planned",
-      "surface": "customer",
-      "method": "GET",
-      "path": "/v1/customer/subscriptions/calendar",
-      "roles": ["CUSTOMER"],
-      "scope": "self",
-      "rateLimit": "default",
-      "idempotency": "read-only",
       "testFiles": []
     },
     {
@@ -3135,6 +3392,20 @@
       "surface": "customer",
       "method": "GET",
       "path": "/v1/customer/subscriptions/{id}/upcoming",
+      "roles": ["CUSTOMER"],
+      "scope": "self",
+      "rateLimit": "default",
+      "idempotency": "read-only",
+      "testFiles": []
+    },
+    {
+      "id": "GET-v1-customer-subscriptions-calendar",
+      "sourceSection": "25",
+      "phase": "P10",
+      "status": "planned",
+      "surface": "customer",
+      "method": "GET",
+      "path": "/v1/customer/subscriptions/calendar",
       "roles": ["CUSTOMER"],
       "scope": "self",
       "rateLimit": "default",

@@ -163,6 +163,72 @@
       "producers": ["identity"],
       "consumers": [],
       "note": "Provider synchronization is a separate durable identity operation; audit is written synchronously in the same transaction."
+    },
+    {
+      "id": "catalog.product_publication_changed",
+      "eventType": "catalog.product_publication_changed",
+      "sourceSection": "15",
+      "phase": "P3",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["catalog"],
+      "consumers": [],
+      "note": "State/history and outbox commit together; notification delivery is assigned to P9."
+    },
+    {
+      "id": "inventory.reservation_changed",
+      "eventType": "inventory.reservation_changed",
+      "sourceSection": "17",
+      "phase": "P4",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["inventory"],
+      "consumers": [],
+      "note": "State/history and outbox commit together; notification delivery is assigned to P9."
+    },
+    {
+      "id": "inventory.batch_state_changed",
+      "eventType": "inventory.batch_state_changed",
+      "sourceSection": "17",
+      "phase": "P4",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["inventory"],
+      "consumers": [],
+      "note": "State/history and outbox commit together; notification delivery is assigned to P9."
+    },
+    {
+      "id": "inventory.low_stock",
+      "eventType": "inventory.low_stock",
+      "sourceSection": "17",
+      "phase": "P4",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["inventory"],
+      "consumers": [],
+      "note": "State/history and outbox commit together; notification delivery is assigned to P9."
+    },
+    {
+      "id": "inventory.expiry_soon",
+      "eventType": "inventory.expiry_soon",
+      "sourceSection": "17",
+      "phase": "P4",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["inventory"],
+      "consumers": [],
+      "note": "State/history and outbox commit together; notification delivery is assigned to P9."
+    },
+    {
+      "id": "inventory.return_inspected",
+      "eventType": "inventory.return_inspected",
+      "sourceSection": "17",
+      "phase": "P4",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["inventory"],
+      "consumers": [],
+      "note": "State/history and outbox commit together; notification delivery is assigned to P9."
     }
   ]
 }

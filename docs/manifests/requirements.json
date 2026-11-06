@@ -350,6 +350,36 @@
         "test/integration/runtime/store-scheduler.spec.ts",
         "test/e2e/foundation-journey.spec.ts"
       ]
+    },
+    {
+      "id": "P3-LOCAL",
+      "phase": "P3",
+      "sourceSection": "32.P3",
+      "description": "Local catalog/search gate: CRUD/publication and immutable history, current temporal prices/approvals, store-scoped search ranking/revision caching, local/S3 media contracts, BullMQ import dispatch with durable DB recovery, full CSV validation/dry-run/idempotency and persisted private reports. Credentialed AWS/CDN acceptance remains external.",
+      "testFiles": [
+        "test/unit/catalog/catalog.spec.ts",
+        "test/unit/catalog/import.spec.ts",
+        "test/unit/catalog/storage.spec.ts",
+        "test/integration/catalog/catalog.spec.ts",
+        "test/integration/catalog/import.spec.ts",
+        "test/integration/catalog/media.spec.ts",
+        "test/integration/catalog/s3-private.spec.ts",
+        "test/integration/catalog/queue-report.spec.ts"
+      ],
+      "status": "verified",
+      "evidence": "PROGRESS.md: 146 passing tests in43 suites; local PostgreSQL/PostGIS+Redis, 6November2026"
+    },
+    {
+      "id": "P4-LOCAL",
+      "phase": "P4",
+      "sourceSection": "32.P4",
+      "description": "Local inventory gate: receipt/batch/ledger reconciliation, 100-parallel reservation correctness, FEFO/target shelf life, hold/commit/release/pick races, expiry reallocation/shortfall obligations, scoped/versioned approval-controlled adjustments, small-pool concurrency, QC returns and HTTP idempotency. Future order/payment compensation integration belongs to P6/P7.",
+      "testFiles": [
+        "test/concurrency/inventory/reservation.spec.ts",
+        "test/unit/inventory/inventory.spec.ts"
+      ],
+      "status": "verified",
+      "evidence": "PROGRESS.md: 146 passing tests in43 suites; local PostgreSQL/PostGIS+Redis, 6November2026"
     }
   ]
 }

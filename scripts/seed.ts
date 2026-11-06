@@ -1,5 +1,7 @@
 import { Client } from 'pg';
 import { uuidV7 } from '../src/common/ids/ids.js';
+import { seedCatalog } from './seed-catalog.js';
+import { seedInventory } from './seed-inventory.js';
 
 // Sample data is local development data only. Re-running does not overwrite edits.
 const users = [
@@ -124,8 +126,17 @@ async function main(): Promise<void> {
           [id, stores[0].id, user.role],
         );
     }
+    await seedCatalog(
+      client,
+      stores.map((store) => store.id),
+    );
     await client.query('COMMIT');
-    process.stdout.write('Seeded local development identities and stores.\n');
+    await seedInventory(client, stores[0].id, connectionString);
+    process.stdout.write(
+      'Seeded local identities, stores and 200 catalog products with receipt-backed stock in the first store.\n',
+    );
+    for (const user of users)
+      process.stdout.write(`Local identity: ${user.pool} ${user.sub} (${user.role})\n`);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

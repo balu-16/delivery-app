@@ -1,4 +1,20 @@
+export const INVENTORY_CONFIG_DEFAULTS = {
+  catalogLowStockThreshold: 5,
+  inventoryExpirySoonDays: 7,
+} as const;
 export interface ConfigValues {
+  inventoryReservationTtlSeconds: number;
+  inventoryAdjustmentApprovalUnits: number;
+  inventoryExpirySoonDays: number;
+  catalogLowStockThreshold: number;
+  catalogMaxPerOrder: number;
+  catalogAllowedGstBps: number[];
+  catalogPriceApprovalCount: number;
+  catalogPriceApprovalPercent: number;
+  catalogImportMaxBytes: number;
+  catalogImportMaxRows: number;
+  catalogImportBatchSize: number;
+  catalogSuggestCacheSeconds: number;
   addressMaxPerUser: number;
   addressPinMismatchMetres: number;
   zoneMinAreaM2: number;

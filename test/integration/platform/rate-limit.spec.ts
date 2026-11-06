@@ -35,7 +35,7 @@ it('shares counters across Redis clients, separates route classes, and sets an e
 
 it('limits verified actors independently by audience and returns an explicit outage policy', async () => {
   const redis = new Redis(services.redisUrl);
-  const env = readEnv({ RATE_LIMIT_DEFAULT_PER_MIN: '1' });
+  const env = readEnv({ RATE_LIMIT_DEFAULT_PER_MIN: '1', RATE_LIMIT_SEARCH_PER_MIN: '1' });
   let errors = 0;
   const limiter = new RedisRateLimiter(redis, env, () => {
     errors++;
@@ -49,6 +49,13 @@ it('limits verified actors independently by audience and returns an explicit out
       'limited',
     );
     expect((await limiter.checkAuthenticated(actor, 'rider', '/v1/rider/me')).kind).toBe('allowed');
+    expect(
+      (await limiter.checkAuthenticated(actor, 'customer', '/v1/customer/search?q=milk')).kind,
+    ).toBe('allowed');
+    expect(
+      (await limiter.checkAuthenticated(actor, 'customer', '/v1/customer/search/suggest?q=milk'))
+        .kind,
+    ).toBe('limited');
     const original = redis.eval;
     redis.eval = (() => Promise.reject(new Error('Redis unavailable'))) as typeof redis.eval;
     try {

@@ -47,6 +47,19 @@ it('seeds repeatably in local mode and refuses production', async () => {
       "SELECT (SELECT count(*)::int FROM users) AS users,(SELECT count(*)::int FROM user_roles WHERE role='SUPER_ADMIN') AS superadmins,(SELECT count(*)::int FROM stores) AS stores,(SELECT count(*)::int FROM zones) AS zones",
     );
     expect(result.rows[0]).toEqual({ users: 8, superadmins: 2, stores: 3, zones: 3 });
+    const catalog = await client.query(
+      'SELECT (SELECT count(*)::int FROM catalog_products) AS products,(SELECT count(*)::int FROM catalog_variants) AS variants,(SELECT count(*)::int FROM catalog_prices) AS prices,(SELECT count(*)::int FROM store_inventory WHERE on_hand=0 AND reserved=0) AS zero_stock',
+    );
+    expect(catalog.rows[0]).toEqual({ products: 200, variants: 200, prices: 600, zero_stock: 400 });
+    const inventory = await client.query(
+      "SELECT (SELECT count(*)::int FROM inventory_batches) AS batches,(SELECT count(*)::int FROM inventory_ledger WHERE kind='RECEIPT') AS receipts,(SELECT sum(on_hand)::text FROM store_inventory) AS on_hand,(SELECT sum(on_hand_delta)::text FROM inventory_ledger) AS ledger_total",
+    );
+    expect(inventory.rows[0]).toEqual({
+      batches: 200,
+      receipts: 200,
+      on_hand: '4000',
+      ledger_total: '4000',
+    });
   } finally {
     await client.end();
   }
