@@ -229,6 +229,42 @@
       "producers": ["inventory"],
       "consumers": [],
       "note": "State/history and outbox commit together; notification delivery is assigned to P9."
+    },
+    {
+      "id": "picking.task_changed",
+      "eventType": "picking.task_changed",
+      "sourceSection": "22",
+      "phase": "P7",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["picking"],
+      "consumers": [],
+      "plannedConsumers": ["notifications"],
+      "note": "Task lifecycle transitions and confirmation-created tasks; handover records and pack events remain P8 custody inputs."
+    },
+    {
+      "id": "picking.task_completed",
+      "eventType": "picking.task_completed",
+      "sourceSection": "22",
+      "phase": "P7",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["picking"],
+      "consumers": [],
+      "plannedConsumers": ["notifications"],
+      "note": "Emitted after fulfilled stock is consumed and shorts are settled through the P6 adjustment contract."
+    },
+    {
+      "id": "picking.sla_breached",
+      "eventType": "picking.sla_breached",
+      "sourceSection": "22",
+      "phase": "P7",
+      "status": "implemented",
+      "schemaVersion": 1,
+      "producers": ["picking"],
+      "consumers": [],
+      "plannedConsumers": ["notifications", "audit"],
+      "note": "One breach row per task; the SLA worker also feeds the store auto-pause evaluator and passes rider availability through."
     }
   ]
 }

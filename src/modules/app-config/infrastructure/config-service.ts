@@ -94,6 +94,10 @@ const definitions = {
   mapFallbackSpeedKph: z.number().positive().default(20),
   storeBacklogPauseThreshold: z.number().int().positive().default(100),
   storeNoRidersPauseMinutes: z.number().int().positive().default(15),
+  pickingSlaMinutes: z.number().int().min(1).max(1440).default(30),
+  maxActivePickTasksPerPicker: z.number().int().min(1).max(50).default(5),
+  handoverMaxAttempts: z.number().int().min(1).max(20).default(5),
+  handoverLockoutSeconds: z.number().int().min(0).max(86400).default(300),
   etaMinMinutes: z.number().nonnegative().default(10),
   etaMaxMinutes: z.number().nonnegative().default(60),
   requiredRiderDocuments: z

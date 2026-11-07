@@ -31,6 +31,8 @@ import {
   type IdentityAdminPort,
 } from './contracts/identity.js';
 import { IdentityGuard } from './contracts/identity-guard.js';
+import { IDENTITY_ROSTER } from './contracts/roster.js';
+import { PostgresIdentityRoster } from './infrastructure/roster.js';
 import { IdentityService } from './infrastructure/identity-service.js';
 import { DatabaseIdentityAccess } from './infrastructure/identity-access.js';
 import { DatabaseUserProfiles } from './infrastructure/user-profiles.js';
@@ -142,12 +144,18 @@ import { WorkforceProvisioning } from './infrastructure/workforce-provisioning.j
       useFactory: (handle: DatabaseHandle, storage: PrivateUploadPort | null, config: AppConfig) =>
         storage ? new RiderOnboarding(handle.db, storage, config) : null,
     },
+    {
+      provide: IDENTITY_ROSTER,
+      inject: [PLATFORM_DATABASE],
+      useFactory: (handle: DatabaseHandle) => new PostgresIdentityRoster(handle.db),
+    },
     IdentityGuard,
   ],
   exports: [
     IDENTITY_ADMINISTRATION,
     IDENTITY_ACCESS,
     IDENTITY_AUTHORIZER,
+    IDENTITY_ROSTER,
     USER_PROFILES,
     AppConfigModule,
     TOKEN_VERIFIER,

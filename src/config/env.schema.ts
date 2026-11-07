@@ -29,6 +29,7 @@ const envBaseSchema = z
     DATABASE_STATEMENT_TIMEOUT_MS: positiveInteger(10000),
     REDIS_URL: url('redis://localhost:6379'),
     LOCAL_JWT_SECRET: z.string().default('local-dev-only-change-me'),
+    PICKING_HANDOVER_SECRET: z.string().default('picking-handover-local-dev-secret-v1'),
     AWS_REGION: z.string().default('ap-south-1'),
     COGNITO_CUSTOMER_POOL_ID: optional,
     COGNITO_CUSTOMER_CLIENT_ID: optional,
@@ -210,6 +211,11 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
       fail('CDN_BASE_URL', 'Production CDN URL requires HTTPS');
     if (env.METRICS_BEARER_TOKEN.length < 32)
       fail('METRICS_BEARER_TOKEN', 'Must be at least 32 characters in production');
+    if (
+      env.PICKING_HANDOVER_SECRET.length < 32 ||
+      env.PICKING_HANDOVER_SECRET.startsWith('picking-handover-local')
+    )
+      fail('PICKING_HANDOVER_SECRET', 'Production handover verifier key must be a real secret');
     if (env.RAZORPAY_KEY_ID.startsWith('rzp_test_'))
       fail('RAZORPAY_KEY_ID', 'Test keys are forbidden in production');
     if (!env.OLA_MAPS_BASE_URL.startsWith('https://'))

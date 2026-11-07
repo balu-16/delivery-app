@@ -14,6 +14,10 @@ import { INVENTORY_RETURNS } from './contracts/returns.js';
 import { PostgresInventoryReturns } from './infrastructure/returns.js';
 import { INVENTORY_QUALITY } from './contracts/quality.js';
 import { PostgresInventoryQuality } from './infrastructure/quality.js';
+import { INVENTORY_SUBSTITUTION_SWAPS } from './contracts/substitution.js';
+import { PostgresSubstitutionSwaps } from './infrastructure/substitution-swap.js';
+import { INVENTORY_PICK_GUIDANCE } from './contracts/pick-guidance.js';
+import { PostgresPickGuidance } from './infrastructure/pick-guidance.js';
 import { INVENTORY_ADJUSTMENTS } from './contracts/adjustments.js';
 import { PostgresAdjustments } from './infrastructure/adjustments.js';
 import { IdentityModule } from '../identity/identity.module.js';
@@ -82,6 +86,16 @@ import { InventoryExpiry } from './infrastructure/expiry.js';
       inject: [PLATFORM_DATABASE],
       useFactory: (db: DatabaseHandle) => new InventoryExpiry(db.db),
     },
+    {
+      provide: INVENTORY_SUBSTITUTION_SWAPS,
+      inject: [PLATFORM_DATABASE],
+      useFactory: (db: DatabaseHandle) => new PostgresSubstitutionSwaps(db.db),
+    },
+    {
+      provide: INVENTORY_PICK_GUIDANCE,
+      inject: [PLATFORM_DATABASE],
+      useFactory: (db: DatabaseHandle) => new PostgresPickGuidance(db.db),
+    },
   ],
   exports: [
     INVENTORY_AVAILABILITY,
@@ -92,6 +106,8 @@ import { InventoryExpiry } from './infrastructure/expiry.js';
     INVENTORY_RETURNS,
     INVENTORY_SHELF_LIFE,
     INVENTORY_MANUAL_ADJUSTMENT,
+    INVENTORY_SUBSTITUTION_SWAPS,
+    INVENTORY_PICK_GUIDANCE,
     InventoryExpiry,
   ],
 })

@@ -36,7 +36,7 @@ The consolidated local run and its tool/service versions are recorded in [PROGRE
 | CON-01 | Two users buy the last unit simultaneously → exactly one succeeds | P4, P6 | `inventory-reservations.conc` :: `last_unit_has_one_winner`; `hundred_requests_reserve_only_ten_units` |
 | CON-02 | Same user double-taps "Place order" / retries after timeout → one order (idempotency) | P0, P6 | `checkout-idempotency.conc` :: `double_submit_creates_one_order`; `crash_after_commit_resumes_existing_order` |
 | CON-03 | Cancel and payment-capture arrive together → serialised, consistent final state | P6 | `payment-cancel.conc` :: `capture_then_cancel`; `cancel_then_capture_refunds_once` |
-| CON-04 | Cancel and pick-complete race; cancel and rider pickup race | P7, P8 | `fulfillment-cancel.conc` :: `cancel_vs_complete`; `cancel_vs_pickup_preserves_custody` |
+| CON-04 | Cancel and pick-complete race; cancel and rider pickup race | P7, P8 | [Pick cancel/complete race](../test/concurrency/picking/claim.spec.ts) :: `cancel_and_pick_complete_serialize_into_one_consistent_terminal_state` (rider-pickup half is P8) |
 | CON-05 | Two riders accept one offer; rider accepts after expiry | P8 | `dispatch-accept.conc` :: `one_assignment_wins`; `expired_offer_cannot_assign` |
 | CON-06 | Modify subscription vs generation job race | P10 | `subscription-generation.conc` :: `schedule_mutation_serializes_with_generation` |
 | CON-07 | Concurrent wallet spends from two devices; coupon over-redemption | P5, P6 | `wallet-spend.conc` :: `balance_never_negative`; `coupon-quota.conc` :: `global_and_per_user_limits_hold` |
@@ -67,7 +67,7 @@ PAY-10 follows plan decision D19: before invoice issuance, shorts adjust the fut
 | ID | Source checklist item | Phases | Planned suite :: case(s) |
 |---|---|---|---|
 | INV-01 | Reservation expiry sweep releases stock; late payment after sweep | P4, P6 | `reservation-expiry.int` :: `expired_hold_releases_once`; `committed_reservation_survives_sweep`; `capture_after_release_refunds` |
-| INV-02 | Shortage at pick; all items short; damaged/expired batches; FEFO order | P4, P7 | `picking-inventory.int` :: `partial_short_releases_correct_quantity`; `all_short_cancels`; `damaged_expired_batches_excluded`; `fefo_uses_eligible_earliest_batch` |
+| INV-02 | Shortage at pick; all items short; damaged/expired batches; FEFO order | P4, P7 | [Picking integration](../test/integration/picking/picking.spec.ts) :: `shorts_mark_the_remainder_completion_consumes_picked_stock_and_reports_the_adjustment_once`; [fulfillment](../test/integration/picking/fulfillment.spec.ts) :: `an_all_short_task_goes_through_the_shared_cancel_routine_and_never_completes`, `fefe_suggestions_order_by_earliest_expiry_and_exclude_expired_batches` (damaged/quarantined exclusion reuses the P4 eligibility filter) |
 | INV-03 | Item unpublished or price changed while in cart → flagged, never silently altered at payment | P3, P5, P6 | `cart-quote.api` :: `unpublished_item_is_issue`; `price_change_requires_confirmation`; `checkout_revalidates_price_version` |
 | INV-04 | Store switch on address change re-evaluates cart | P5 | `cart-store-change.api` :: `unavailable_lines_retained_as_issues_and_new_prices_confirmed` |
 | INV-05 | Import: duplicate SKUs, bad GST, BOM/encoding, huge file, re-run idempotency | P3 | `catalog-import.int` :: `duplicate_and_tax_validation`; `bom_utf8_and_size_limits`; `repeat_real_import_is_noop`; `dry_run_does_not_suppress_real_run` |
@@ -88,7 +88,7 @@ PAY-10 follows plan decision D19: before invoice issuance, shorts adjust the fut
 | DSP-01 | No rider available (radius widening, admin alert, auto-cancel threshold) | P8 | `dispatch-recovery.int` :: `widen_backoff_alert_then_configured_cancel` |
 | DSP-02 | Rider silent before vs after pickup; app crash/reinstall resume; rider suspended mid-task | P8 | `rider-custody.int` :: `before_pickup_redispatch`; `after_pickup_escalate`; `current_task_restores_session`; `suspension_preserves_custody` |
 | DSP-03 | Mock GPS, teleport, stale or out-of-order points, oversized batches | P8 | `location-ingest.api` :: `integrity_policy_for_mock_accuracy_teleport`; `newer_point_wins`; `future_skew_and_batch_limits` |
-| DSP-04 | Wrong handover code; wrong delivery code attempts limit; contactless proof-of-delivery | P7, P8 | `delivery-proof.api` :: `handover_attempts_and_manager_override`; `delivery_attempt_limit_persists`; `owned_pod_media_required` |
+| DSP-04 | Wrong handover code; wrong delivery code attempts limit; contactless proof-of-delivery | P7, P8 | [Handover verification](../test/integration/picking/fulfillment.spec.ts) :: `handover_verification_is_attempt_limited_lockable_and_manager_override_is_audited`; delivery-code attempts and contactless POD are P8 |
 | DSP-05 | Customer unreachable / wrong address / failed delivery → RTO → QC → restock | P7, P8 | `failed-delivery.e2e` :: `wait_contact_fail_return_qc_resellable_or_damage` |
 | DSP-06 | Cash-in-hand limit blocks COD offers; settlement discrepancies | P8, P11 | `rider-cash.int` :: `cod_assignment_checks_current_cash_limit`; `deposit_discrepancy_is_audited`; `payout_nets_dues_once` |
 
@@ -151,7 +151,7 @@ These cover gaps that are not separate source Section 34 bullets. Their full-pro
 | ADD-13 | P6 | `refund-allocation.conc` :: concurrent pending refunds and wallet reversals cannot refund more than funded or restore the same bucket twice. |
 | ADD-14 | P6 | `invoice-issue.conc` :: rollback consumes no committed document number; rendering failure reuses the issued number and immutable payload. |
 | ADD-15 | P6 | `delivery-code.int` :: authorized code retrieval survives process restart/key rotation, stores no plaintext, and attempt lockout remains effective. |
-| ADD-16 | P7 | `substitution.conc` :: replacement reservation cannot oversell; original reservation is released once; final charge does not exceed the original allocation. |
+| ADD-16 | P7 | [Substitution race](../test/concurrency/picking/claim.spec.ts) :: `substitution_cannot_oversell_exactly_one_contending_reservation_wins`; [guards and reconciliation](../test/integration/picking/fulfillment.spec.ts) :: `substitution_guards_fail_closed_and_a_listed_swap_reconciles_reservations` (charge cap executes through the P6 adjustment contract). |
 | ADD-17 | P8 | `geo-expiry.int` :: expired rider hash/stale heartbeat excludes a remaining GEO member from assignment. |
 | ADD-18 | P8 | `rider-capacity.conc` :: one rider accepting two different tasks cannot exceed configured task or COD cash limits. |
 | ADD-19 | P8 | `location-sampling.int` :: timestamp ordering is atomic across ingest instances; 15-second OR 50-metre sampling and partition rollover work. |
@@ -170,7 +170,7 @@ These cover gaps that are not separate source Section 34 bullets. Their full-pro
 | SYS-03 | Order totals reconcile to the paisa | Pure bigint quote/allocation and frozen fulfillment adjustment model; PAY-10, ADD-01, ADD-16. |
 | SYS-04 | Applied funding is unique and refunds do not exceed captured funds | Canonical capture/refund commitments under order locks; PAY-05, PAY-07, ADD-13. Additional external captures are detected/refunded per D18. |
 | SYS-05 | One active rider per task and bounded tasks per rider | Conditional task assignment plus rider capacity locks; CON-05, ADD-18. |
-| SYS-06 | At most one active delivery and pick task per order | Unique order/task keys and idempotent confirmation consumers; P7/P8 task-creation integration tests and CON-09. |
+| SYS-06 | At most one active delivery and pick task per order | Unique order/task keys and idempotent confirmation consumers; [pick half](../test/integration/picking/picking.spec.ts) :: `the_confirmation_consumer_creates_exactly_one_task_per_order_with_walk_ordered_items`; delivery half is P8. |
 | SYS-07 | Coupon limits never exceeded | Locked global/user quota counters and reversible redemption records; CON-07 and P5 50-attempt/10-use concurrency test. |
 | SYS-08 | State/history/event persist together | Shared transition transaction and rollback tests across aggregates; CON-03, CON-04, CON-09 and P0 transition integration suite. |
 | SYS-09 | Gapless unique issued invoice numbers, immutable documents | Counter/document insertion in one transaction, immutable grants, out-of-transaction rendering; TIM-01, ADD-14. |

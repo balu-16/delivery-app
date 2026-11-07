@@ -18,6 +18,7 @@ import { IdentitySyncWorkerModule } from '../modules/identity/identity-worker.mo
 import { CatalogImportWorkerModule } from '../modules/catalog/catalog.module.js';
 import { MediaWorkerModule } from '../modules/media/media-worker.module.js';
 import { InventoryWorkerModule } from '../modules/inventory/inventory-worker.module.js';
+import { PickingWorkerModule } from '../modules/picking/picking.module.js';
 
 export const surfaceModules = {
   customer: CustomerSurfaceModule,
@@ -47,6 +48,7 @@ export class RoleModule {
               CatalogImportWorkerModule,
               MediaWorkerModule,
               InventoryWorkerModule,
+              PickingWorkerModule,
             ]
           : []),
         ...surfacesFor(env.APP_ROLE).map((surface) => surfaceModules[surface]),

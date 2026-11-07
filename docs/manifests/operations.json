@@ -2394,7 +2394,7 @@
       "id": "GET-v1-store-kpis",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "GET",
       "path": "/v1/store/kpis",
@@ -2402,13 +2402,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "GET-v1-store-orders",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "GET",
       "path": "/v1/store/orders",
@@ -2416,13 +2421,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "POST-v1-store-orders-id-handover",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/orders/{id}/handover",
@@ -2430,13 +2440,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "POST-v1-store-orders-id-pack",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/orders/{id}/pack",
@@ -2444,13 +2459,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "GET-v1-store-pick-tasks",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "GET",
       "path": "/v1/store/pick-tasks",
@@ -2458,13 +2478,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "POST-v1-store-pick-tasks-id-claim",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/pick-tasks/{id}/claim",
@@ -2472,13 +2497,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "POST-v1-store-pick-tasks-id-complete",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/pick-tasks/{id}/complete",
@@ -2486,13 +2516,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "POST-v1-store-pick-tasks-id-items-itemId-pick",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/pick-tasks/{id}/items/{itemId}/pick",
@@ -2500,13 +2535,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "POST-v1-store-pick-tasks-id-items-itemId-short",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/pick-tasks/{id}/items/{itemId}/short",
@@ -2514,13 +2554,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "POST-v1-store-pick-tasks-id-items-itemId-substitute",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/pick-tasks/{id}/items/{itemId}/substitute",
@@ -2528,13 +2573,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "POST-v1-store-pick-tasks-id-reassign",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/pick-tasks/{id}/reassign",
@@ -2542,13 +2592,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "POST-v1-store-pick-tasks-id-start",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/pick-tasks/{id}/start",
@@ -2556,13 +2611,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "POST-v1-store-returns-id-qc",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "POST",
       "path": "/v1/store/returns/{id}/qc",
@@ -2570,13 +2630,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "required for money/stock effects",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "GET-v1-store-sla-board",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "GET",
       "path": "/v1/store/sla-board",
@@ -2584,13 +2649,18 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "GET-v1-store-staff",
       "sourceSection": "22",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "surface": "store",
       "method": "GET",
       "path": "/v1/store/staff",
@@ -2598,7 +2668,12 @@
       "scope": "store",
       "rateLimit": "default",
       "idempotency": "read-only",
-      "testFiles": []
+      "testFiles": [
+        "test/integration/picking/picking.spec.ts",
+        "test/integration/picking/fulfillment.spec.ts",
+        "test/concurrency/picking/claim.spec.ts",
+        "test/unit/picking/policy.spec.ts"
+      ]
     },
     {
       "id": "GET-v1-customer-orders-id-delivery-code",

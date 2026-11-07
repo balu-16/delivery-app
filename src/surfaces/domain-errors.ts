@@ -92,9 +92,34 @@ export class DomainErrorInterceptor implements NestInterceptor {
             'CART_INTENT_CONSUMED',
             'REFUND_LIMIT_EXCEEDED',
             'PAYMENT_WINDOW_EXPIRED',
+            'PICK_TASK_STATE_INVALID',
+            'NOT_TASK_OWNER',
+            'ITEM_ALREADY_RESOLVED',
+            'PICKER_AT_CAPACITY',
+            'PICK_TASK_INCOMPLETE',
+            'PICK_TASK_NOT_COMPLETE',
+            'WRONG_ITEM',
+            'SUBSTITUTION_DISABLED',
+            'SUBSTITUTION_NOT_PERMITTED',
+            'SUBSTITUTION_STATE_INVALID',
+            'HANDOVER_CODE_INVALID',
+            'HANDOVER_LOCKED',
+            'HANDOVER_NOT_READY',
           ].includes(code)
         )
           status = 409;
+        else if (
+          [
+            'INVALID_CURSOR',
+            'INVALID_SHORT_REASON',
+            'INVALID_BATCH',
+            'BATCH_REQUIRED',
+            'INVALID_TARGET_TIME',
+          ].includes(code)
+        )
+          status = 400;
+        else if (['FULFILLMENT_DEPENDENCY_UNAVAILABLE', 'GATEWAY_OUTCOME_UNKNOWN'].includes(code))
+          status = 503;
         else if (code === 'IMPORT_TOO_LARGE') status = 413;
         else if (['ExternalServiceUnavailable', 'ExternalServiceTimeout'].includes(code))
           status = 503;

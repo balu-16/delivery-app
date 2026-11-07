@@ -28,11 +28,18 @@ import { CatalogImportDispatcher } from './infrastructure/import-dispatcher.js';
 import { CatalogImportWorker } from './infrastructure/import-worker.js';
 import { SEARCH_PORT } from './contracts/search.js';
 import { CATALOG_ADMIN, CATALOG_QUERY } from './contracts/catalog.js';
+import { CATALOG_LOOKUP } from './contracts/lookup.js';
 import { PostgresCatalogAdmin } from './infrastructure/catalog-admin.js';
 import { PostgresCatalogQuery } from './infrastructure/catalog-query.js';
+import { PostgresCatalogLookup } from './infrastructure/lookup.js';
 @Module({
   imports: [IdentityModule, AppConfigModule, ComplianceModule],
   providers: [
+    {
+      provide: CATALOG_LOOKUP,
+      inject: [PLATFORM_DATABASE],
+      useFactory: (db: DatabaseHandle) => new PostgresCatalogLookup(db.db),
+    },
     {
       provide: CATALOG_ADMIN,
       inject: [PLATFORM_DATABASE, IDENTITY_ACCESS, APP_CONFIG, APPROVAL_FACTORY],
@@ -56,7 +63,7 @@ import { PostgresCatalogQuery } from './infrastructure/catalog-query.js';
     },
     { provide: SEARCH_PORT, useExisting: CATALOG_QUERY },
   ],
-  exports: [CATALOG_ADMIN, CATALOG_QUERY, SEARCH_PORT],
+  exports: [CATALOG_ADMIN, CATALOG_QUERY, CATALOG_LOOKUP, SEARCH_PORT],
 })
 export class CatalogModule {}
 

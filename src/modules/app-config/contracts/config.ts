@@ -57,6 +57,10 @@ export interface ConfigValues {
   mapFallbackSpeedKph: number;
   storeBacklogPauseThreshold: number;
   storeNoRidersPauseMinutes: number;
+  pickingSlaMinutes: number;
+  maxActivePickTasksPerPicker: number;
+  handoverMaxAttempts: number;
+  handoverLockoutSeconds: number;
   etaMinMinutes: number;
   etaMaxMinutes: number;
   requiredRiderDocuments: string[];

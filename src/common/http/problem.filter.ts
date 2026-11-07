@@ -111,10 +111,27 @@ export function createProblem(status: number, traceId: string, supplied?: unknow
       'BATCH_NOT_ELIGIBLE',
       'RETURN_QUANTITY_EXCEEDED',
       'REPORT_NOT_READY',
+      'PICK_TASK_STATE_INVALID',
+      'NOT_TASK_OWNER',
+      'ITEM_ALREADY_RESOLVED',
+      'PICKER_AT_CAPACITY',
+      'PICK_TASK_INCOMPLETE',
+      'PICK_TASK_NOT_COMPLETE',
+      'WRONG_ITEM',
+      'SUBSTITUTION_DISABLED',
+      'SUBSTITUTION_NOT_PERMITTED',
+      'SUBSTITUTION_STATE_INVALID',
+      'HANDOVER_CODE_INVALID',
+      'HANDOVER_LOCKED',
+      'HANDOVER_NOT_READY',
     ],
     413: ['IMPORT_TOO_LARGE'],
     502: ['ExternalServiceRejected'],
-    503: ['ExternalServiceUnavailable', 'ExternalServiceTimeout'],
+    503: [
+      'ExternalServiceUnavailable',
+      'ExternalServiceTimeout',
+      'FULFILLMENT_DEPENDENCY_UNAVAILABLE',
+    ],
   };
   const [title, fallback] = names[status] ?? ['Internal Server Error', 'INTERNAL_ERROR'];
   const code =

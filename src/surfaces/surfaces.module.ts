@@ -9,6 +9,7 @@ import { AdminCatalogImportSurfaceModule } from './admin/catalog-imports/p3.modu
 import { CatalogMediaSurfaceModule } from './media/p3.module.js';
 import { StoreInventorySurfaceModule } from './store/inventory/p4.module.js';
 import { AdminInventorySurfaceModule } from './admin/inventory/p4.module.js';
+import { StorePickingSurfaceModule } from './store/picking/p7.module.js';
 import {
   AdminIdentitySurfaceModule,
   CustomerIdentitySurfaceModule,
@@ -29,7 +30,12 @@ export class CustomerSurfaceModule {}
 @Module({ imports: [RiderIdentitySurfaceModule] })
 export class RiderSurfaceModule {}
 @Module({
-  imports: [StoreIdentitySurfaceModule, StoreStatusSurfaceModule, StoreInventorySurfaceModule],
+  imports: [
+    StoreIdentitySurfaceModule,
+    StoreStatusSurfaceModule,
+    StoreInventorySurfaceModule,
+    StorePickingSurfaceModule,
+  ],
 })
 export class StoreSurfaceModule {}
 @Module({
