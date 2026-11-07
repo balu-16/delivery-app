@@ -111,6 +111,11 @@ export class DomainErrorInterceptor implements NestInterceptor {
         else if (
           [
             'INVALID_CURSOR',
+            'INVALID_BATCH_SIZE',
+            'INVALID_ATTEMPT',
+            'INVALID_DEDUPE_INPUT',
+            'INVALID_INSTANT',
+            'INVALID_QUIET_WINDOW',
             'INVALID_SHORT_REASON',
             'INVALID_BATCH',
             'BATCH_REQUIRED',

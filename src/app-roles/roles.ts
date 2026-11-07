@@ -19,6 +19,7 @@ import { CatalogImportWorkerModule } from '../modules/catalog/catalog.module.js'
 import { MediaWorkerModule } from '../modules/media/media-worker.module.js';
 import { InventoryWorkerModule } from '../modules/inventory/inventory-worker.module.js';
 import { PickingWorkerModule } from '../modules/picking/picking.module.js';
+import { NotificationsWorkerModule } from '../modules/notifications/notifications-worker.module.js';
 import { RealtimeModule } from '../platform/realtime/realtime.module.js';
 
 export const surfaceModules = {
@@ -55,6 +56,7 @@ export class RoleModule {
               MediaWorkerModule,
               InventoryWorkerModule,
               PickingWorkerModule,
+              NotificationsWorkerModule,
             ]
           : []),
         ...surfacesFor(env.APP_ROLE).map((surface) => surfaceModules[surface]),

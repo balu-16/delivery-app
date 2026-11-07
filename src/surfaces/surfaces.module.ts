@@ -10,6 +10,10 @@ import { CatalogMediaSurfaceModule } from './media/p3.module.js';
 import { StoreInventorySurfaceModule } from './store/inventory/p4.module.js';
 import { AdminInventorySurfaceModule } from './admin/inventory/p4.module.js';
 import { StorePickingSurfaceModule } from './store/picking/p7.module.js';
+import { CustomerNotificationsSurfaceModule } from './customer/notifications/p9.module.js';
+import { RiderNotificationsSurfaceModule } from './rider/notifications/p9.module.js';
+import { StoreNotificationsSurfaceModule } from './store/notifications/p9.module.js';
+import { AdminNotificationsSurfaceModule } from './admin/notifications/p9.module.js';
 import {
   AdminIdentitySurfaceModule,
   CustomerIdentitySurfaceModule,
@@ -24,10 +28,11 @@ import {
     CustomerPlacesSurfaceModule,
     CustomerCatalogSurfaceModule,
     CatalogMediaSurfaceModule,
+    CustomerNotificationsSurfaceModule,
   ],
 })
 export class CustomerSurfaceModule {}
-@Module({ imports: [RiderIdentitySurfaceModule] })
+@Module({ imports: [RiderIdentitySurfaceModule, RiderNotificationsSurfaceModule] })
 export class RiderSurfaceModule {}
 @Module({
   imports: [
@@ -35,6 +40,7 @@ export class RiderSurfaceModule {}
     StoreStatusSurfaceModule,
     StoreInventorySurfaceModule,
     StorePickingSurfaceModule,
+    StoreNotificationsSurfaceModule,
   ],
 })
 export class StoreSurfaceModule {}
@@ -47,6 +53,7 @@ export class StoreSurfaceModule {}
     AdminCatalogImportSurfaceModule,
     CatalogMediaSurfaceModule,
     AdminInventorySurfaceModule,
+    AdminNotificationsSurfaceModule,
   ],
 })
 export class AdminSurfaceModule {}

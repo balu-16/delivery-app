@@ -265,6 +265,87 @@
       "consumers": [],
       "plannedConsumers": ["notifications", "audit"],
       "note": "One breach row per task; the SLA worker also feeds the store auto-pause evaluator and passes rider availability through."
+    },
+    {
+      "id": "rider.offer_created",
+      "eventType": "rider.offer_created",
+      "sourceSection": "23.2",
+      "phase": "P8",
+      "status": "planned",
+      "producers": ["dispatch"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "rider.offer_revoked",
+      "eventType": "rider.offer_revoked",
+      "sourceSection": "23.2",
+      "phase": "P8",
+      "status": "planned",
+      "producers": ["dispatch"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "rider.document_approved",
+      "eventType": "rider.document_approved",
+      "sourceSection": "13",
+      "phase": "P8",
+      "status": "planned",
+      "producers": ["identity"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "rider.document_rejected",
+      "eventType": "rider.document_rejected",
+      "sourceSection": "13",
+      "phase": "P8",
+      "status": "planned",
+      "producers": ["identity"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "dispatch.no_rider",
+      "eventType": "dispatch.no_rider",
+      "sourceSection": "23.2",
+      "phase": "P8",
+      "status": "planned",
+      "producers": ["dispatch"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "delivery.completed",
+      "eventType": "delivery.completed",
+      "sourceSection": "23.3",
+      "phase": "P8",
+      "status": "planned",
+      "producers": ["dispatch"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "delivery.failed",
+      "eventType": "delivery.failed",
+      "sourceSection": "23.3",
+      "phase": "P8",
+      "status": "planned",
+      "producers": ["dispatch"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "reconciliation.finding",
+      "eventType": "reconciliation.finding",
+      "sourceSection": "20.4",
+      "phase": "P6",
+      "status": "planned",
+      "producers": ["payments"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "marketing.campaign",
+      "eventType": "marketing.campaign",
+      "sourceSection": "24.1",
+      "phase": "P9",
+      "status": "planned",
+      "producers": ["operations"],
+      "consumers": ["notifications"]
     }
   ]
 }
