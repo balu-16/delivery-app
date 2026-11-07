@@ -318,9 +318,16 @@ export class PostgresPickActions {
         tx,
       );
       await taskHistory(tx, taskId, task.status, 'COMPLETED', actorId);
-      await taskEvent(tx, taskId, task.order_id, 'picking.task_completed', {
-        completedAt: now.toISOString(),
-      });
+      await taskEvent(
+        tx,
+        taskId,
+        task.order_id,
+        'picking.task_completed',
+        {
+          completedAt: now.toISOString(),
+        },
+        ['dispatch', 'notifications'],
+      );
       return this.view(tx, taskId);
     });
   }

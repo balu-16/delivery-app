@@ -44,3 +44,18 @@ export interface PickPacking {
     reference: string,
   ): Promise<{ packedAt: string }>;
 }
+
+/** Custody handoff read for P8: the rider can only pick up a verified handover. */
+export const HANDOVER_STATUS = Symbol('HANDOVER_STATUS');
+export interface HandoverStatus {
+  verified(orderId: string): Promise<boolean>;
+}
+export interface PickPacking {
+  /** Records bags/seal/cold-chain and marks the order packed through P6. */
+  pack(
+    actorId: string,
+    orderId: string,
+    input: PackInput,
+    reference: string,
+  ): Promise<{ packedAt: string }>;
+}

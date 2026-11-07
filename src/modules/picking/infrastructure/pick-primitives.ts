@@ -63,22 +63,28 @@ export async function taskHistory(
   );
 }
 
-/** Aggregate-scoped change event; consumers are attached in later phases. */
+/** Aggregate-scoped change event; consumers create durable delivery obligations. */
 export async function taskEvent(
   tx: TransactionContext,
   taskId: string,
   orderId: string,
   eventType: string,
   payload: Record<string, unknown>,
+  consumers: readonly string[] = [],
 ): Promise<void> {
   const version = await sql<{
     v: string;
   }>`SELECT COALESCE(max(version),0)+1 AS v FROM pick_task_history WHERE task_id=${taskId}::uuid`.execute(
     tx,
   );
-  await sql`INSERT INTO outbox_events(id,event_type,schema_version,aggregate_type,aggregate_id,aggregate_version,correlation_id,payload) VALUES(${uuidV7()}::uuid,${eventType},1,'pick_task',${taskId}::uuid,${version.rows[0]!.v}::bigint,${orderId},${JSON.stringify({ taskId, orderId, ...payload })}::jsonb)`.execute(
+  const eventId = uuidV7();
+  await sql`INSERT INTO outbox_events(id,event_type,schema_version,aggregate_type,aggregate_id,aggregate_version,correlation_id,payload) VALUES(${eventId}::uuid,${eventType},1,'pick_task',${taskId}::uuid,${version.rows[0]!.v}::bigint,${orderId},${JSON.stringify({ taskId, orderId, ...payload })}::jsonb)`.execute(
     tx,
   );
+  for (const consumer of consumers)
+    await sql`INSERT INTO outbox_deliveries(event_id,consumer) VALUES(${eventId}::uuid,${consumer})`.execute(
+      tx,
+    );
 }
 
 export type TaskRow = {

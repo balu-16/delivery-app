@@ -11,7 +11,12 @@ import type { ConfigService } from '../../../config/config.service.js';
 import type { IdentityAccess } from '../../identity/contracts/identity.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import type { OrderFulfillment } from '../contracts/fulfillment.js';
-import type { HandoverCodes, PackInput, PickPacking } from '../contracts/packing.js';
+import type {
+  HandoverCodes,
+  HandoverStatus,
+  PackInput,
+  PickPacking,
+} from '../contracts/packing.js';
 import { operation } from './pick-primitives.js';
 
 function deriveCode(secret: string, orderId: string): string {
@@ -20,7 +25,7 @@ function deriveCode(secret: string, orderId: string): string {
 }
 
 /** Packing records and handover verification; the derived code is never stored. */
-export class PostgresPacking implements PickPacking, HandoverCodes {
+export class PostgresPacking implements PickPacking, HandoverCodes, HandoverStatus {
   constructor(
     private readonly db: Database,
     private readonly identity: IdentityAccess,
@@ -72,6 +77,15 @@ export class PostgresPacking implements PickPacking, HandoverCodes {
       }>`SELECT packed_at FROM packing_records WHERE order_id=${orderId}::uuid`.execute(tx);
       return { packedAt: row.rows[0]!.packed_at.toISOString() };
     });
+  }
+
+  async verified(orderId: string): Promise<boolean> {
+    const rows = await sql<{
+      one: number;
+    }>`SELECT 1 AS one FROM handover_records WHERE order_id=${orderId}::uuid AND state IN ('VERIFIED','OVERRIDE')`.execute(
+      this.db,
+    );
+    return rows.rows.length > 0;
   }
 
   async issue(input: { orderId: string; storeId: string }) {

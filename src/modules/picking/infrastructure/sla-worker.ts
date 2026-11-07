@@ -31,7 +31,11 @@ export class PickingSlaWorker {
           );
         if (!inserted.rows.length) continue;
         breaches += 1;
-        await sql`INSERT INTO outbox_events(id,event_type,schema_version,aggregate_type,aggregate_id,aggregate_version,correlation_id,payload) VALUES(${uuidV7()}::uuid,'picking.sla_breached',1,'pick_task',${task.id}::uuid,1::bigint,${task.order_id},${JSON.stringify({ taskId: task.id, orderId: task.order_id, storeId: task.store_id })}::jsonb)`.execute(
+        const breachEventId = uuidV7();
+        await sql`INSERT INTO outbox_events(id,event_type,schema_version,aggregate_type,aggregate_id,aggregate_version,correlation_id,payload) VALUES(${breachEventId}::uuid,'picking.sla_breached',1,'pick_task',${task.id}::uuid,1::bigint,${task.order_id},${JSON.stringify({ taskId: task.id, orderId: task.order_id, storeId: task.store_id })}::jsonb)`.execute(
+          tx,
+        );
+        await sql`INSERT INTO outbox_deliveries(event_id,consumer) VALUES(${breachEventId}::uuid,'notifications')`.execute(
           tx,
         );
       }

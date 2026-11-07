@@ -148,11 +148,18 @@ export class PostgresPickTasks implements PickTasks {
         tx,
       );
       await taskHistory(tx, taskId, task.status, 'ASSIGNED', actorId);
-      await taskEvent(tx, taskId, task.order_id, 'picking.task_changed', {
-        previous: task.status,
-        status: 'ASSIGNED',
-        assignedTo: actorId,
-      });
+      await taskEvent(
+        tx,
+        taskId,
+        task.order_id,
+        'picking.task_changed',
+        {
+          previous: task.status,
+          status: 'ASSIGNED',
+          assignedTo: actorId,
+        },
+        ['dispatch', 'notifications'],
+      );
       return { task: await this.view(tx, await loadTask(tx, taskId, false)) };
     });
   }
@@ -174,10 +181,17 @@ export class PostgresPickTasks implements PickTasks {
         tx,
       );
       await taskHistory(tx, taskId, task.status, 'IN_PROGRESS', actorId);
-      await taskEvent(tx, taskId, task.order_id, 'picking.task_changed', {
-        previous: task.status,
-        status: 'IN_PROGRESS',
-      });
+      await taskEvent(
+        tx,
+        taskId,
+        task.order_id,
+        'picking.task_changed',
+        {
+          previous: task.status,
+          status: 'IN_PROGRESS',
+        },
+        ['dispatch', 'notifications'],
+      );
       // The order state machine (P6) moves CONFIRMED→PICKING in this transaction.
       await this.fulfillment.startPicking(task.order_id, actorId, tx);
       return this.view(tx, await loadTask(tx, taskId, false));
@@ -221,12 +235,19 @@ export class PostgresPickTasks implements PickTasks {
         tx,
       );
       await taskHistory(tx, taskId, task.status, 'ASSIGNED', actorId, reason);
-      await taskEvent(tx, taskId, task.order_id, 'picking.task_changed', {
-        previous: task.status,
-        status: 'ASSIGNED',
-        assignedTo: toUserId,
-        reason,
-      });
+      await taskEvent(
+        tx,
+        taskId,
+        task.order_id,
+        'picking.task_changed',
+        {
+          previous: task.status,
+          status: 'ASSIGNED',
+          assignedTo: toUserId,
+          reason,
+        },
+        ['dispatch', 'notifications'],
+      );
       return this.view(tx, await loadTask(tx, taskId, false));
     });
   }

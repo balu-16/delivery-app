@@ -46,7 +46,7 @@ import {
   type OrderFulfillment,
   type OrderFulfillmentReads,
 } from './contracts/fulfillment.js';
-import { HANDOVER_CODES, PICK_PACKING } from './contracts/packing.js';
+import { HANDOVER_CODES, HANDOVER_STATUS, PICK_PACKING } from './contracts/packing.js';
 import { PICK_CANCELLATION, PICK_TASKS } from './contracts/tasks.js';
 import { OrderConfirmedConsumer } from './infrastructure/confirmation-consumer.js';
 import { PickingSlaWorker } from './infrastructure/sla-worker.js';
@@ -169,12 +169,14 @@ export const PICKING_CONSUMER = 'picking';
     },
     { provide: PICK_PACKING, useExisting: PostgresPacking },
     { provide: HANDOVER_CODES, useExisting: PostgresPacking },
+    { provide: HANDOVER_STATUS, useExisting: PostgresPacking },
   ],
   exports: [
     PICK_TASKS,
     PICK_CANCELLATION,
     PICK_PACKING,
     HANDOVER_CODES,
+    HANDOVER_STATUS,
     ORDER_FULFILLMENT,
     FINANCIAL_ADJUSTMENTS,
     ORDER_CANCELLATION,

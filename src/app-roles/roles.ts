@@ -19,6 +19,7 @@ import { CatalogImportWorkerModule } from '../modules/catalog/catalog.module.js'
 import { MediaWorkerModule } from '../modules/media/media-worker.module.js';
 import { InventoryWorkerModule } from '../modules/inventory/inventory-worker.module.js';
 import { PickingWorkerModule } from '../modules/picking/picking.module.js';
+import { RealtimeModule } from '../platform/realtime/realtime.module.js';
 
 export const surfaceModules = {
   customer: CustomerSurfaceModule,
@@ -29,6 +30,10 @@ export const surfaceModules = {
 export type Surface = keyof typeof surfaceModules;
 export function surfacesFor(role: Env['APP_ROLE']): Surface[] {
   return role === 'all' ? ['customer', 'rider', 'store', 'admin'] : role === 'worker' ? [] : [role];
+}
+/** D06: customer sockets on customer/all, rider sockets on rider/all; never on other roles. */
+export function ownsRealtime(role: Env['APP_ROLE']): boolean {
+  return role === 'customer' || role === 'rider' || role === 'all';
 }
 
 /** The composition root receives provider-only infrastructure; surface modules own controllers. */
@@ -41,6 +46,7 @@ export class RoleModule {
       imports: [
         RuntimeConfigModule.forRoot(env),
         probes ? PlatformModule.forMetadata(env, probes) : PlatformModule.forRoot(env),
+        ...(ownsRealtime(env.APP_ROLE) && !probes ? [RealtimeModule.forRoot(env)] : []),
         ...(worker
           ? [
               StoresModule,

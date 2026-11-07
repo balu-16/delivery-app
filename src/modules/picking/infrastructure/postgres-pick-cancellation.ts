@@ -30,11 +30,18 @@ export class PostgresPickCancellation implements PickCancellation {
           tx,
         );
         await taskHistory(tx, task.id, task.status, 'CANCELLED', null, reason);
-        await taskEvent(tx, task.id, orderId, 'picking.task_changed', {
-          previous: task.status,
-          status: 'CANCELLED',
-          reason,
-        });
+        await taskEvent(
+          tx,
+          task.id,
+          orderId,
+          'picking.task_changed',
+          {
+            previous: task.status,
+            status: 'CANCELLED',
+            reason,
+          },
+          ['dispatch', 'notifications'],
+        );
       }
     };
     if (outer) await run(outer);

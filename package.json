@@ -36,6 +36,7 @@
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "3.1162.0",
     "@aws-sdk/client-s3": "3.1162.0",
+    "@aws-sdk/client-sesv2": "^3.1163.0",
     "@aws-sdk/s3-presigned-post": "3.1162.0",
     "@aws-sdk/s3-request-presigner": "3.1162.0",
     "@fastify/cors": "11.4.1",
@@ -44,6 +45,7 @@
     "@nestjs/core": "12.4.0",
     "@nestjs/platform-fastify": "12.4.0",
     "@nestjs/swagger": "12.1.1",
+    "@socket.io/redis-adapter": "^8.3.0",
     "aws-jwt-verify": "5.2.1",
     "bullmq": "6.7.0",
     "class-transformer": "0.5.1",
@@ -51,14 +53,17 @@
     "csv-parse": "7.0.3",
     "fastify": "5.12.8",
     "fastify-raw-body": "6.0.3",
+    "firebase-admin": "^14.5.0",
     "ioredis": "6.0.0",
     "jose": "6.2.15",
     "kysely": "0.29.8",
     "node-pg-migrate": "9.0.0",
+    "nodemailer": "^10.3.1",
     "pg": "8.23.1",
     "pino": "10.4.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
+    "socket.io": "^4.8.4",
     "zod": "4.6.7"
   },
   "devDependencies": {
@@ -66,6 +71,7 @@
     "@eslint/js": "10.0.1",
     "@types/jest": "30.0.0",
     "@types/node": "26.6.6",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "8.23.1",
     "@types/supertest": "7.2.1",
     "eslint": "10.14.0",
@@ -73,6 +79,7 @@
     "jest": "30.5.2",
     "lint-staged": "17.6.0",
     "prettier": "3.9.10",
+    "socket.io-client": "^4.8.4",
     "supertest": "7.3.1",
     "testcontainers": "12.2.1",
     "ts-jest": "29.4.15",
@@ -80,5 +87,11 @@
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@firebase/util",
+      "protobufjs"
+    ]
   }
 }
