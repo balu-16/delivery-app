@@ -70,10 +70,6 @@ export class RealtimeGateway {
         const identity = await spec.authenticate(bearer);
         if (!identity || this.closed) return next(new Error('UNAUTHORIZED'));
         socket.data.identity = identity;
-        const room = `user:${identity.userId}`;
-        await socket.join(room);
-        const snapshotPayload = await spec.snapshot(identity);
-        socket.emit('snapshot', snapshotPayload);
         next();
       } catch {
         next(new Error('UNAUTHORIZED'));
@@ -82,7 +78,15 @@ export class RealtimeGateway {
     // Receive-only: reject every client-initiated event so business commands
     // stay on the authorized HTTP surface.
     namespace.on('connection', (socket: Socket) => {
-      socket.onAny(() => {
+      const identity = socket.data.identity as RealtimeIdentity;
+      void (async () => {
+        // Snapshot after the connection is fully established so the client
+        // listener exists; reconnects resume from the same snapshot.
+        await socket.join(`user:${identity.userId}`);
+        socket.emit('snapshot', await spec.snapshot(identity));
+      })().catch(() => socket.disconnect(true));
+      socket.onAny((event) => {
+        if (event === 'subscribe' || event === 'unsubscribe') return;
         socket.emit('rejected', { code: 'REALTIME_RECEIVE_ONLY' });
       });
       const limit = spec.maxRoomsPerSocket ?? 20;
