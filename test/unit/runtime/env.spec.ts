@@ -65,6 +65,7 @@ describe('production environment', () => {
     OLA_MAPS_API_KEY: 'maps-secret',
     OLA_MAPS_BASE_URL: 'https://maps.example.com',
     METRICS_BEARER_TOKEN: 'a'.repeat(32),
+    PICKING_HANDOVER_SECRET: 'h'.repeat(32),
   };
   it('accepts a complete non-local provider configuration', () => {
     expect(readEnv(production).NODE_ENV).toBe('production');
@@ -89,5 +90,8 @@ describe('production environment', () => {
     expect(() => readEnv({ ...production, S3_PRIVATE_BUCKET: 'media-bucket' })).toThrow(
       /S3_PRIVATE_BUCKET/,
     );
+    expect(() =>
+      readEnv({ ...production, PICKING_HANDOVER_SECRET: 'picking-handover-local-dev-secret-v1' }),
+    ).toThrow(/PICKING_HANDOVER_SECRET/);
   });
 });
