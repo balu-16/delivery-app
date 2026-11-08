@@ -176,8 +176,8 @@ importers:
         specifier: ^3.1163.0
         version: 3.1163.0
       '@aws-sdk/client-sqs':
-        specifier: 3.1162.0
-        version: 3.1162.0
+        specifier: 3.1163.0
+        version: 3.1163.0
       '@aws-sdk/credential-provider-ini':
         specifier: 3.973.26
         version: 3.973.26
@@ -382,8 +382,8 @@ packages:
     resolution: {integrity: sha512-XXAx+6NWTFwA6lnx4i2iH5AQ93HjkgEcnthYUZlhrr+Sg/ttrHyf9/+TmQEPEv5AbKrQ7p21M0ulDl+q60xWBA==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-sqs@3.1162.0':
-    resolution: {integrity: sha512-kSieJZcdV1s2q3Pk4RXkBo4Y4qTY1iTCy37pMs2Xh2jpG1QIxQXYABjejwkZRel/B1isJZAGBd1KRseeF64ArA==}
+  '@aws-sdk/client-sqs@3.1163.0':
+    resolution: {integrity: sha512-DmknybmkX+nk/4EKppjUPqtqmr6zK0AIlKLXC45h+YGLz5OpKt95tI1iQYJi3eKBBhabO+GtZrC3+Zjc//BhJg==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.980.0':
@@ -4162,9 +4162,9 @@ snapshots:
       '@smithy/types': 4.20.0
       tslib: 2.9.1
 
-  '@aws-sdk/client-sqs@3.1162.0':
+  '@aws-sdk/client-sqs@3.1163.0':
     dependencies:
-      '@aws-sdk/core': 3.980.1
+      '@aws-sdk/core': 3.980.0
       '@aws-sdk/credential-provider-node': 3.972.93
       '@aws-sdk/middleware-sdk-sqs': 3.972.48
       '@aws-sdk/types': 3.975.0
