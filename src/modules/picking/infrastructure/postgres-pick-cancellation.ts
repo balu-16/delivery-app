@@ -40,7 +40,7 @@ export class PostgresPickCancellation implements PickCancellation {
             status: 'CANCELLED',
             reason,
           },
-          ['dispatch', 'notifications'],
+          ['notifications'],
         );
       }
     };

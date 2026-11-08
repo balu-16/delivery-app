@@ -62,7 +62,10 @@ for (const file of files) {
     if (to[0] === 'modules' && (from[0] !== 'modules' || from[1] !== to[1])) {
       const composition =
         from[0] === 'app-roles' ||
-        (from[0] === 'modules' && from.length === 3 && from[2] === `${from[1]}.module.ts`) ||
+        (from[0] === 'modules' &&
+          from.length === 3 &&
+          (from[2] === `${from[1]}.module.ts` ||
+            (from[2]?.startsWith(`${from[1]}-`) && from[2]?.endsWith('.module.ts')))) ||
         (from[0] === 'surfaces' && from.at(-1)?.endsWith('.module.ts'));
       const moduleFile =
         to.length === 3 &&

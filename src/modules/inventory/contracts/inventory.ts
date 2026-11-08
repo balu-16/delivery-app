@@ -11,11 +11,14 @@ export interface ReserveInput {
   lines: ReservationLine[];
   targetDeliveryAt: string;
   ttlSeconds: number;
+  /** A stable new cycle reference is required to reacquire resolved stock. */
+  cycleReference?: string;
 }
 export interface PickLine {
   storeId: string;
   variantId: string;
   quantity: string;
+  batches?: { batchId: string; quantity: string }[];
 }
 export interface InventoryReservations {
   reserve(input: ReserveInput, tx?: TransactionContext): Promise<void>;
@@ -33,6 +36,12 @@ export interface ReceiptInput {
   reference: string;
 }
 export interface InventoryManagement {
+  setBinLocation(
+    actor: string,
+    storeId: string,
+    variantId: string,
+    location: string,
+  ): Promise<void>;
   receive(actor: string, input: ReceiptInput): Promise<void>;
   list(
     actor: string,

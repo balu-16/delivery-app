@@ -65,6 +65,14 @@ test('Cognito tokens enforce signature, pool, client, use and expiry and refresh
     verifier.verify(await token({ issuer: 'https://example.invalid' }), 'rider', 'access'),
   ).rejects.toThrow();
   await expect(verifier.verify(await token({ use: 'id' }), 'rider', 'access')).rejects.toThrow();
+  // The configured 60-second grace accepts a slightly expired token.
+  expect(
+    await verifier.verify(
+      await token({ expires: Math.floor(Date.now() / 1000) - 30 }),
+      'rider',
+      'access',
+    ),
+  ).toMatchObject({ sub: 'subject' });
   await expect(
     verifier.verify(
       await token({ expires: Math.floor(Date.now() / 1000) - 61 }),
@@ -80,4 +88,40 @@ test('Cognito tokens enforce signature, pool, client, use and expiry and refresh
     await verifier.verify(await token({ key: two.privateKey, kid: 'key-2' }), 'rider', 'access'),
   ).toMatchObject({ sub: 'subject' });
   expect(fetches).toBe(2);
+});
+
+test('a shared Cognito pool still binds each access token to its application client', async () => {
+  const pair = await generateKeyPair('RS256');
+  const jwk = { ...(await exportJWK(pair.publicKey)), kid: 'shared', alg: 'RS256', use: 'sig' };
+  const cache = new SimpleJwksCache({
+    fetcher: {
+      fetch: async () => new TextEncoder().encode(JSON.stringify({ keys: [jwk] })).buffer,
+    },
+  });
+  const verifier = new CognitoTokenVerifier(
+    {
+      customerPoolId: 'us-east-1_shared',
+      workforcePoolId: 'us-east-1_shared',
+      customerClientId: 'customer',
+      riderClientId: 'rider',
+      storeClientId: 'store',
+      adminClientId: 'admin',
+      region: 'us-east-1',
+    },
+    cache,
+  );
+  const sign = (client: string) =>
+    new SignJWT({ token_use: 'access', client_id: client })
+      .setProtectedHeader({ alg: 'RS256', kid: 'shared' })
+      .setIssuer('https://cognito-idp.us-east-1.amazonaws.com/us-east-1_shared')
+      .setSubject('same-subject')
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(pair.privateKey);
+  const customer = await sign('customer');
+  const admin = await sign('admin');
+  expect((await verifier.verify(customer, 'customer', 'access')).pool).toBe('CUSTOMER');
+  expect((await verifier.verify(admin, 'admin', 'access')).pool).toBe('WORKFORCE');
+  await expect(verifier.verify(customer, 'admin', 'access')).rejects.toThrow();
+  await expect(verifier.verify(admin, 'customer', 'access')).rejects.toThrow();
 });

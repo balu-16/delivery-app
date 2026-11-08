@@ -1,0 +1,23 @@
+# ADR 0014: P13 local hardening and staging acceptance
+
+Status: accepted for implementation, 8 November 2026.
+
+The owner selected local functional, security, resilience, container and measured load-smoke gates, with full-scale load acceptance delivered as a staging handoff. Three GPT-6.1 Terra high agents own API/security, runtime resilience and load tooling; the main agent owns integration, containers, CI and evidence. No nested agents, deployment or Git commits are authorized by this implementation.
+
+The baseline is the P10–P12 ordinary gate of 514 passing tests and selected domain/application line coverage of 95.85%. The historical distributed subscription measurement completed in 488.238 seconds; its opening balances/stock were constructed directly. P13 adds ledger-backed fixtures and reconciliation instead of treating the earlier timing as proof of opening-ledger consistency. The earlier single-wallet timeout remains preserved.
+
+Local profiles run sequentially without competing regression suites. Catalog/search use 20/10 requests per second for five minutes; checkout uses two complete placements per second for five minutes; GPS uses 20 updates per second across 100 riders for five minutes; realtime uses 500 authenticated sockets across two instances. Outbox uses 20 events per second with interruption/recovery. Subscription generation retains its 10,000-order/15-minute gate. Latency budgets remain those in the implementation plan. Explicit load-only rate limits are recorded separately from default-policy abuse tests.
+
+The original full scale is 100 stores with 20,000 eligible SKUs each, 200/100 catalog/search requests per second, 20 checkouts per second for 15 minutes, and 5,000 riders/sockets with 1,000 location updates per second for 30 minutes. These are staging acceptance targets, not a claim about this machine's roughly 3.7 GiB Docker memory allocation.
+
+Authentication route sweeps, role metadata and linked test files are useful but insufficient to establish operation-specific ownership, valid-input behavior or replay. Evidence tracks those criteria separately. Unassessed local criteria remain open; they cannot be reclassified as external checks to produce a pass.
+
+Production activation still needs owner resources and credentials, provider configuration review, live contracts, full-scale staging results and hosted CI. Local fixtures, an emulator and read-only container tests do not establish these checks. Progress records local and external acceptance separately.
+
+Checkout diagnostics exposed two correctness/availability issues. Ordinary quotes used the global catalog cache revision as a pricing identity, so unrelated stock reservations could raise `PRICE_CHANGED`. Migration 030 adds a separate SHA-256 fingerprint of the quoted products, active price identities, amounts, MRP, tax and publication state; availability is rechecked independently and actual exhaustion still fails. The public legacy `priceVersion` remains informational. Old quotes without a fingerprint safely require refresh. Deploy the migration before new application processes; old application instances may still issue legacy quotes during replacement, so clients must handle refresh on a 409. Do not backfill an invented fingerprint into an unvalidated quote.
+
+Ordinary checkout also requested configuration and serviceability through the outer pool while holding a transaction. It now passes the existing transaction through those reads, with a one-connection application regression. Cart pricing batches typed policy reads using the same transaction. Migrations 029 and 030 explicitly reject down migration, retaining migration history instead of pretending an empty down body reverted their protections.
+
+The first full checkout profile failed after 118 confirmations. A later elevated-rate diagnostic revealed false price conflicts and transaction-pool failures; its initial short phases did not establish the backlog hypothesis. After the fixes, both 150-order bursts passed. Waiting for the real picking maintenance cycle confirmed default auto-pause at a backlog of 150 and continued availability at a backlog of 300 with the explicit load-fixture threshold of 20,000. Checkout-only profiles declare that override because they do not run a picking workload. Production defaults and their separate auto-pause tests are unchanged.
+
+App-based tests sharing Redis now derive a unique queue prefix from an exact generated test-database name. Production and non-test databases keep their existing prefix. Two real worker applications verify that isolated databases cannot consume one another's obligations on the same test Redis. This is a test isolation fix, not a change to business idempotency.

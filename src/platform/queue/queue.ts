@@ -45,6 +45,10 @@ export class DurableQueue {
   private recovery?: Promise<void>;
   private readonly maxAttempts: number;
   private readonly onError: (error: Error) => void;
+  private relayClaims = 0;
+  private relayFailures = 0;
+  private jobsCompleted = 0;
+  private jobsFailed = 0;
   private readonly handlers = new Map<string, EventHandler>();
 
   constructor(private readonly options: DurableQueueOptions) {
@@ -88,6 +92,12 @@ export class DurableQueue {
         autorun: options.autorun !== false,
       });
       this.worker.on('error', this.onError);
+      this.worker.on('completed', () => {
+        this.jobsCompleted++;
+      });
+      this.worker.on('failed', () => {
+        this.jobsFailed++;
+      });
     }
   }
   registerHandler(name: string, handler: EventHandler): void {
@@ -126,22 +136,50 @@ export class DurableQueue {
   }
   /** Relay may run on several instances: outbox claim leases coordinate them. */
   async recoverOnce(limit = 50): Promise<number> {
-    return this.outbox.publishDue(async ({ event, consumer }) => {
-      const suffix = createHash('sha256').update(consumer).digest('hex').slice(0, 16);
-      await this.queue.add(
-        'delivery',
-        { eventId: event.eventId, consumer },
-        {
-          jobId: `${event.eventId}-${suffix}`,
-          attempts: 1,
-          removeOnComplete: true,
-          removeOnFail: true,
+    try {
+      const claimed = await this.outbox.publishDue(
+        async ({ event, consumer }) => {
+          const suffix = createHash('sha256').update(consumer).digest('hex').slice(0, 16);
+          await this.queue.add(
+            'delivery',
+            { eventId: event.eventId, consumer },
+            {
+              jobId: `${event.eventId}-${suffix}`,
+              attempts: 1,
+              removeOnComplete: true,
+              removeOnFail: true,
+            },
+          );
+        },
+        limit,
+        () => {
+          this.relayFailures++;
         },
       );
-    }, limit);
+      this.relayClaims += claimed;
+      return claimed;
+    } catch (error) {
+      this.relayFailures++;
+      throw error;
+    }
   }
-  startRecovery(intervalMs = 5000): void {
-    if (!Number.isSafeInteger(intervalMs) || intervalMs < 100 || this.timer)
+  stats(): {
+    relayClaims: number;
+    relayFailures: number;
+    jobsCompleted: number;
+    jobsFailed: number;
+    recovering: boolean;
+  } {
+    return {
+      relayClaims: this.relayClaims,
+      relayFailures: this.relayFailures,
+      jobsCompleted: this.jobsCompleted,
+      jobsFailed: this.jobsFailed,
+      recovering: !!this.recovery,
+    };
+  }
+  startRecovery(intervalMs = 500): void {
+    if (!Number.isSafeInteger(intervalMs) || intervalMs < 100 || intervalMs > 60000 || this.timer)
       throw new Error('INVALID_RECOVERY_INTERVAL');
     if (this.worker && !this.worker.isRunning())
       void this.worker.run().catch((error: Error) => this.onError(error));
@@ -157,6 +195,15 @@ export class DurableQueue {
         });
     }, intervalMs);
     this.timer.unref();
+  }
+  async depths(): Promise<{ waiting: number; active: number; delayed: number; failed: number }> {
+    const counts = await this.queue.getJobCounts('waiting', 'active', 'delayed', 'failed');
+    return {
+      waiting: counts.waiting ?? 0,
+      active: counts.active ?? 0,
+      delayed: counts.delayed ?? 0,
+      failed: counts.failed ?? 0,
+    };
   }
   async ping(): Promise<void> {
     await this.queue.waitUntilReady();

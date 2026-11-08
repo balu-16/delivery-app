@@ -9,6 +9,28 @@ import { quantity } from '../domain/quantity.js';
 import { lockStock, movement, operation } from './stock-primitives.js';
 
 export class PostgresInventoryManagement implements InventoryManagement {
+  async setBinLocation(
+    actor: string,
+    storeId: string,
+    variantId: string,
+    location: string,
+  ): Promise<void> {
+    if (!location.trim() || location.length > 60) throw new Error('INVALID_INPUT');
+    await transactionWithRetry(this.db, async (tx) => {
+      if (!(await this.identity.hasStoreRole(actor, storeId, ['STORE_MANAGER'], tx)))
+        throw new Error('STORE_NOT_FOUND');
+      const updated =
+        await sql`UPDATE store_inventory SET bin_location=${location.trim()},version=version+1
+        WHERE store_id=${storeId}::uuid AND variant_id=${variantId}::uuid RETURNING variant_id`.execute(
+          tx,
+        );
+      if (!updated.rows.length) throw new Error('RESOURCE_NOT_FOUND');
+      await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,${actor}::uuid,
+        'INVENTORY_BIN_UPDATED','store',${storeId},${JSON.stringify({ variantId, binLocation: location.trim() })}::jsonb)`.execute(
+        tx,
+      );
+    });
+  }
   constructor(
     private readonly db: Database,
     private readonly identity: IdentityAccess,
@@ -87,7 +109,7 @@ export class PostgresInventoryManagement implements InventoryManagement {
     if (search.length > 100) throw new Error('INVALID_INPUT');
     const rows = await sql<{
       variantId: string;
-    }>`SELECT i.variant_id AS "variantId",v.sku,v.barcode,p.name,i.on_hand::text AS "onHand",i.reserved::text,a.available::text,i.version::text FROM store_inventory i JOIN catalog_variants v ON v.id=i.variant_id JOIN catalog_products p ON p.id=v.product_id JOIN inventory_saleable_availability a ON a.store_id=i.store_id AND a.variant_id=i.variant_id WHERE i.store_id=${storeId}::uuid AND (${after}::uuid IS NULL OR i.variant_id>${after}::uuid) AND (${lowStock ?? null}::bigint IS NULL OR a.available<=${lowStock ?? null}::bigint) AND (${search}='' OR p.name ILIKE '%'||${search}||'%' OR v.sku ILIKE '%'||${search}||'%' OR v.barcode=${search}) ORDER BY i.variant_id LIMIT ${limit + 1}`.execute(
+    }>`SELECT i.variant_id AS "variantId",i.bin_location AS "binLocation",v.sku,v.barcode,p.name,i.on_hand::text AS "onHand",i.reserved::text,a.available::text,i.version::text FROM store_inventory i JOIN catalog_variants v ON v.id=i.variant_id JOIN catalog_products p ON p.id=v.product_id JOIN inventory_saleable_availability a ON a.store_id=i.store_id AND a.variant_id=i.variant_id WHERE i.store_id=${storeId}::uuid AND (${after}::uuid IS NULL OR i.variant_id>${after}::uuid) AND (${lowStock ?? null}::bigint IS NULL OR a.available<=${lowStock ?? null}::bigint) AND (${search}='' OR p.name ILIKE '%'||${search}||'%' OR v.sku ILIKE '%'||${search}||'%' OR v.barcode=${search}) ORDER BY i.variant_id LIMIT ${limit + 1}`.execute(
       this.db,
     );
     return {

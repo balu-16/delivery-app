@@ -1,0 +1,40 @@
+/** Business policies introduced by subscriptions, support and operations. */
+export interface PhaseConfigValues {
+  subscriptionCutoffTime: string;
+  subscriptionGenerationTime: string;
+  subscriptionGraceRetryTime: string;
+  subscriptionGraceDeadlineTime: string;
+  subscriptionPickLeadMinutes: number;
+  subscriptionDispatchLeadMinutes: number;
+  subscriptionMaxPauseDays: number;
+  subscriptionFailurePauseThreshold: number;
+  subscriptionPriceIncreaseAlertBps: number;
+  subscriptionExtendOnHoliday: boolean;
+  supportFirstResponseSlaHours: number;
+  supportTicketCreationLimitPerHour: number;
+  supportMessageMaxLength: number;
+  supportResolutionSlaHours: number;
+  supportReopenDays: number;
+  ratingWindowHours: number;
+  ratingEditHours: number;
+  ratingAggregateMinimumCount: number;
+  lowRatingThreshold: number;
+  supportDirectRefundLimitPaise: string;
+  supportDailyRefundLimitPaise: string;
+  reportExportMaxRows: number;
+  reportExportMaxBytes: number;
+  reportExportTimeoutSeconds: number;
+  reportExportRetentionDays: number;
+  reportDownloadTtlSeconds: number;
+  notificationRetentionDays: number;
+  responseCacheRetentionHours: number;
+  retentionBatchSize: number;
+  fraudWindowHours: number;
+  fraudFailedPaymentThreshold: number;
+  fraudCancellationThreshold: number;
+  fraudCodRefusalThreshold: number;
+  fraudCouponHoardThreshold: number;
+  fraudImpossibleGpsKph: number;
+  fraudPickerShortRateBps: number;
+  fraudPickerMinLines: number;
+}

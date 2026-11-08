@@ -1,12 +1,24 @@
+import type { TransactionContext } from '../../../platform/database/database.js';
+export type PrivateMediaPurpose =
+  'RIDER_KYC' | 'DELIVERY_POD' | 'SUPPORT_ATTACHMENT' | 'PAYOUT_EVIDENCE';
 export interface PrivateUploadPort {
   createTarget(
     ownerId: string,
-    purpose: 'RIDER_KYC',
+    purpose: PrivateMediaPurpose,
     contentType: string,
     size: number,
   ): Promise<{ mediaId: string; url: string; fields: Record<string, string> }>;
-  assertOwnedRegistered(ownerId: string, mediaId: string, purpose: 'RIDER_KYC'): Promise<void>;
+  assertOwnedRegistered(
+    ownerId: string,
+    mediaId: string,
+    purpose: PrivateMediaPurpose,
+  ): Promise<void>;
   signedRead(mediaId: string): Promise<string>;
+}
+/** Server-only cleanup capability; never exposed as an upload operation. */
+export interface PrivateMediaErasure {
+  fenceForErasure(userId: string, tx: TransactionContext): Promise<void>;
+  eraseFenced(userId: string): Promise<boolean>;
 }
 export const PRIVATE_UPLOADS = Symbol('PRIVATE_UPLOADS');
 

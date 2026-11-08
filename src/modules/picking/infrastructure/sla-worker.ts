@@ -44,7 +44,7 @@ export class PickingSlaWorker {
       store_id: string;
       backlog: string;
       no_riders_since: Date | null;
-    }>`SELECT i.store_id,COALESCE(sum(CASE WHEN t.status IN ('PENDING','ASSIGNED','IN_PROGRESS') THEN 1 ELSE 0 END),0)::text AS backlog,(SELECT s.no_riders_since FROM store_operational_signals s WHERE s.store_id=i.store_id ORDER BY s.observed_at DESC LIMIT 1) AS no_riders_since FROM stores i LEFT JOIN pick_tasks t ON t.store_id=i.store_id WHERE EXISTS (SELECT 1 FROM pick_tasks t2 WHERE t2.store_id=i.store_id) GROUP BY i.store_id`.execute(
+    }>`SELECT i.id AS store_id,COALESCE(sum(CASE WHEN t.status IN ('PENDING','ASSIGNED','IN_PROGRESS') THEN 1 ELSE 0 END),0)::text AS backlog,(SELECT s.no_riders_since FROM store_operational_signals s WHERE s.store_id=i.id ORDER BY s.observed_at DESC LIMIT 1) AS no_riders_since FROM stores i LEFT JOIN pick_tasks t ON t.store_id=i.id WHERE EXISTS (SELECT 1 FROM pick_tasks t2 WHERE t2.store_id=i.id) GROUP BY i.id`.execute(
       this.db,
     );
     for (const store of stores.rows) {

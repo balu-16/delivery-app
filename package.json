@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "pnpm start:dev",
     "start:dev": "tsc-watch -p tsconfig.build.json --onSuccess \"node --env-file-if-exists=.env dist/main.js\"",
-    "start": "node dist/main.js",
+    "start": "node --env-file-if-exists=.env dist/main.js",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint . && node scripts/check-boundaries.mjs && node scripts/verify-manifests.mjs",
@@ -30,6 +30,14 @@
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --selectProjects unit integration concurrency e2e --runInBand --coverage",
     "test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js --selectProjects e2e --runInBand",
     "test:storage": "pnpm build && node scripts/storage-smoke.mjs",
+    "test:container": "node scripts/container-smoke.mjs",
+    "grant:runtime": "node --env-file-if-exists=.env --import tsx scripts/grant-runtime.ts",
+    "verify:p13": "node scripts/verify-p13-evidence.mjs --strict",
+    "load:install": "bash test/load/install-k6.sh",
+    "load:catalog": "bash test/load/run-catalog.sh",
+    "load:http": "bash test/load/run-http.sh",
+    "load:sockets": "node test/load/sockets.mjs",
+    "load:outbox": "node --import tsx test/load/outbox.ts",
     "prepare": "node scripts/prepare-hooks.mjs",
     "format:check": "prettier --check src test scripts db docs/manifests '*.json' '*.yml' '*.yaml' '*.cjs' '*.mjs' '.github/**/*.yml'"
   },
@@ -37,6 +45,10 @@
     "@aws-sdk/client-cognito-identity-provider": "3.1162.0",
     "@aws-sdk/client-s3": "3.1162.0",
     "@aws-sdk/client-sesv2": "^3.1163.0",
+    "@aws-sdk/client-sqs": "3.1162.0",
+    "@aws-sdk/credential-provider-ini": "3.973.26",
+    "@aws-sdk/credential-provider-node": "3.972.93",
+    "@aws-sdk/rds-signer": "3.1162.0",
     "@aws-sdk/s3-presigned-post": "3.1162.0",
     "@aws-sdk/s3-request-presigner": "3.1162.0",
     "@fastify/cors": "11.4.1",
@@ -45,11 +57,13 @@
     "@nestjs/core": "12.4.0",
     "@nestjs/platform-fastify": "12.4.0",
     "@nestjs/swagger": "12.1.1",
+    "@smithy/signature-v4": "5.7.5",
     "@socket.io/redis-adapter": "^8.3.0",
     "aws-jwt-verify": "5.2.1",
     "bullmq": "6.7.0",
     "class-transformer": "0.5.1",
     "class-validator": "0.15.1",
+    "cron-parser": "5.10.3",
     "csv-parse": "7.0.3",
     "fastify": "5.12.8",
     "fastify-raw-body": "6.0.3",
@@ -61,6 +75,7 @@
     "nodemailer": "^10.3.1",
     "pg": "8.23.1",
     "pino": "10.4.0",
+    "redis": "6.3.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "socket.io": "^4.8.4",
@@ -69,6 +84,7 @@
   "devDependencies": {
     "@apidevtools/swagger-parser": "13.1.0",
     "@eslint/js": "10.0.1",
+    "@jest/globals": "30.5.2",
     "@types/jest": "30.0.0",
     "@types/node": "26.6.6",
     "@types/nodemailer": "^8.0.2",
@@ -87,11 +103,5 @@
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@firebase/util",
-      "protobufjs"
-    ]
   }
 }

@@ -1,7 +1,9 @@
 import { Client } from 'pg';
+import { databaseIamRegion, postgresConnectionConfig } from '../src/platform/database/database.js';
 import { uuidV7 } from '../src/common/ids/ids.js';
 import { seedCatalog } from './seed-catalog.js';
 import { seedInventory } from './seed-inventory.js';
+import { seedSubscriptions } from './seed-subscriptions.js';
 
 // Sample data is local development data only. Re-running does not overwrite edits.
 const users = [
@@ -40,15 +42,96 @@ const stores = [
   },
 ] as const;
 
+// Local development coupons. Replay-safe: re-running never overwrites edits.
+// One first-order-only, one percent-with-cap and one free-delivery fixture.
+const coupons = [
+  {
+    code: 'FIRSTORDER200',
+    kind: 'FLAT',
+    valuePaise: '20000',
+    maxCapPaise: null,
+    minOrderPaise: '0',
+    perUserLimit: 1,
+    globalLimit: null,
+    storeId: null,
+    firstOrderOnly: true,
+    stackable: false,
+  },
+  {
+    code: 'SAVE20CAP100',
+    kind: 'PERCENT',
+    valuePaise: '2000',
+    maxCapPaise: '10000',
+    minOrderPaise: '29900',
+    perUserLimit: null,
+    globalLimit: null,
+    storeId: null,
+    firstOrderOnly: false,
+    stackable: false,
+  },
+  {
+    code: 'FREESHIP',
+    kind: 'FREE_DELIVERY',
+    valuePaise: '0',
+    maxCapPaise: null,
+    minOrderPaise: '0',
+    perUserLimit: null,
+    globalLimit: null,
+    storeId: null,
+    firstOrderOnly: false,
+    stackable: false,
+  },
+] as const;
+async function seedCoupons(client: Client): Promise<void> {
+  const admin = await client.query<{ id: string }>(
+    "SELECT id FROM users WHERE pool='WORKFORCE' AND cognito_sub='admin' LIMIT 1",
+  );
+  const adminId = admin.rows[0]?.id;
+  if (!adminId) throw new Error('Seed admin identity is required for coupons');
+  for (const coupon of coupons) {
+    await client.query(
+      `INSERT INTO coupons(id,code,kind,value,max_cap_paise,min_order_paise,per_user_limit,global_limit,
+        store_id,first_order_only,stackable,created_by)
+       VALUES ($1,$2,$3,$4::bigint,$5::bigint,$6::bigint,$7,$8,$9::uuid,$10,$11,$12)
+       ON CONFLICT (code) DO NOTHING`,
+      [
+        uuidV7(),
+        coupon.code,
+        coupon.kind,
+        coupon.valuePaise,
+        coupon.maxCapPaise,
+        coupon.minOrderPaise,
+        coupon.perUserLimit,
+        coupon.globalLimit,
+        coupon.storeId,
+        coupon.firstOrderOnly,
+        coupon.stackable,
+        adminId,
+      ],
+    );
+  }
+}
 async function main(): Promise<void> {
+  if (process.env.STORAGE_PROVIDER === 's3')
+    throw new Error('The development seed writes local images and cannot run with S3 storage');
   if (
     process.env.NODE_ENV === 'production' ||
-    (process.env.AUTH_PROVIDER && process.env.AUTH_PROVIDER !== 'local')
+    (process.env.AUTH_PROVIDER &&
+      process.env.AUTH_PROVIDER !== 'local' &&
+      !(
+        process.env.SEED_AWS_DEVELOPMENT_FIXTURES === 'deliveryapp' &&
+        process.env.DATABASE_AUTH === 'iam' &&
+        process.env.DATABASE_URL &&
+        new URL(process.env.DATABASE_URL).pathname === '/deliveryapp'
+      ))
   )
     throw new Error('Seed data is available only with local authentication outside production');
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error('DATABASE_URL is required');
-  const client = new Client({ connectionString });
+  const client = new Client({
+    ...postgresConnectionConfig(connectionString, databaseIamRegion(process.env)),
+    connectionTimeoutMillis: 60000,
+  });
   await client.connect();
   try {
     await client.query('BEGIN');
@@ -130,6 +213,11 @@ async function main(): Promise<void> {
       client,
       stores.map((store) => store.id),
     );
+    await seedCoupons(client);
+    await seedSubscriptions(
+      client,
+      stores.map((store) => store.id),
+    );
     await client.query('COMMIT');
     await seedInventory(client, stores[0].id, connectionString);
     process.stdout.write(
@@ -144,7 +232,17 @@ async function main(): Promise<void> {
     await client.end();
   }
 }
-void main().catch(() => {
-  process.stderr.write('Development seed failed; confirm migrations and local configuration.\n');
+void main().catch((error: unknown) => {
+  const code =
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    /^[0-9A-Z_]{1,24}$/.test(error.code)
+      ? error.code
+      : 'UNKNOWN';
+  process.stderr.write(
+    `Development seed failed (${code}); confirm migrations and local configuration.\n`,
+  );
   process.exitCode = 1;
 });

@@ -380,6 +380,108 @@
       ],
       "status": "verified",
       "evidence": "PROGRESS.md: 146 passing tests in43 suites; local PostgreSQL/PostGIS+Redis, 6November2026"
+    },
+    {
+      "id": "P5-REPAIR-LOCAL",
+      "phase": "P5",
+      "sourceSection": "19-24,27",
+      "status": "implemented",
+      "description": "Quote/cart/config/coupon revalidation and scoped pricing verified locally",
+      "testFiles": [
+        "test/integration/payments/checkout-flow.spec.ts",
+        "test/integration/cart/cart.spec.ts",
+        "test/concurrency/coupons/redemption.spec.ts"
+      ]
+    },
+    {
+      "id": "P6-REPAIR-LOCAL",
+      "phase": "P6",
+      "sourceSection": "19-24,27",
+      "status": "implemented",
+      "description": "Intent uniqueness, receipt/refund capacity, wallet reversal provenance, expiry/reinstatement, invoices and approval-controlled repairs verified locally",
+      "testFiles": [
+        "test/integration/commerce/journeys.spec.ts",
+        "test/integration/payments/refund-fencing.spec.ts",
+        "test/integration/payments/inbox-integrity.spec.ts"
+      ]
+    },
+    {
+      "id": "P7-REPAIR-LOCAL",
+      "phase": "P7",
+      "sourceSection": "19-24,27",
+      "status": "implemented",
+      "description": "Real order fulfillment bindings, selected batches, partial/all shorts, weighted tolerance, packing/handover and disconnect recovery verified locally",
+      "testFiles": [
+        "test/integration/commerce/journeys.spec.ts",
+        "test/integration/picking/picking.spec.ts",
+        "test/concurrency/picking/claim.spec.ts"
+      ]
+    },
+    {
+      "id": "P8-REPAIR-LOCAL",
+      "phase": "P8",
+      "sourceSection": "19-24,27",
+      "status": "implemented",
+      "description": "Manual dispatch, custody/returns/POD, COD expectations, GPS and worker-to-audience publications verified locally",
+      "testFiles": [
+        "test/integration/commerce/journeys.spec.ts",
+        "test/integration/dispatch/custody.spec.ts",
+        "test/integration/realtime/worker-broadcast.spec.ts"
+      ]
+    },
+    {
+      "id": "P9-REPAIR-LOCAL",
+      "phase": "P9",
+      "sourceSection": "19-24,27",
+      "status": "implemented",
+      "description": "Notification leases, per-device retries, malformed/schema event reporting, localization and inbox behavior verified locally",
+      "testFiles": [
+        "test/integration/notifications/notifications.spec.ts",
+        "test/integration/notifications/delivery.spec.ts"
+      ]
+    },
+    {
+      "id": "P10-LOCAL",
+      "phase": "P10",
+      "sourceSection": "25",
+      "status": "verified",
+      "description": "Scheduled subscriptions, leased store-scoped wallet generation, cutoff/recovery and scheduled fulfillment; 10,000 distributed funded orders and replay passed",
+      "testFiles": [
+        "test/integration/subscriptions/scheduled-checkout.spec.ts",
+        "test/integration/subscriptions/batch-load.spec.ts",
+        "test/integration/subscriptions/distributed-load.spec.ts"
+      ],
+      "evidence": "docs/PROGRESS.md: P10\u2013P12 integrated verification, 8 November 2026; local acceptance only"
+    },
+    {
+      "id": "P11-LOCAL",
+      "phase": "P11",
+      "sourceSection": "23.6,24.2-24.5",
+      "status": "verified",
+      "description": "Scoped support, delivered-only ratings and approved manual payout accounting; phase acceptance recorded separately in PROGRESS.md",
+      "testFiles": [
+        "test/integration/support/support.spec.ts",
+        "test/integration/ratings/ratings.spec.ts",
+        "test/integration/payouts/payouts.spec.ts",
+        "test/e2e/p11-support.spec.ts",
+        "test/integration/payments/manual-refund.spec.ts"
+      ],
+      "evidence": "docs/PROGRESS.md: P10\u2013P12 integrated verification, 8 November 2026; local acceptance only"
+    },
+    {
+      "id": "P12-LOCAL",
+      "phase": "P12",
+      "sourceSection": "13-25,26-29",
+      "status": "verified",
+      "description": "Administrative review, private reports/exports, privacy execution and retention; phase acceptance recorded separately in PROGRESS.md",
+      "testFiles": [
+        "test/integration/compliance/admin-operations.spec.ts",
+        "test/integration/compliance/report-data.spec.ts",
+        "test/integration/compliance/cross-phase-privacy.spec.ts",
+        "test/integration/compliance/migration-p12.spec.ts",
+        "test/e2e/p12-compliance.spec.ts"
+      ],
+      "evidence": "docs/PROGRESS.md: P10\u2013P12 integrated verification, 8 November 2026; local acceptance only"
     }
   ]
 }

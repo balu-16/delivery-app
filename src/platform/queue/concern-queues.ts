@@ -2,19 +2,15 @@ import { createHash } from 'node:crypto';
 import { Queue, Worker, type JobsOptions } from 'bullmq';
 import { Redis } from 'ioredis';
 import type { Json } from '../database/database.js';
-
-export const CONCERNS = [
-  'outbox',
-  'notifications',
-  'dispatch',
-  'payments',
-  'subscriptions',
-  'imports',
-  'maintenance',
-] as const;
-export type QueueConcern = (typeof CONCERNS)[number];
-export type ConcernHandler = (data: Json, jobId: string) => Promise<void>;
-export type Schedule = { everyMs: number } | { pattern: string };
+import {
+  CONCERNS,
+  type QueueConcern,
+  type ConcernHandler,
+  type Schedule,
+  type FailedConcernJob,
+} from './concerns.js';
+export { CONCERNS } from './concerns.js';
+export type { QueueConcern, ConcernHandler, Schedule, FailedConcernJob } from './concerns.js';
 export interface ConcernQueueOptions {
   redisUrl: string;
   prefix?: string;
@@ -24,13 +20,6 @@ export interface ConcernQueueOptions {
   consume?: boolean;
   onError?: (error: Error) => void;
 }
-export interface FailedConcernJob {
-  id: string;
-  name: string;
-  attempts: number;
-  failedAt: number | undefined;
-}
-
 /** Redis transports jobs; business handlers must use durable operation IDs and idempotent effects. */
 export class ConcernQueues {
   private readonly connection: Redis;
@@ -170,10 +159,47 @@ export class ConcernQueues {
       failedAt: job.finishedOn,
     }));
   }
+  async getFailed(concern: QueueConcern, id: string): Promise<FailedConcernJob | null> {
+    const job = await this.queue(concern).getJob(id);
+    if (!job || (await job.getState()) !== 'failed') return null;
+    return {
+      id: job.id ?? '',
+      name: job.name,
+      attempts: job.attemptsMade,
+      failedAt: job.finishedOn,
+    };
+  }
   async replay(concern: QueueConcern, id: string): Promise<void> {
     const job = await this.queue(concern).getJob(id);
     if (!job || (await job.getState()) !== 'failed') throw new Error('FAILED_JOB_NOT_FOUND');
     await job.retry('failed', { resetAttemptsMade: true, resetAttemptsStarted: true });
+  }
+  async depths(): Promise<
+    Array<{
+      concern: QueueConcern;
+      waiting: number;
+      active: number;
+      delayed: number;
+      failed: number;
+    }>
+  > {
+    return Promise.all(
+      CONCERNS.map(async (concern) => {
+        const counts = await this.queue(concern).getJobCounts(
+          'waiting',
+          'active',
+          'delayed',
+          'failed',
+        );
+        return {
+          concern,
+          waiting: counts.waiting ?? 0,
+          active: counts.active ?? 0,
+          delayed: counts.delayed ?? 0,
+          failed: counts.failed ?? 0,
+        };
+      }),
+    );
   }
   async ping(): Promise<void> {
     await this.connection.ping();

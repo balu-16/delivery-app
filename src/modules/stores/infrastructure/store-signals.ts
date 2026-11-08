@@ -1,19 +1,21 @@
 import { sql, type Kysely } from 'kysely';
 import { uuidV7 } from '../../../common/ids/ids.js';
-import type { PlatformSchema } from '../../../platform/database/database.js';
+import type { PlatformSchema, TransactionContext } from '../../../platform/database/database.js';
 import type { StoreSignals } from '../contracts/signals.js';
 
 export class PostgresStoreSignals implements StoreSignals {
   constructor(
     private readonly db: Kysely<PlatformSchema>,
-    private readonly settings: () => Promise<{ backlog: number; minutes: number }>,
+    private readonly settings: (
+      tx?: TransactionContext,
+    ) => Promise<{ backlog: number; minutes: number }>,
   ) {}
-  async noRiders(storeId: string, at: Date): Promise<boolean> {
-    const { minutes } = await this.settings();
+  async noRiders(storeId: string, at: Date, tx?: TransactionContext): Promise<boolean> {
+    const { minutes } = await this.settings(tx);
     const result = await sql<{
       unavailable: boolean;
     }>`SELECT (no_riders_since IS NOT NULL AND no_riders_since + ${minutes} * interval '1 minute' <= ${at}::timestamptz) AS unavailable FROM store_operational_signals WHERE store_id=${storeId}`.execute(
-      this.db,
+      tx ?? this.db,
     );
     return result.rows[0]?.unavailable ?? false;
   }

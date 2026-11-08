@@ -87,6 +87,28 @@ export async function taskEvent(
     );
 }
 
+/** Item-level change for customer notifications (shorts, substitutions). */
+export async function itemEvent(
+  tx: TransactionContext,
+  taskId: string,
+  orderId: string,
+  orderItemId: string,
+  variantId: string,
+  status: 'SHORT' | 'SUBSTITUTED',
+): Promise<void> {
+  const eventId = uuidV7();
+  const version = await sql<{ v: string }>`SELECT (COALESCE(max(aggregate_version),0)+1)::text AS v
+    FROM outbox_events WHERE aggregate_type='pick_item' AND aggregate_id=${orderItemId}::uuid`.execute(
+    tx,
+  );
+  await sql`INSERT INTO outbox_events(id,event_type,schema_version,aggregate_type,aggregate_id,aggregate_version,correlation_id,payload) VALUES(${eventId}::uuid,'picking.item_changed',1,'pick_item',${orderItemId}::uuid,${version.rows[0]!.v}::bigint,${orderId},${JSON.stringify({ taskId, orderId, orderItemId, variantId, status })}::jsonb)`.execute(
+    tx,
+  );
+  await sql`INSERT INTO outbox_deliveries(event_id,consumer) VALUES(${eventId}::uuid,'notifications')`.execute(
+    tx,
+  );
+}
+
 export type TaskRow = {
   id: string;
   order_id: string;
@@ -163,9 +185,13 @@ export async function loadItems(
   lock = false,
 ): Promise<ItemRow[]> {
   if (!taskIds.length) return [];
-  // Walk order: bin location, then item id, so every picker walks the same path.
+  // Walk order: item id (store_inventory has no bin_location column yet; add
+  // it with the catalog schema before enabling aisle-order picking).
   const rows =
-    await sql<ItemRow>`SELECT i.id,i.task_id,i.order_item_id,i.variant_id,i.substitute_variant_id,i.name_snapshot,i.expected_qty::text AS "expected_qty",i.picked_qty::text AS "picked_qty",i.batch_id,i.status,i.short_reason FROM pick_items i JOIN pick_tasks t ON t.id=i.task_id LEFT JOIN store_inventory s ON s.store_id=t.store_id AND s.variant_id=i.variant_id WHERE i.task_id=ANY(${taskIds.slice()}::uuid[]) ORDER BY i.task_id,s.bin_location NULLS LAST,i.id ${lock ? sql`FOR UPDATE OF i` : sql``}`.execute(
+    await sql<ItemRow>`SELECT i.id,i.task_id,i.order_item_id,i.variant_id,i.substitute_variant_id,i.name_snapshot,i.expected_qty::text AS "expected_qty",i.picked_qty::text AS "picked_qty",i.batch_id,i.status,i.short_reason
+      FROM pick_items i JOIN pick_tasks t ON t.id=i.task_id
+      LEFT JOIN store_inventory s ON s.store_id=t.store_id AND s.variant_id=COALESCE(i.substitute_variant_id,i.variant_id)
+      WHERE i.task_id=ANY(${taskIds.slice()}::uuid[]) ORDER BY i.task_id,s.bin_location ASC NULLS LAST,i.id ${lock ? sql`FOR UPDATE OF i` : sql``}`.execute(
       tx,
     );
   return rows.rows;

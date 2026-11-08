@@ -52,6 +52,23 @@ async function seedImage(directory: string): Promise<void> {
   }
 }
 
+async function insertRows(client: Client, prefix: string, rows: unknown[][]): Promise<void> {
+  for (let start = 0; start < rows.length; start += 100) {
+    const batch = rows.slice(start, start + 100);
+    const values: unknown[] = [];
+    const placeholders = batch.map(
+      (row) =>
+        `(${row
+          .map((value) => {
+            values.push(value);
+            return `$${values.length}`;
+          })
+          .join(',')})`,
+    );
+    await client.query(`${prefix} VALUES ${placeholders.join(',')} ON CONFLICT DO NOTHING`, values);
+  }
+}
+
 /** Seed structural assortment only. P4 receipts, never fixtures, supply production stock. */
 export async function seedCatalog(client: Client, stores: readonly string[]): Promise<void> {
   const directory = resolve(process.env.LOCAL_CATALOG_STORAGE_DIR ?? '.local/catalog');
@@ -75,55 +92,67 @@ export async function seedCatalog(client: Client, stores: readonly string[]): Pr
       'INSERT INTO catalog_categories(id,name) VALUES ($1,$2) ON CONFLICT DO NOTHING',
       [fixtureId(1, index + 1), name],
     );
+  const products: unknown[][] = [];
+  const variants: unknown[][] = [];
+  const images: unknown[][] = [];
+  const inventory: unknown[][] = [];
+  const prices: unknown[][] = [];
   for (let index = 1; index <= 200; index++) {
     const nameIndex = (index - 1) % names.length;
     const name = `${names[nameIndex]} ${Math.ceil(index / names.length) * 100} g`;
     const productId = fixtureId(3, index);
     const variantId = fixtureId(4, index);
     const perishable = nameIndex < 4 || (nameIndex >= 8 && nameIndex < 12);
-    await client.query(
-      "INSERT INTO catalog_products(id,category_id,brand_id,name,normalized_name,hsn_code,gst_rate_bps,perishable,expiry_tracking,published) VALUES ($1,$2,$3,$4,$5,'1001',500,$6,$6,true) ON CONFLICT DO NOTHING",
-      [
-        productId,
-        fixtureId(1, Math.floor(nameIndex / 4) + 1),
-        brandId,
-        name,
-        name.toLowerCase(),
-        perishable,
-      ],
-    );
-    await client.query(
-      'INSERT INTO catalog_variants(id,product_id,name,sku,barcode) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING',
-      [
-        variantId,
-        productId,
-        'Standard pack',
-        `LOCAL-${String(index).padStart(4, '0')}`,
-        `890000${String(index).padStart(7, '0')}`,
-      ],
-    );
-    await client.query(
-      'INSERT INTO catalog_product_images(product_id,media_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-      [productId, imageId],
-    );
+    products.push([
+      productId,
+      fixtureId(1, Math.floor(nameIndex / 4) + 1),
+      brandId,
+      name,
+      name.toLowerCase(),
+      '1001',
+      500,
+      perishable,
+      perishable,
+      true,
+    ]);
+    variants.push([
+      variantId,
+      productId,
+      'Standard pack',
+      `LOCAL-${String(index).padStart(4, '0')}`,
+      `890000${String(index).padStart(7, '0')}`,
+    ]);
+    images.push([productId, imageId]);
     for (const [storeIndex, storeId] of stores.entries()) {
-      await client.query(
-        'INSERT INTO store_inventory(store_id,variant_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-        [storeId, variantId],
-      );
-      await client.query(
-        "INSERT INTO catalog_prices(id,store_id,variant_id,selling_paise,mrp_paise,valid_from,created_by) VALUES ($1,$2,$3,$4,$5,'2020-01-01T00:00:00Z',$6) ON CONFLICT DO NOTHING",
-        [
-          fixtureId(5, index * 10 + storeIndex),
-          storeId,
-          variantId,
-          (10000n + BigInt(index) * 50n).toString(),
-          (12000n + BigInt(index) * 50n).toString(),
-          ownerId,
-        ],
-      );
+      inventory.push([storeId, variantId]);
+      prices.push([
+        fixtureId(5, index * 10 + storeIndex),
+        storeId,
+        variantId,
+        (10000n + BigInt(index) * 50n).toString(),
+        (12000n + BigInt(index) * 50n).toString(),
+        '2020-01-01T00:00:00Z',
+        ownerId,
+      ]);
     }
   }
+  await insertRows(
+    client,
+    'INSERT INTO catalog_products(id,category_id,brand_id,name,normalized_name,hsn_code,gst_rate_bps,perishable,expiry_tracking,published)',
+    products,
+  );
+  await insertRows(
+    client,
+    'INSERT INTO catalog_variants(id,product_id,name,sku,barcode)',
+    variants,
+  );
+  await insertRows(client, 'INSERT INTO catalog_product_images(product_id,media_id)', images);
+  await insertRows(client, 'INSERT INTO store_inventory(store_id,variant_id)', inventory);
+  await insertRows(
+    client,
+    'INSERT INTO catalog_prices(id,store_id,variant_id,selling_paise,mrp_paise,valid_from,created_by)',
+    prices,
+  );
   for (const [term, expansion] of [
     ['doodh', 'milk'],
     ['atta', 'wheat flour'],

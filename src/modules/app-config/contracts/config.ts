@@ -1,3 +1,4 @@
+import type { PhaseConfigValues } from './phase-config.js';
 export const INVENTORY_CONFIG_DEFAULTS = {
   catalogLowStockThreshold: 5,
   inventoryExpirySoonDays: 7,
@@ -15,7 +16,7 @@ export interface FeeTaxRule {
   taxBps: number;
   split: 'CGST_SGST' | 'IGST';
 }
-export interface ConfigValues {
+export interface ConfigValues extends PhaseConfigValues {
   inventoryReservationTtlSeconds: number;
   inventoryAdjustmentApprovalUnits: number;
   inventoryExpirySoonDays: number;
@@ -23,6 +24,7 @@ export interface ConfigValues {
   catalogMaxPerOrder: number;
   catalogAllowedGstBps: number[];
   maxCartLines: number;
+  cartRetentionDays: number;
   minOrderPaise: string;
   maxOrderPaise: string;
   maxCodPaise: string;
@@ -36,6 +38,7 @@ export interface ConfigValues {
   couponValidationAttemptsPerWindow: number;
   refundDestinationPolicy: 'original' | 'original_then_wallet' | 'wallet';
   promoSpendCapBps: number;
+  walletLowBalanceThresholdPaise: string;
   topupMinPaise: string;
   topupMaxPaise: string;
   topupMonthlyCapPaise: string;
@@ -67,10 +70,58 @@ export interface ConfigValues {
   termsVersion: string;
   privacyVersion: string;
   maxPauseLengthDays: number;
+  dispatchTrigger: 'ON_PICK_START' | 'ON_PACKED';
+  dispatchRadiusM: number;
+  dispatchRadiusWideningStepsM: number[];
+  dispatchMaxAttempts: number;
+  dispatchAutoCancelMinutes: number;
+  dispatchNoRiderAlertAfterAttempts: number;
+  offerTimeoutSeconds: number;
+  offerDeclineCooldownSeconds: number;
+  riderMaxConcurrentTasks: number;
+  riderStaleLocationSeconds: number;
+  riderHeartbeatStaleSeconds: number;
+  riderRedispatchMinutes: number;
+  riderInactivityOfflineMinutes: number;
+  riderMaxContinuousHours: number;
+  cashInHandLimitPaise: string;
+  earningsBasePaise: string;
+  earningsPerKmPaise: string;
+  detentionFreeMinutes: number;
+  detentionPerMinutePaise: string;
+  deliveryCodeMaxAttempts: number;
+  deliveryCodeLockoutSeconds: number;
+  deliveryFailureWaitSeconds: number;
+  deliveryFailureMinContactAttempts: number;
+  geofenceThresholdMetres: number;
+  dispatchScoreWeightsEta: number;
+  dispatchScoreWeightsIdle: number;
+  dispatchScoreWeightsAcceptance: number;
+  locationRetentionDays: number;
+  locationMinIntervalSeconds: number;
+  locationMinDistanceMetres: number;
+  locationMaxBatchPoints: number;
+  locationMaxAccuracyMetres: number;
+  locationMaxSpeedMps: number;
+  etaRoadFactor: number;
+  etaAvgSpeedKph: number;
+  etaPublishDeltaMinutes: number;
+  notificationQuietHoursStart: number;
+  notificationQuietHoursEnd: number;
+  pickingWeightToleranceBps: number;
+  pickingDisconnectMinutes: number;
+  pickingShortRateAlertBps: number;
 }
 export type ConfigKey = keyof ConfigValues;
 export interface AppConfig {
-  get<K extends ConfigKey>(key: K): Promise<ConfigValues[K]>;
+  getMany?<K extends ConfigKey>(
+    keys: readonly K[],
+    tx?: import('../../../platform/database/database.js').TransactionContext,
+  ): Promise<Pick<ConfigValues, K>>;
+  get<K extends ConfigKey>(
+    key: K,
+    tx?: import('../../../platform/database/database.js').TransactionContext,
+  ): Promise<ConfigValues[K]>;
 }
 export const APP_CONFIG = Symbol('APP_CONFIG');
 

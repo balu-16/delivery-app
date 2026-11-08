@@ -1,0 +1,11 @@
+# Support, ratings and payout operations
+
+Customer and rider ticket endpoints scope records to the active owner. Workforce staff can assign, respond, use canned responses and add internal notes. Internal notes and their attachments are excluded from customer and rider responses. Private attachment read capabilities are issued only after a ticket relationship check. Creation is rate limited per account; creation and message calls support an `Idempotency-Key`. Reopen is available within the configured window and starts a new SLA cycle.
+
+The worker scans durable delivery failures and payment reconciliation findings to recover deduplicated incident tickets. It sends each first-response and resolution breach once per SLA cycle through the notification outbox. A guarded in-process recovery scan supplements the Redis scheduler. Rating creation requires the delivered order owner, a valid order, fulfilled product variant or delivery rider, and the configured window. Ratings have bounded edits, moderation, low-rating ticket deduplication and minimum-count aggregate display.
+
+Weekly rider payouts select unallocated earnings before Monday 00:00 Asia/Kolkata. Drafts snapshot earnings and cash dues without reducing dues. Maker-checker approval takes the rider cash lock, rechecks the cash offset and posts an immutable adjustment. Zero net settles with an internal reference; positive net requires a manual reference and private evidence. Corrections require separate approval and evidence-backed settlement. Neither flow initiates a bank transfer. Unsettled payouts and corrections block erasure.
+
+Support refunds use the orders/payments refund path and source capacity. Configured per-refund and daily agent limits gate direct refunds; zero defaults require approval. COD refunds with wallet disabled produce pending manual payout commitments that settle only after an authorized operator records private evidence.
+
+Focused verification: `test/integration/support/support.spec.ts`, `test/integration/ratings/ratings.spec.ts`, `test/integration/payouts/payouts.spec.ts`, `test/integration/payments/manual-refund.spec.ts`, and `test/e2e/p11-support.spec.ts`. The payout test covers a real cash-lock barrier between approval and deposit, stale approval, duplicate approvals, half-open cutoff, zero-net settlement, carry, and correction evidence.

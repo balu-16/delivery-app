@@ -4,6 +4,7 @@ import {
   databaseTimeAfterLock,
   transactionWithRetry,
   type Database,
+  type TransactionContext,
 } from '../../../platform/database/database.js';
 import type { IdentityAccess } from '../../identity/contracts/identity.js';
 import type { InventoryReturns, ReturnReceipt } from '../contracts/returns.js';
@@ -15,12 +16,72 @@ export class PostgresInventoryReturns implements InventoryReturns {
     private readonly db: Database,
     private readonly identity: IdentityAccess,
   ) {}
-  async receiveReturn(actor: string, input: ReturnReceipt): Promise<void> {
+  async receiveCancelledOrder(
+    orderId: string,
+    actorId: string | null,
+    tx: TransactionContext,
+  ): Promise<void> {
+    const order = await sql<{
+      store_id: string;
+      status: string;
+    }>`SELECT store_id,status FROM orders WHERE id=${orderId}::uuid FOR UPDATE`.execute(tx);
+    if (order.rows[0]?.status !== 'CANCELLED') throw new Error('ILLEGAL_STATE_TRANSITION');
+    const custody =
+      await sql`SELECT id FROM delivery_tasks WHERE order_id=${orderId}::uuid AND pickup_at IS NOT NULL`.execute(
+        tx,
+      );
+    if (custody.rows.length) throw new Error('ILLEGAL_STATE_TRANSITION');
+    const stock = await sql<{
+      variant_id: string;
+      picked: string;
+      returned: string;
+      expires_at: Date | null;
+    }>`SELECT l.variant_id,(-sum(l.on_hand_delta))::text AS picked,
+      COALESCE((SELECT sum(r.quantity) FROM inventory_returns r WHERE r.order_id=${orderId}::uuid AND r.store_id=l.store_id AND r.variant_id=l.variant_id),0)::text AS returned,
+      min(b.expires_at) AS expires_at FROM inventory_ledger l JOIN inventory_batches b ON b.id=l.batch_id
+      WHERE l.store_id=${order.rows[0].store_id}::uuid AND (l.reference=${`pick:${orderId}`} OR l.reference LIKE ${`pick:${orderId}:g%`})
+        AND l.kind='RESERVE_COMMIT_PICK' GROUP BY l.store_id,l.variant_id ORDER BY l.variant_id`.execute(
+      tx,
+    );
+    for (const row of stock.rows) {
+      const remaining = BigInt(row.picked) - BigInt(row.returned);
+      if (remaining <= 0n) continue;
+      await this.receive(
+        actorId,
+        {
+          returnId: uuidV7(),
+          orderId,
+          storeId: order.rows[0].store_id,
+          variantId: row.variant_id,
+          quantity: remaining.toString(),
+          expiresAt: row.expires_at?.toISOString() ?? null,
+        },
+        tx,
+        true,
+      );
+    }
+  }
+  async receiveReturn(
+    actor: string,
+    input: ReturnReceipt,
+    outer?: TransactionContext,
+  ): Promise<void> {
+    return this.receive(actor, input, outer);
+  }
+  private async receive(
+    actor: string | null,
+    input: ReturnReceipt,
+    outer?: TransactionContext,
+    cancelledOrder = false,
+  ): Promise<void> {
     const amount = quantity(input.quantity),
       expiry = input.expiresAt ? new Date(input.expiresAt) : null;
     if (expiry && !Number.isFinite(expiry.getTime())) throw new Error('INVALID_INPUT');
-    await transactionWithRetry(this.db, async (tx) => {
-      if (!(await this.identity.hasStoreRole(actor, input.storeId, ['STORE_MANAGER'], tx)))
+    const run = async (tx: TransactionContext) => {
+      if (
+        !cancelledOrder &&
+        (!actor || !(await this.identity.hasStoreRole(actor, input.storeId, ['STORE_MANAGER'], tx)))
+      )
         throw new Error('STORE_NOT_FOUND');
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`inventory-order:${input.orderId}`},0))`.execute(
         tx,
@@ -33,14 +94,14 @@ export class PostgresInventoryReturns implements InventoryReturns {
       const picked = await sql<{
         picked: string;
         returned: string;
-      }>`SELECT COALESCE((SELECT -sum(on_hand_delta) FROM inventory_ledger WHERE reference=${`pick:${input.orderId}`} AND store_id=${input.storeId}::uuid AND variant_id=${input.variantId}::uuid AND kind='RESERVE_COMMIT_PICK'),0)::text AS picked, COALESCE((SELECT sum(quantity) FROM inventory_returns WHERE order_id=${input.orderId}::uuid AND store_id=${input.storeId}::uuid AND variant_id=${input.variantId}::uuid),0)::text AS returned`.execute(
+      }>`SELECT COALESCE((SELECT -sum(on_hand_delta) FROM inventory_ledger WHERE (reference=${`pick:${input.orderId}`} OR reference LIKE ${`pick:${input.orderId}:g%`}) AND store_id=${input.storeId}::uuid AND variant_id=${input.variantId}::uuid AND kind='RESERVE_COMMIT_PICK'),0)::text AS picked, COALESCE((SELECT sum(quantity) FROM inventory_returns WHERE order_id=${input.orderId}::uuid AND store_id=${input.storeId}::uuid AND variant_id=${input.variantId}::uuid),0)::text AS returned`.execute(
         tx,
       );
       if (BigInt(picked.rows[0]!.returned) + amount > BigInt(picked.rows[0]!.picked))
         throw new Error('RETURN_QUANTITY_EXCEEDED');
       const product = await sql<{
         expiry_tracking: boolean;
-      }>`SELECT p.expiry_tracking FROM catalog_variants v JOIN catalog_products p ON p.id=v.product_id WHERE v.id=${input.variantId}::uuid AND v.deleted_at IS NULL AND p.deleted_at IS NULL`.execute(
+      }>`SELECT p.expiry_tracking FROM catalog_variants v JOIN catalog_products p ON p.id=v.product_id WHERE v.id=${input.variantId}::uuid`.execute(
         tx,
       );
       if (!product.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
@@ -60,13 +121,15 @@ export class PostgresInventoryReturns implements InventoryReturns {
         kind: 'RETURN_RECEIVED',
         onHand: amount,
         reserved: 0n,
-        actor,
+        actor: actor ?? undefined,
       });
       await stockAlerts(tx, input.storeId, input.variantId);
       await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,${actor}::uuid,'INVENTORY_RETURN_RECEIVED','inventory_return',${input.returnId},${JSON.stringify({ orderId: input.orderId, quantity: input.quantity })}::jsonb)`.execute(
         tx,
       );
-    });
+    };
+    if (outer) await run(outer);
+    else await transactionWithRetry(this.db, run);
   }
   async inspectReturn(
     actor: string,

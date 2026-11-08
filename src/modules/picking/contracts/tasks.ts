@@ -57,6 +57,7 @@ export interface PickItemInput {
   quantity: string;
   /** Required when the variant tracks batches (perishables): FEFO suggestion or scanned batch. */
   batchId?: string;
+  batches?: { batchId: string; quantity: string }[];
 }
 
 export interface ShortInput {
@@ -113,6 +114,7 @@ export const PICK_TASKS = Symbol('PICK_TASKS');
 export interface PickTasks {
   /** Walk-ordered queue of tasks; pick lists sort by bin location then item id. */
   queue(actorId: string, input: QueueInput): Promise<PickTaskPage>;
+  heartbeat(actorId: string, taskId: string): Promise<void>;
   /** Self-claim under SKIP LOCKED; two pickers can never claim the same task. */
   claim(actorId: string, taskId: string, reference: string): Promise<ClaimResult>;
   start(actorId: string, taskId: string, reference: string): Promise<PickTaskView>;

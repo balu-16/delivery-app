@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import { fork, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { GenericContainer, Wait } from 'testcontainers';
+import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { resolve } from 'node:path';
 import { Queue } from 'bullmq';
@@ -85,6 +89,268 @@ async function createMutation(): Promise<{ aggregateId: string; eventId: string 
 }
 
 describe('transactional outbox recovery with real PostgreSQL and Redis', () => {
+  it('rolls back a forcibly killed worker and permits replay of its unfinished effect', async () => {
+    const { aggregateId, eventId } = await createMutation();
+    const child = fork(resolve('test/helpers/event-worker.ts'), [], {
+      execArgv: ['--import', 'tsx'],
+      env: {
+        ...process.env,
+        TEST_CHILD_DATABASE_URL: services.databaseUrl,
+        TEST_CHILD_REDIS_URL: services.redisUrl,
+        TEST_CHILD_PREFIX: services.redisPrefix,
+        TEST_CHILD_EVENT_ID: eventId,
+        TEST_CHILD_AGGREGATE_ID: aggregateId,
+        TEST_CHILD_BLOCK: '1',
+      },
+      stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    });
+    const messages: string[] = [];
+    child.on('message', (message) => {
+      if (typeof message === 'string') messages.push(message);
+    });
+    const publisher = new DurableQueue({
+      db: handle.db,
+      redisUrl: services.redisUrl,
+      prefix: services.redisPrefix,
+      consume: false,
+    });
+    try {
+      await eventually(() => Promise.resolve(messages.includes('ready')));
+      expect(await publisher.recoverOnce()).toBe(1);
+      await eventually(() => Promise.resolve(messages.includes('in-handler')));
+      child.kill('SIGKILL');
+      await once(child, 'exit');
+      const state = await sql<{
+        effects: number;
+        complete: boolean;
+      }>`SELECT a.effects,d.completed_at IS NOT NULL AS complete FROM test_aggregates a JOIN outbox_events e ON e.aggregate_id=a.id JOIN outbox_deliveries d ON d.event_id=e.id WHERE e.id=${eventId}::uuid`.execute(
+        handle.db,
+      );
+      expect(state.rows[0]).toEqual({ effects: 0, complete: false });
+      const connection = new Redis(services.redisUrl, { maxRetriesPerRequest: null });
+      const queue = new Queue('platform-events', { connection, prefix: services.redisPrefix });
+      const replacement = new DurableQueue({
+        db: handle.db,
+        redisUrl: services.redisUrl,
+        prefix: services.redisPrefix,
+        handlers: {
+          'test-consumer': async (tx) => {
+            await sql`UPDATE test_aggregates SET effects=effects+1 WHERE id=${aggregateId}::uuid`.execute(
+              tx,
+            );
+          },
+        },
+      });
+      try {
+        await replacement.ping();
+        await queue.add(
+          'delivery',
+          { eventId, consumer: 'test-consumer' },
+          { removeOnComplete: true, removeOnFail: true },
+        );
+        await eventually(
+          async () =>
+            (
+              await sql<{
+                effects: number;
+              }>`SELECT effects FROM test_aggregates WHERE id=${aggregateId}::uuid`.execute(
+                handle.db,
+              )
+            ).rows[0]?.effects === 1,
+        );
+      } finally {
+        await replacement.close();
+        await queue.close();
+        await connection.quit();
+      }
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await publisher.close();
+    }
+  }, 30000);
+
+  it('survives killing a worker after its effect commits and suppresses a duplicate job', async () => {
+    const { aggregateId, eventId } = await createMutation();
+    const child = fork(resolve('test/helpers/event-worker.ts'), [], {
+      execArgv: ['--import', 'tsx'],
+      env: {
+        ...process.env,
+        TEST_CHILD_DATABASE_URL: services.databaseUrl,
+        TEST_CHILD_REDIS_URL: services.redisUrl,
+        TEST_CHILD_PREFIX: services.redisPrefix,
+        TEST_CHILD_EVENT_ID: eventId,
+        TEST_CHILD_AGGREGATE_ID: aggregateId,
+      },
+      stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    });
+    const messages: string[] = [];
+    child.on('message', (message) => {
+      if (typeof message === 'string') messages.push(message);
+    });
+    const publisher = new DurableQueue({
+      db: handle.db,
+      redisUrl: services.redisUrl,
+      prefix: services.redisPrefix,
+      consume: false,
+    });
+    try {
+      await eventually(() => Promise.resolve(messages.includes('ready')));
+      expect(await publisher.recoverOnce()).toBe(1);
+      await eventually(() => Promise.resolve(messages.includes('committed')));
+      child.kill('SIGKILL');
+      await once(child, 'exit');
+      const connection = new Redis(services.redisUrl, { maxRetriesPerRequest: null });
+      const queue = new Queue('platform-events', { connection, prefix: services.redisPrefix });
+      const worker = new DurableQueue({
+        db: handle.db,
+        redisUrl: services.redisUrl,
+        prefix: services.redisPrefix,
+        handlers: {
+          'test-consumer': async (tx) => {
+            await sql`UPDATE test_aggregates SET effects=effects+1 WHERE id=${aggregateId}::uuid`.execute(
+              tx,
+            );
+          },
+        },
+      });
+      try {
+        await worker.ping();
+        await queue.add(
+          'delivery',
+          { eventId, consumer: 'test-consumer' },
+          { removeOnComplete: true, removeOnFail: true },
+        );
+        await eventually(async () => worker.stats().jobsCompleted === 1);
+        const result = await sql<{
+          effects: number;
+        }>`SELECT effects FROM test_aggregates WHERE id=${aggregateId}::uuid`.execute(handle.db);
+        expect(result.rows[0]?.effects).toBe(1);
+      } finally {
+        await worker.close();
+        await queue.close();
+        await connection.quit();
+      }
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await publisher.close();
+    }
+  }, 30000);
+
+  it('recovers a committed delivery after a disposable Redis instance loses its data', async () => {
+    const redis = await new GenericContainer(
+      'redis:7.4.12-alpine3.21@sha256:338fbfc036dc5517ac0b04d6de21521085935336e565f223406180e9d84166e2',
+    )
+      .withCommand(['redis-server', '--save', '', '--appendonly', 'no'])
+      .withExposedPorts(6379)
+      .withWaitStrategy(Wait.forListeningPorts())
+      .start();
+    const redisUrl = `redis://${redis.getHost()}:${redis.getMappedPort(6379)}`;
+    const { aggregateId, eventId } = await createMutation();
+    const publisher = new DurableQueue({
+      db: handle.db,
+      redisUrl,
+      prefix: services.redisPrefix,
+      consume: false,
+    });
+    try {
+      await publisher.ping();
+      expect(await publisher.recoverOnce()).toBe(1);
+      await publisher.close();
+      const docker = promisify(execFile);
+      await docker('docker', ['stop', '-t', '0', redis.getId()]);
+      await docker('docker', ['start', redis.getId()]);
+      const mapping = await docker('docker', ['port', redis.getId(), '6379/tcp']);
+      const restartedPort = /:(\d+)/.exec(mapping.stdout)?.[1];
+      if (!restartedPort) throw new Error('Redis restart did not expose a port');
+      const restartedUrl = `redis://${redis.getHost()}:${restartedPort}`;
+      await sql`UPDATE outbox_deliveries SET next_publish_at=clock_timestamp() WHERE event_id=${eventId}::uuid`.execute(
+        handle.db,
+      );
+      const worker = new DurableQueue({
+        db: handle.db,
+        redisUrl: restartedUrl,
+        prefix: services.redisPrefix,
+        handlers: {
+          'test-consumer': async (tx) => {
+            await sql`UPDATE test_aggregates SET effects=effects+1 WHERE id=${aggregateId}::uuid`.execute(
+              tx,
+            );
+          },
+        },
+      });
+      try {
+        await worker.ping();
+        expect(await worker.recoverOnce()).toBe(1);
+        await eventually(
+          async () =>
+            (
+              await sql<{
+                effects: number;
+              }>`SELECT effects FROM test_aggregates WHERE id=${aggregateId}::uuid`.execute(
+                handle.db,
+              )
+            ).rows[0]?.effects === 1,
+        );
+      } finally {
+        await worker.close();
+      }
+    } finally {
+      await redis.stop();
+    }
+  }, 60000);
+
+  it('recovers an obligation after the committing process is killed', async () => {
+    const aggregateId = uuidV7();
+    const eventId = uuidV7();
+    const child = fork(resolve('test/helpers/commit-worker.ts'), [], {
+      execArgv: ['--import', 'tsx'],
+      env: {
+        ...process.env,
+        TEST_CHILD_DATABASE_URL: services.databaseUrl,
+        TEST_CHILD_AGGREGATE_ID: aggregateId,
+        TEST_CHILD_EVENT_ID: eventId,
+      },
+      stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    });
+    try {
+      const [message] = await once(child, 'message');
+      expect(message).toBe('committed');
+      child.kill('SIGKILL');
+      await once(child, 'exit');
+      const durable = new DurableQueue({
+        db: handle.db,
+        redisUrl: services.redisUrl,
+        prefix: services.redisPrefix,
+        handlers: {
+          'test-consumer': async (tx) => {
+            await sql`UPDATE test_aggregates SET effects=effects+1 WHERE id=${aggregateId}::uuid`.execute(
+              tx,
+            );
+          },
+        },
+      });
+      try {
+        await durable.ping();
+        expect(await durable.recoverOnce()).toBe(1);
+        await eventually(
+          async () =>
+            (
+              await sql<{
+                effects: number;
+              }>`SELECT effects FROM test_aggregates WHERE id=${aggregateId}::uuid`.execute(
+                handle.db,
+              )
+            ).rows[0]?.effects === 1,
+        );
+        expect(await durable.recoverOnce()).toBe(0);
+      } finally {
+        await durable.close();
+      }
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+  }, 20000);
+
   it('waits for an in-flight recovery before closing its queue', async () => {
     const durable = new DurableQueue({
       db: handle.db,

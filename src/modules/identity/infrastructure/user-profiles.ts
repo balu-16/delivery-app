@@ -42,7 +42,7 @@ export class DatabaseUserProfiles implements UserProfiles {
       if (!user.rows[0]) throw new Error('USER_NOT_FOUND');
       const existing = await sql<{
         id: string;
-      }>`SELECT id FROM erasure_requests WHERE user_id=${userId}::uuid AND status='REQUESTED'`.execute(
+      }>`SELECT id FROM erasure_requests WHERE user_id=${userId}::uuid AND status IN ('REQUESTED','BLOCKED','AWAITING_APPROVAL','PROCESSING','CLEANUP')`.execute(
         tx,
       );
       if (existing.rows[0]) return existing.rows[0].id;

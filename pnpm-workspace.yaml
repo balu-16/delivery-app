@@ -4,6 +4,7 @@ minimumReleaseAgeExclude:
   - '@nestjs/platform-fastify@12.4.0'
   - '@nestjs/swagger@12.1.1'
 allowBuilds:
+  '@firebase/util': false
   '@scarf/scarf': false
   msgpackr-extract: false
   esbuild: true

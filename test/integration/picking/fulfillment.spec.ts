@@ -64,6 +64,8 @@ const configFake: AppConfig = {
 };
 const runtimeFake = {
   get: (key: string) => {
+    if (key === 'PICKING_CODE_KEY_VERSION') return 1;
+    if (key === 'PICKING_CODE_KEYS_JSON') return '{}';
     if (key === 'PICKING_HANDOVER_SECRET') return 'picking-test-secret-0123456789abcdef';
     throw new Error(`unexpected runtime read: ${key}`);
   },
@@ -75,6 +77,7 @@ const fakeFulfillment: OrderFulfillment = {
   },
 };
 const fakeAdjustments: FinancialAdjustments = {
+  settleFulfillment: async () => ({ refundedPaise: '0', creditNoteRequired: false }),
   recordShort: async () => ({ refundedPaise: '0', creditNoteRequired: false }),
 };
 const fakeReads: OrderFulfillmentReads = {
@@ -89,15 +92,31 @@ const fakeSignals: StoreSignals = {
   evaluateDue: async () => 0,
 };
 
-async function confirmedOrder(lines: { variantId: string; quantity: string }[]) {
+async function confirmedOrder(
+  lines: { variantId: string; quantity: string }[],
+  opts?: { receive?: boolean },
+  _ttl = 900,
+) {
   const order = await emitOrderConfirmed(db, world, lines);
-  for (const line of lines)
-    await reservations.reserve({
-      orderId: order.orderId,
-      lines: [{ storeId: world.store, variantId: line.variantId, quantity: line.quantity }],
-      targetDeliveryAt: new Date(Date.now() + 600000).toISOString(),
-      ttlSeconds: 900,
-    });
+  if (opts?.receive !== false)
+    for (const line of lines)
+      await inventory.receive(world.manager, {
+        storeId: world.store,
+        variantId: line.variantId,
+        batchCode: `AUTO-${uuidV7().slice(0, 8)}`,
+        quantity: line.quantity,
+        reference: uuidV7(),
+      });
+  await reservations.reserve({
+    orderId: order.orderId,
+    lines: lines.map((line) => ({
+      storeId: world.store,
+      variantId: line.variantId,
+      quantity: line.quantity,
+    })),
+    targetDeliveryAt: new Date(Date.now() + 600000).toISOString(),
+    ttlSeconds: 900,
+  });
   await reservations.commit(order.orderId);
   const event = await sql<{
     payload: unknown;
@@ -126,7 +145,7 @@ async function completeWith(order: { taskId: string }, barcode: string) {
   const item = task.items[0]!;
   const batches = await sql<{
     id: string;
-  }>`SELECT id FROM inventory_allocations WHERE order_id=(SELECT order_id FROM pick_tasks WHERE id=${order.taskId}::uuid) AND variant_id=${item.variantId}::uuid LIMIT 1`.execute(
+  }>`SELECT batch_id AS id FROM inventory_allocations WHERE order_id=(SELECT order_id FROM pick_tasks WHERE id=${order.taskId}::uuid) AND variant_id=${item.variantId}::uuid LIMIT 1`.execute(
     db.db,
   );
   await picking.pickItem(
@@ -214,13 +233,21 @@ test('pack requires a completed task, records seal data once and marks the order
     reference,
   );
   expect(packed).toContain(order.orderId);
-  // Replay with the same reference returns the original record untouched.
+  // A matching replay succeeds; changing a request under the same key conflicts.
   await packing.pack(
     world.picker1,
     order.orderId,
-    { bags: '9', sealCode: 'S1', coldChain: false },
+    { bags: '2', sealCode: 'S1', coldChain: true },
     reference,
   );
+  await expect(
+    packing.pack(
+      world.picker1,
+      order.orderId,
+      { bags: '9', sealCode: 'S1', coldChain: false },
+      reference,
+    ),
+  ).rejects.toThrow('IDEMPOTENCY_KEY_REUSED');
   const row = await sql<{
     bags: number;
     cold_chain: boolean;
@@ -335,11 +362,12 @@ test('an all-short task goes through the shared cancel routine and never complet
     quantity: '1',
     reference: uuidV7(),
   });
-  const order = await confirmedOrder([{ variantId: v, quantity: '1' }]);
+  const order = await confirmedOrder([{ variantId: v, quantity: '1' }], { receive: false });
   await picking.claim(world.picker1, order.taskId, uuidV7());
   await picking.start(world.picker1, order.taskId, uuidV7());
-  const item = (await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' }))
-    .items[0]!.items[0]!;
+  const item = (
+    await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' })
+  ).items.find((task) => task.id === order.taskId)!.items[0]!;
   const shorted = await picking.shortItem(
     world.picker1,
     order.taskId,
@@ -420,8 +448,9 @@ test('substitution guards fail closed and a listed swap reconciles reservations'
   const order = await confirmedOrder([{ variantId: original, quantity: '1' }]);
   await picking.claim(world.picker1, order.taskId, uuidV7());
   await picking.start(world.picker1, order.taskId, uuidV7());
-  const item = (await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' }))
-    .items[0]!.items[0]!;
+  const item = (
+    await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' })
+  ).items.find((task) => task.id === order.taskId)!.items[0]!;
   // Unlisted candidate is rejected even with the flag on.
   const stranger = await world.makeVariant({ barcode: 'X2' });
   await expect(
@@ -471,4 +500,50 @@ test('substitution guards fail closed and a listed swap reconciles reservations'
     db.db,
   );
   expect(after.rows[0]).toEqual({ on_hand: '1', reserved: '0' });
+});
+
+test('completion merges selections from separate lines sharing one allocated batch', async () => {
+  const variant = await world.makeVariant({ barcode: 'MERGED-BATCH' });
+  const order = await confirmedOrder([{ variantId: variant, quantity: '2' }]);
+  const secondItem = uuidV7();
+  await sql`UPDATE order_items SET ordered_qty=1,fulfilled_qty=1 WHERE order_id=${order.orderId}::uuid`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO order_items(id,order_id,variant_id,name_snapshot,ordered_qty,fulfilled_qty,unit_price_paise,mrp_paise,tax_rate_bps,hsn_code,line_status)
+    VALUES(${secondItem}::uuid,${order.orderId}::uuid,${variant}::uuid,'second line',1,1,0,0,0,'0000','FULFILLED')`.execute(
+    db.db,
+  );
+  await sql`UPDATE pick_items SET expected_qty=1 WHERE task_id=${order.taskId}::uuid`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO pick_items(id,task_id,order_item_id,variant_id,name_snapshot,expected_qty,status)
+    VALUES(${uuidV7()}::uuid,${order.taskId}::uuid,${secondItem}::uuid,${variant}::uuid,'second line',1,'PENDING')`.execute(
+    db.db,
+  );
+  await picking.claim(world.picker1, order.taskId, uuidV7());
+  await picking.start(world.picker1, order.taskId, uuidV7());
+  const task = (
+    await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' })
+  ).items.find((entry) => entry.id === order.taskId)!;
+  const allocation = await sql<{
+    batch_id: string;
+  }>`SELECT batch_id FROM inventory_allocations WHERE order_id=${order.orderId}::uuid AND variant_id=${variant}::uuid`.execute(
+    db.db,
+  );
+  for (const item of task.items)
+    await picking.pickItem(
+      world.picker1,
+      order.taskId,
+      item.id,
+      { scannedBarcode: 'MERGED-BATCH', quantity: '1', batchId: allocation.rows[0]!.batch_id },
+      uuidV7(),
+    );
+  expect((await picking.complete(world.picker1, order.taskId, uuidV7())).status).toBe('COMPLETED');
+  const stock = await sql<{
+    on_hand: string;
+    reserved: string;
+  }>`SELECT on_hand::text,reserved::text FROM store_inventory WHERE store_id=${world.store}::uuid AND variant_id=${variant}::uuid`.execute(
+    db.db,
+  );
+  expect(stock.rows[0]).toEqual({ on_hand: '0', reserved: '0' });
 });

@@ -1,0 +1,436 @@
+{
+  "schemaVersion": 1,
+  "description": "Focused evidence from real admin HTTP routes in an isolated P5 PostgreSQL world. A listed case is only the asserted scenario; it does not claim full security coverage. Route inventory is maintained separately.",
+  "entries": [
+    {
+      "id": "AdminIdentityController_getConfig",
+      "method": "GET",
+      "path": "/v1/admin/config",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: enforces super-admin configuration authority and audits typed settings and flags"
+    },
+    {
+      "id": "AdminIdentityController_updateConfig",
+      "method": "POST",
+      "path": "/v1/admin/config/{key}",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "unknown body field rejected (400)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: enforces super-admin configuration authority and audits typed settings and flags"
+    },
+    {
+      "id": "AdminIdentityController_updateFlag",
+      "method": "POST",
+      "path": "/v1/admin/feature-flags/{key}",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "unknown body field rejected (400)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: enforces super-admin configuration authority and audits typed settings and flags"
+    },
+    {
+      "id": "adminListCities",
+      "method": "GET",
+      "path": "/v1/admin/cities",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminCreateCity",
+      "method": "POST",
+      "path": "/v1/admin/cities",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "unknown body field rejected (400)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminDeleteCity",
+      "method": "DELETE",
+      "path": "/v1/admin/cities/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminUpdateCity",
+      "method": "PATCH",
+      "path": "/v1/admin/cities/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminListLegalEntities",
+      "method": "GET",
+      "path": "/v1/admin/legal-entities",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminCreateLegalEntity",
+      "method": "POST",
+      "path": "/v1/admin/legal-entities",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "unknown body field rejected (400)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminDeleteLegalEntity",
+      "method": "DELETE",
+      "path": "/v1/admin/legal-entities/{id}",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "referenced entity rejected (409)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminUpdateLegalEntity",
+      "method": "PATCH",
+      "path": "/v1/admin/legal-entities/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminListStores",
+      "method": "GET",
+      "path": "/v1/admin/stores",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminCreateStore",
+      "method": "POST",
+      "path": "/v1/admin/stores",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "unknown body field rejected (400)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminDeleteStore",
+      "method": "DELETE",
+      "path": "/v1/admin/stores/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminUpdateStore",
+      "method": "PATCH",
+      "path": "/v1/admin/stores/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminSaveStoreHoliday",
+      "method": "PUT",
+      "path": "/v1/admin/stores/{id}/holidays",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminDeleteStoreHoliday",
+      "method": "DELETE",
+      "path": "/v1/admin/stores/{id}/holidays/{day}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminReplaceStoreHours",
+      "method": "PUT",
+      "path": "/v1/admin/stores/{id}/hours",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminGetStoreOperations",
+      "method": "GET",
+      "path": "/v1/admin/stores/{id}/operations",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminListZones",
+      "method": "GET",
+      "path": "/v1/admin/zones",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminCreateZone",
+      "method": "POST",
+      "path": "/v1/admin/zones",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "unknown body field rejected (400)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminDeactivateZone",
+      "method": "DELETE",
+      "path": "/v1/admin/zones/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminUpdateZone",
+      "method": "PATCH",
+      "path": "/v1/admin/zones/{id}",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "stale version rejected (409)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminAddAssortment",
+      "method": "POST",
+      "path": "/v1/admin/catalog/assortment",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminListBrands",
+      "method": "GET",
+      "path": "/v1/admin/catalog/brands",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminCreateBrand",
+      "method": "POST",
+      "path": "/v1/admin/catalog/brands",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "unknown body field rejected (400)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminDeleteBrand",
+      "method": "DELETE",
+      "path": "/v1/admin/catalog/brands/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminGetBrand",
+      "method": "GET",
+      "path": "/v1/admin/catalog/brands/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminUpdateBrand",
+      "method": "PUT",
+      "path": "/v1/admin/catalog/brands/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminListCategories",
+      "method": "GET",
+      "path": "/v1/admin/catalog/categories",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminCreateCategory",
+      "method": "POST",
+      "path": "/v1/admin/catalog/categories",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "unknown body field rejected (400)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminDeleteCategory",
+      "method": "DELETE",
+      "path": "/v1/admin/catalog/categories/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminGetCategory",
+      "method": "GET",
+      "path": "/v1/admin/catalog/categories/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminUpdateCategory",
+      "method": "PUT",
+      "path": "/v1/admin/catalog/categories/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminSetPrice",
+      "method": "POST",
+      "path": "/v1/admin/catalog/prices",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminListProducts",
+      "method": "GET",
+      "path": "/v1/admin/catalog/products",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminCreateProduct",
+      "method": "POST",
+      "path": "/v1/admin/catalog/products",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "unknown body field rejected (400)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminDeleteProduct",
+      "method": "DELETE",
+      "path": "/v1/admin/catalog/products/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminGetProduct",
+      "method": "GET",
+      "path": "/v1/admin/catalog/products/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminUpdateProduct",
+      "method": "PUT",
+      "path": "/v1/admin/catalog/products/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminListSynonyms",
+      "method": "GET",
+      "path": "/v1/admin/catalog/synonyms",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminSetSynonym",
+      "method": "PUT",
+      "path": "/v1/admin/catalog/synonyms",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminListVariants",
+      "method": "GET",
+      "path": "/v1/admin/catalog/variants",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminCreateVariant",
+      "method": "POST",
+      "path": "/v1/admin/catalog/variants",
+      "cases": [
+        "valid request",
+        "inappropriate role rejected (403)",
+        "unknown body field rejected (400)"
+      ],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminDeleteVariant",
+      "method": "DELETE",
+      "path": "/v1/admin/catalog/variants/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminGetVariant",
+      "method": "GET",
+      "path": "/v1/admin/catalog/variants/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminUpdateVariant",
+      "method": "PUT",
+      "path": "/v1/admin/catalog/variants/{id}",
+      "cases": ["valid request", "inappropriate role rejected (403)"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits"
+    },
+    {
+      "id": "adminSetStoreStatus",
+      "method": "POST",
+      "path": "/v1/admin/stores/{id}/status",
+      "cases": ["valid request"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    },
+    {
+      "id": "adminSetStoreStaff",
+      "method": "PUT",
+      "path": "/v1/admin/stores/{id}/staff",
+      "cases": ["valid request to remove an inactive assignment"],
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+    }
+  ],
+  "groupAuditAssertions": [
+    {
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits",
+      "actions": [
+        "LEGAL_ENTITY_SAVED",
+        "CITY_SAVED",
+        "STORE_SAVED",
+        "STORE_HOURS_CHANGED",
+        "STORE_HOLIDAY_CHANGED",
+        "ZONE_CREATED",
+        "ZONE_UPDATED",
+        "ZONE_DEACTIVATED"
+      ]
+    },
+    {
+      "test": "test/e2e/p13-admin-crud.spec.ts: manages catalog names, products, variants, assortment, prices and synonyms with validation and audits",
+      "actions": ["CATALOG_NAMED_SAVED", "CATALOG_PRODUCT_SAVED", "CATALOG_VARIANT_SAVED"]
+    },
+    {
+      "test": "test/e2e/p13-admin-crud.spec.ts: enforces super-admin configuration authority and audits typed settings and flags",
+      "actions": ["CONFIG_CHANGED", "FLAG_CHANGED"]
+    }
+  ],
+  "existingEvidence": [
+    {
+      "test": "test/integration/coupons/coupons.spec.ts: admin coupon CRUD is audited, replayed and version-fenced",
+      "scope": "Coupon administration"
+    },
+    {
+      "test": "test/integration/coupons/coupons.spec.ts: coupon administration rejects non-admins and non-workforce callers",
+      "scope": "Coupon authorization"
+    }
+  ],
+  "limitations": [
+    "A single support role and, for configuration, an ADMIN role were tested; no exhaustive role matrix is claimed.",
+    "Unknown-field validation was checked only for the specific create and configuration routes listed.",
+    "No idempotency-key replay is asserted for these non-idempotency-key CRUD routes; coupon replay evidence is separate.",
+    "The staff assignment test only exercises removal of an inactive assignment; it does not exercise adding active staff."
+  ]
+}

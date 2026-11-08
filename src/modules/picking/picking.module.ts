@@ -5,6 +5,7 @@ import {
   Module,
   OnApplicationBootstrap,
 } from '@nestjs/common';
+import { InventoryShortfallConsumer } from './infrastructure/inventory-shortfall-consumer.js';
 import { PLATFORM_DATABASE, PLATFORM_QUEUE } from '../../platform/contracts/runtime.js';
 import type { DatabaseHandle } from '../../platform/database/database.js';
 import type { DurableQueue } from '../../platform/queue/queue.js';
@@ -55,9 +56,9 @@ import { PostgresPickActions } from './infrastructure/postgres-pick-actions.js';
 import { PostgresPickViews } from './infrastructure/postgres-pick-views.js';
 import { PostgresPickCancellation } from './infrastructure/postgres-pick-cancellation.js';
 import { PostgresPacking } from './infrastructure/postgres-packing.js';
-import { UnboundFulfillment } from './infrastructure/unbound-fulfillment.js';
-
-const unbound = () => new UnboundFulfillment();
+import { OrdersModule } from '../orders/orders.module.js';
+import { ORDER_PICKING_INTEGRATION } from '../orders/contracts/orders.js';
+import { recoverDisconnected } from './infrastructure/presence.js';
 
 /** Outbox consumer name: P6 routes ORDER_CONFIRMED deliveries to 'picking'. */
 export const PICKING_CONSUMER = 'picking';
@@ -65,16 +66,23 @@ export const PICKING_CONSUMER = 'picking';
 /**
  * Store fulfillment module. The order-side ports (ORDER_FULFILLMENT,
  * FINANCIAL_ADJUSTMENTS, ORDER_CANCELLATION, ORDER_FULFILLMENT_READS) are
- * bound to a fail-closed stand-in until P6's real contracts are adapted in
- * (ADR 0010); stock, scan, SLA and handover behavior is fully live.
+ * bound to the real order integration provider; stock and financial changes
+ * share the fulfillment transaction.
  */
 @Module({
-  imports: [IdentityModule, AppConfigModule, StoresModule, InventoryModule, CatalogModule],
+  imports: [
+    IdentityModule,
+    AppConfigModule,
+    StoresModule,
+    InventoryModule,
+    CatalogModule,
+    OrdersModule,
+  ],
   providers: [
-    { provide: ORDER_FULFILLMENT, useFactory: unbound },
-    { provide: FINANCIAL_ADJUSTMENTS, useFactory: unbound },
-    { provide: ORDER_CANCELLATION, useFactory: unbound },
-    { provide: ORDER_FULFILLMENT_READS, useFactory: unbound },
+    { provide: ORDER_FULFILLMENT, useExisting: ORDER_PICKING_INTEGRATION },
+    { provide: FINANCIAL_ADJUSTMENTS, useExisting: ORDER_PICKING_INTEGRATION },
+    { provide: ORDER_CANCELLATION, useExisting: ORDER_PICKING_INTEGRATION },
+    { provide: ORDER_FULFILLMENT_READS, useExisting: ORDER_PICKING_INTEGRATION },
     {
       provide: PostgresPickViews,
       inject: [PLATFORM_DATABASE],
@@ -193,16 +201,26 @@ class PickingWorkerLifecycle implements OnApplicationBootstrap, BeforeApplicatio
   private readonly consumer: OrderConfirmedConsumer;
   private readonly sla: PickingSlaWorker;
   constructor(
-    @Inject(PLATFORM_DATABASE) handle: DatabaseHandle,
-    @Inject(APP_CONFIG) config: AppConfig,
+    @Inject(PLATFORM_DATABASE) private readonly handle: DatabaseHandle,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(STORE_SIGNALS) signals: StoreSignals,
     @Inject(PLATFORM_QUEUE) private readonly queue: DurableQueue,
+    @Inject(PICK_CANCELLATION) private readonly cancellation: PostgresPickCancellation,
+    @Inject(ORDER_CANCELLATION) private readonly orders: OrderCancellation,
   ) {
     this.consumer = new OrderConfirmedConsumer(config);
     this.sla = new PickingSlaWorker(handle.db, signals);
   }
   onApplicationBootstrap(): void {
-    this.queue.registerHandler(PICKING_CONSUMER, (tx, event) => this.consumer.handle(tx, event));
+    this.queue.registerHandler(PICKING_CONSUMER, async (tx, event) => {
+      if (event.eventType === 'ORDER_CANCELLED') {
+        const payload = event.payload as { orderId?: string; reason?: string };
+        if (!payload.orderId) throw new Error('UNPARSEABLE_EVENT');
+        await this.cancellation.cancel(payload.orderId, payload.reason ?? 'ORDER_CANCELLED', tx);
+      } else await this.consumer.handle(tx, event);
+    });
+    const shortfalls = new InventoryShortfallConsumer(this.orders, this.cancellation);
+    this.queue.registerHandler('inventory-shortfalls', (tx, event) => shortfalls.handle(tx, event));
     this.run();
     this.timer = setInterval(() => this.run(), 60000);
     this.timer.unref();
@@ -211,6 +229,7 @@ class PickingWorkerLifecycle implements OnApplicationBootstrap, BeforeApplicatio
     if (this.active) return;
     this.active = (async () => {
       await this.sla.runOnce();
+      await recoverDisconnected(this.handle.db, this.config);
     })()
       .catch(() => {
         process.stderr.write('Picking maintenance failed; it will retry\n');
@@ -225,5 +244,8 @@ class PickingWorkerLifecycle implements OnApplicationBootstrap, BeforeApplicatio
   }
 }
 
-@Module({ imports: [PickingModule], providers: [PickingWorkerLifecycle] })
+@Module({
+  imports: [PickingModule, AppConfigModule, StoresModule, OrdersModule],
+  providers: [PickingWorkerLifecycle],
+})
 export class PickingWorkerModule {}

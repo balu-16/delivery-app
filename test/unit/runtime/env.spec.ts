@@ -1,6 +1,35 @@
 import { readEnv } from '../../../src/config/env.schema.js';
 
 describe('runtime environment', () => {
+  it('requires exactly one Firebase credential source when FCM is enabled', () => {
+    expect(() => readEnv({ PUSH_PROVIDER: 'fcm' })).toThrow(/FIREBASE_SERVICE_ACCOUNT_PATH/);
+    expect(
+      readEnv({ PUSH_PROVIDER: 'fcm', FIREBASE_SERVICE_ACCOUNT_PATH: '/private/firebase.json' })
+        .PUSH_PROVIDER,
+    ).toBe('fcm');
+    expect(() =>
+      readEnv({
+        PUSH_PROVIDER: 'fcm',
+        FIREBASE_SERVICE_ACCOUNT_PATH: '/private/firebase.json',
+        FCM_SERVICE_ACCOUNT_JSON_SECRET: '{}',
+      }),
+    ).toThrow(/FIREBASE_SERVICE_ACCOUNT_PATH/);
+  });
+  it('bounds receive, pool and worker settings before startup', () => {
+    const defaults = readEnv({});
+    expect(defaults.DB_ACQUIRE_TIMEOUT_MS).toBe(5000);
+    expect(defaults.OUTBOX_POLL_INTERVAL_MS).toBe(500);
+    expect(defaults.QUEUE_CONCURRENCY).toBe(4);
+    for (const settings of [
+      { DB_ACQUIRE_TIMEOUT_MS: '0' },
+      { DB_ACQUIRE_TIMEOUT_MS: '60001' },
+      { OUTBOX_POLL_INTERVAL_MS: '99' },
+      { QUEUE_CONCURRENCY: '101' },
+      { HTTP_REQUEST_TIMEOUT_MS: '0' },
+      { HTTP_REQUEST_TIMEOUT_MS: '1000', HTTP_HEADERS_TIMEOUT_MS: '2000' },
+    ])
+      expect(() => readEnv(settings)).toThrow('Invalid environment:');
+  });
   it('uses local defaults and includes every source key', () => {
     const env = readEnv({});
     expect(env.APP_ROLE).toBe('all');

@@ -125,17 +125,38 @@ export class OutboxStore {
   async publishDue(
     publish: (delivery: ClaimedDelivery) => Promise<void>,
     limit = 50,
+    onPublishFailure: () => void = () => undefined,
   ): Promise<number> {
     const deliveries = await this.claim(limit);
-    for (const delivery of deliveries) {
+    for (let index = 0; index < deliveries.length; index++) {
+      const delivery = deliveries[index]!;
       try {
         await publish(delivery);
         await this.acknowledge(delivery);
       } catch {
-        await this.fail(delivery);
+        onPublishFailure();
+        // A transport outage should incur one command deadline per batch, not
+        // one per delivery. Release the remaining claims for a later poll.
+        for (const pending of deliveries.slice(index)) await this.fail(pending);
+        break;
       }
     }
     return deliveries.length;
+  }
+  /** Database is authoritative even when Redis loses queued jobs. */
+  async metrics(): Promise<{ pending: number; suspended: number; oldestSeconds: number }> {
+    const result = await sql<{ pending: string; suspended: string; oldest_seconds: string }>`
+      SELECT count(*) FILTER (WHERE d.suspended_at IS NULL)::text AS pending,
+        count(*) FILTER (WHERE d.suspended_at IS NOT NULL)::text AS suspended,
+        COALESCE(GREATEST(0, EXTRACT(EPOCH FROM (clock_timestamp() - min(e.occurred_at) FILTER (WHERE d.suspended_at IS NULL)))), 0)::text AS oldest_seconds
+      FROM outbox_deliveries d JOIN outbox_events e ON e.id=d.event_id
+      WHERE d.completed_at IS NULL`.execute(this.db);
+    const row = result.rows[0];
+    return {
+      pending: Number(row?.pending ?? 0),
+      suspended: Number(row?.suspended ?? 0),
+      oldestSeconds: Number(row?.oldest_seconds ?? 0),
+    };
   }
   /** Bounded operator view; payloads are intentionally excluded. */
   async listFailed(limit = 50): Promise<FailedDelivery[]> {

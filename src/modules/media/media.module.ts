@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { S3Client } from '@aws-sdk/client-s3';
+import { createS3Client } from '../../adapters/storage/s3-client.js';
 import { ConfigService } from '../../config/config.service.js';
 import { PLATFORM_DATABASE } from '../../platform/contracts/runtime.js';
 import type { DatabaseHandle } from '../../platform/database/database.js';
@@ -24,12 +24,7 @@ import { S3Storage } from './infrastructure/s3-storage.js';
               config.get('LOCAL_JWT_SECRET'),
             )
           : new S3Storage(
-              new S3Client({
-                region: config.get('AWS_REGION'),
-                ...(config.get('S3_ENDPOINT')
-                  ? { endpoint: config.get('S3_ENDPOINT'), forcePathStyle: true }
-                  : {}),
-              }),
+              createS3Client(config),
               config.get('S3_MEDIA_BUCKET')!,
               config.get('S3_PRIVATE_BUCKET')!,
             ),

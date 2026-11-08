@@ -61,6 +61,19 @@ const fakeFulfillment: OrderFulfillment = {
   markPacked: async () => undefined,
 };
 const fakeAdjustments: FinancialAdjustments = {
+  settleFulfillment: async (input) => {
+    adjustmentLines.push(
+      ...input.lines
+        .filter((l) => BigInt(l.shortQty) > 0n || l.substituteVariantId)
+        .map((l) => ({
+          orderItemId: l.orderItemId,
+          shortQty: l.shortQty,
+          reason: l.reason ?? 'SUBSTITUTED',
+          substituteVariantId: l.substituteVariantId,
+        })),
+    );
+    return { refundedPaise: '0', creditNoteRequired: false };
+  },
   recordShort: async (input) => {
     adjustmentLines.push(...input.lines);
     return { refundedPaise: '0', creditNoteRequired: false };
@@ -72,15 +85,30 @@ const fakeReads: OrderFulfillmentReads = {
   orderSummary: async () => null,
 };
 
-async function confirmedOrder(lines: { variantId: string; quantity: string }[]) {
+async function confirmedOrder(
+  lines: { variantId: string; quantity: string }[],
+  opts?: { receive?: boolean },
+) {
   const order = await emitOrderConfirmed(db, world, lines);
-  for (const line of lines)
-    await reservations.reserve({
-      orderId: order.orderId,
-      lines: [{ storeId: world.store, variantId: line.variantId, quantity: line.quantity }],
-      targetDeliveryAt: new Date(Date.now() + 600000).toISOString(),
-      ttlSeconds: 900,
-    });
+  if (opts?.receive !== false)
+    for (const line of lines)
+      await inventory.receive(world.manager, {
+        storeId: world.store,
+        variantId: line.variantId,
+        batchCode: `AUTO-${uuidV7().slice(0, 8)}`,
+        quantity: line.quantity,
+        reference: uuidV7(),
+      });
+  await reservations.reserve({
+    orderId: order.orderId,
+    lines: lines.map((line) => ({
+      storeId: world.store,
+      variantId: line.variantId,
+      quantity: line.quantity,
+    })),
+    targetDeliveryAt: new Date(Date.now() + 600000).toISOString(),
+    ttlSeconds: 900,
+  });
   await reservations.commit(order.orderId);
   const event = await sql<{
     payload: unknown;
@@ -192,8 +220,9 @@ test('cancel and pick-complete serialize into one consistent terminal state', as
   const order = await confirmedOrder([{ variantId: v, quantity: '2' }]);
   await picking.claim(world.picker1, order.taskId, uuidV7());
   await picking.start(world.picker1, order.taskId, uuidV7());
-  const item = (await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' }))
-    .items[0]!.items[0]!;
+  const item = (
+    await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' })
+  ).items.find((task) => task.id === order.taskId)!.items[0]!;
   await picking.pickItem(
     world.picker1,
     order.taskId,
@@ -239,6 +268,8 @@ test('cancel and pick-complete serialize into one consistent terminal state', as
 test('substitution cannot oversell: exactly one contending reservation wins', async () => {
   const original = await world.makeVariant({ barcode: 'O1' });
   const replacement = await world.makeVariant({ barcode: 'R1' });
+  await sql`INSERT INTO substitute_candidates(variant_id,candidate_variant_id)
+    VALUES(${original}::uuid,${replacement}::uuid)`.execute(db.db);
   const contender = uuidV7();
   await inventory.receive(world.manager, {
     storeId: world.store,
@@ -257,6 +288,9 @@ test('substitution cannot oversell: exactly one contending reservation wins', as
   const order = await confirmedOrder([{ variantId: original, quantity: '1' }]);
   // A separate confirmed order holds the single replacement unit; it is
   // released just before the two contending acquirers race for it.
+  await sql`INSERT INTO orders(id,order_number,user_id,store_id,address_snapshot,status,payment_status,subtotal_paise,total_paise,amount_due_paise,placed_at)
+    SELECT ${contender}::uuid,${('ORD-' + contender.replaceAll('-', '')).toUpperCase()},user_id,store_id,'{}'::jsonb,'PENDING_PAYMENT','UNPAID',0,0,0,clock_timestamp()
+    FROM orders WHERE id=${order.orderId}::uuid`.execute(db.db);
   await reservations.reserve({
     orderId: contender,
     lines: [{ storeId: world.store, variantId: replacement, quantity: '1' }],
@@ -265,8 +299,9 @@ test('substitution cannot oversell: exactly one contending reservation wins', as
   });
   await picking.claim(world.picker1, order.taskId, uuidV7());
   await picking.start(world.picker1, order.taskId, uuidV7());
-  const item = (await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' }))
-    .items[0]!.items[0]!;
+  const item = (
+    await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' })
+  ).items.find((task) => task.id === order.taskId)!.items[0]!;
   await reservations.release(contender);
   const [substitute, reReserve] = await Promise.allSettled([
     picking.substituteItem(
@@ -278,6 +313,7 @@ test('substitution cannot oversell: exactly one contending reservation wins', as
     ),
     reservations.reserve({
       orderId: contender,
+      cycleReference: 'retry',
       lines: [{ storeId: world.store, variantId: replacement, quantity: '1' }],
       targetDeliveryAt: new Date(Date.now() + 600000).toISOString(),
       ttlSeconds: 900,

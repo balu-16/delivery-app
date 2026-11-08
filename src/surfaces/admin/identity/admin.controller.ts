@@ -67,8 +67,13 @@ async function identityCommand<T>(work: () => Promise<T>): Promise<T> {
         'LAST_SUPER_ADMIN',
         'CANNOT_DISABLE_SELF',
         'PROVISIONING_INPUT_CONFLICT',
+        'EXISTING_COGNITO_IDENTITY_REQUIRES_REVIEW',
+        'PROVISIONING_REQUIRES_REVIEW',
+        'PROVISIONING_IN_PROGRESS',
         'ROLE_NOT_ASSIGNED',
         'DOCUMENT_STATE_INVALID',
+        'WALLET_REQUIRED_FOR_SUBSCRIPTIONS',
+        'INVALID_SLOT_TIMING',
       ].includes(code)
     )
       throw new ConflictException({ code });

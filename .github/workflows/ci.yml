@@ -2,6 +2,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -35,6 +36,8 @@ jobs:
           set -o pipefail
           # The integration project includes empty/populated migration and rollback tests.
           pnpm test:coverage --json --outputFile=artifacts/tests.json 2>&1 | tee artifacts/tests.log
+      - name: Validate named P13 evidence and report remaining criteria
+        run: node scripts/verify-p13-evidence.mjs --results artifacts/tests.json --output artifacts/p13-security-evidence.json
       - name: Audit dependencies
         run: |
           set -o pipefail
@@ -44,18 +47,6 @@ jobs:
           set -o pipefail
           pnpm openapi:export 2>&1 | tee artifacts/openapi.log
           node scripts/verify-manifests.mjs 2>&1 | tee artifacts/openapi-manifests.log
-      - name: S3 emulator contract
-        run: |
-          set -o pipefail
-          docker compose up -d --wait localstack
-          TEST_S3_ENDPOINT=http://127.0.0.1:4566 node scripts/storage-smoke.mjs 2>&1 | tee artifacts/storage.log
-      - name: Build container
-        run: |
-          set -o pipefail
-          docker build -t delivery-platform:ci . 2>&1 | tee artifacts/docker-build.log
-      - name: Stop local services
-        if: always()
-        run: docker compose down --remove-orphans
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -67,4 +58,70 @@ jobs:
         with:
           name: openapi
           path: openapi/
+          if-no-files-found: error
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build and rehearse immutable application image
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          docker build -t delivery-platform:p13 . 2>&1 | tee artifacts/docker-build.log
+          pnpm test:container 2>&1 | tee artifacts/container-smoke.log
+      - name: S3 emulator contract
+        run: |
+          set -o pipefail
+          docker compose up -d --wait localstack
+          pnpm build
+          TEST_S3_ENDPOINT=http://127.0.0.1:4566 node scripts/storage-smoke.mjs 2>&1 | tee artifacts/storage.log
+      - name: Stop local services
+        if: always()
+        run: docker compose down --remove-orphans
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: container-logs
+          path: artifacts/
+          if-no-files-found: error
+  load-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm load:install
+      - name: Isolated short harness smoke (not full-scale acceptance)
+        env:
+          LOAD_OUTPUT_DIR: artifacts/p13-load
+        run: node --import tsx test/load/run-local.ts --profile=smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-smoke-reports
+          path: |
+            artifacts/p13-load/**/report.json
+            artifacts/p13-load/**/summary.json
+            artifacts/p13-load/**/console.log
+            artifacts/p13-load/orchestrator-*.json
+            artifacts/p13-load/run.json
+            artifacts/p13-load/sockets-*.json
+            artifacts/p13-load/outbox-*.json
           if-no-files-found: error

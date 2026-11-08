@@ -12,6 +12,7 @@ import {
   Max,
   MaxLength,
   Min,
+  IsIn,
 } from 'class-validator';
 export class NameDto {
   @ApiProperty({ minLength: 1, maxLength: 200 }) @IsString() @Length(1, 200) name!: string;
@@ -36,6 +37,10 @@ export class ProductDto extends NameDto {
   @ApiProperty() @IsBoolean() expiryTracking!: boolean;
 }
 export class VariantDto extends NameDto {
+  @ApiPropertyOptional({ enum: ['PIECE', 'GRAM', 'MILLILITRE'] })
+  @IsOptional()
+  @IsIn(['PIECE', 'GRAM', 'MILLILITRE'])
+  baseUnit?: 'PIECE' | 'GRAM' | 'MILLILITRE';
   @ApiProperty({ format: 'uuid' }) @IsUUID() productId!: string;
   @ApiProperty({ maxLength: 100 }) @IsString() @Length(1, 100) sku!: string;
   @ApiPropertyOptional({ nullable: true, maxLength: 100 })
@@ -100,6 +105,8 @@ export class ProductView extends NameView {
   @ApiProperty() published!: boolean;
 }
 export class VariantView extends NameView {
+  @ApiProperty({ enum: ['PIECE', 'GRAM', 'MILLILITRE'] }) baseUnit!:
+    'PIECE' | 'GRAM' | 'MILLILITRE';
   @ApiProperty({ format: 'uuid' }) productId!: string;
   @ApiProperty() sku!: string;
   @ApiProperty({ type: String, nullable: true }) barcode!: string | null;

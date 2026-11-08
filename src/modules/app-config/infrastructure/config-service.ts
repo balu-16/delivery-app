@@ -1,8 +1,9 @@
 import { INVENTORY_CONFIG_DEFAULTS } from '../contracts/config.js';
+import { phaseDefinitions } from './phase-definitions.js';
 import { z } from 'zod';
 import { sql } from 'kysely';
 import { uuidV7 } from '../../../common/ids/ids.js';
-import type { Database, Json } from '../../../platform/database/database.js';
+import type { Database, Json, TransactionContext } from '../../../platform/database/database.js';
 import {
   FEATURE_FLAG_KEYS,
   type AdminConfig,
@@ -24,6 +25,7 @@ const feeSlabs = z
   .max(20);
 
 const definitions = {
+  ...phaseDefinitions,
   inventoryReservationTtlSeconds: z.number().int().positive().default(900),
   inventoryAdjustmentApprovalUnits: z.number().int().positive().default(100),
   inventoryExpirySoonDays: z
@@ -45,6 +47,7 @@ const definitions = {
   catalogPriceApprovalCount: z.number().int().positive().default(20),
   catalogPriceApprovalPercent: z.number().int().min(0).max(10000).default(20),
   maxCartLines: z.number().int().positive().default(50),
+  cartRetentionDays: z.number().int().positive().default(30),
   minOrderPaise: paise.default('0'),
   maxOrderPaise: paise.default('50000000'),
   maxCodPaise: paise.default('500000'),
@@ -63,6 +66,7 @@ const definitions = {
     .enum(['original', 'original_then_wallet', 'wallet'])
     .default('original_then_wallet'),
   promoSpendCapBps: z.number().int().min(0).max(10000).default(10000),
+  walletLowBalanceThresholdPaise: paise.default('10000'),
   topupMinPaise: paise.default('10000'),
   topupMaxPaise: paise.default('1000000'),
   topupMonthlyCapPaise: paise.default('10000000'),
@@ -109,11 +113,84 @@ const definitions = {
   termsVersion: z.string().min(1).max(40).default('1'),
   privacyVersion: z.string().min(1).max(40).default('1'),
   maxPauseLengthDays: z.number().int().positive().default(90),
+  dispatchTrigger: z.enum(['ON_PICK_START', 'ON_PACKED']).default('ON_PICK_START'),
+  dispatchRadiusM: z.number().int().min(1).max(100000).default(3000),
+  dispatchRadiusWideningStepsM: z
+    .array(z.number().int().positive().max(100000))
+    .min(1)
+    .max(20)
+    .default([1500, 3000, 5000]),
+  dispatchMaxAttempts: z.number().int().min(1).max(100).default(5),
+  dispatchAutoCancelMinutes: z.number().int().min(1).max(1440).default(30),
+  dispatchNoRiderAlertAfterAttempts: z.number().int().min(1).max(100).default(2),
+  offerTimeoutSeconds: z.number().int().min(1).max(3600).default(60),
+  offerDeclineCooldownSeconds: z.number().int().min(0).max(86400).default(300),
+  riderMaxConcurrentTasks: z.number().int().min(1).max(20).default(3),
+  riderStaleLocationSeconds: z.number().int().min(1).max(3600).default(120),
+  riderHeartbeatStaleSeconds: z.number().int().min(1).max(3600).default(60),
+  riderRedispatchMinutes: z.number().int().min(1).max(1440).default(10),
+  riderInactivityOfflineMinutes: z.number().int().min(1).max(1440).default(30),
+  riderMaxContinuousHours: z.number().min(1).max(24).default(12),
+  cashInHandLimitPaise: paise.default('2000000'),
+  earningsBasePaise: paise.default('3000'),
+  earningsPerKmPaise: paise.default('800'),
+  detentionFreeMinutes: z.number().int().min(0).max(1440).default(5),
+  detentionPerMinutePaise: paise.default('100'),
+  deliveryCodeMaxAttempts: z.number().int().min(1).max(20).default(5),
+  deliveryFailureWaitSeconds: z.number().int().min(0).max(86400).default(300),
+  deliveryFailureMinContactAttempts: z.number().int().min(1).max(20).default(2),
+  deliveryCodeLockoutSeconds: z.number().int().min(1).max(86400).default(300),
+  geofenceThresholdMetres: z.number().int().min(1).max(10000).default(300),
+  dispatchScoreWeightsEta: z.number().nonnegative().max(1).default(0.6),
+  dispatchScoreWeightsIdle: z.number().nonnegative().max(1).default(0.25),
+  dispatchScoreWeightsAcceptance: z.number().nonnegative().max(1).default(0.15),
+  locationRetentionDays: z.number().int().min(1).max(365).default(30),
+  locationMinIntervalSeconds: z.number().positive().max(3600).default(15),
+  locationMinDistanceMetres: z.number().positive().max(10000).default(50),
+  locationMaxBatchPoints: z.number().int().min(1).max(500).default(50),
+  locationMaxAccuracyMetres: z.number().positive().max(10000).default(100),
+  locationMaxSpeedMps: z
+    .number()
+    .positive()
+    .max(300)
+    .default(250 / 3.6),
+  etaRoadFactor: z.number().min(1).max(5).default(1.4),
+  etaAvgSpeedKph: z.number().positive().max(150).default(20),
+  etaPublishDeltaMinutes: z.number().positive().max(60).default(1),
+  notificationQuietHoursStart: z.number().int().min(0).max(1439).default(1260),
+  notificationQuietHoursEnd: z.number().int().min(0).max(1439).default(480),
+  pickingWeightToleranceBps: z.number().int().min(0).max(10000).default(0),
+  pickingDisconnectMinutes: z.number().int().min(1).max(1440).default(15),
+  pickingShortRateAlertBps: z.number().int().min(1).max(10000).default(2500),
 } satisfies { [K in ConfigKey]: z.ZodType<ConfigValues[K], unknown> };
 const configSchema = z
   .object(definitions)
   .strict()
   .superRefine((v, ctx) => {
+    if (v.subscriptionGenerationTime <= v.subscriptionCutoffTime)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['subscriptionGenerationTime'],
+        message: 'generation must follow cutoff',
+      });
+    if (v.subscriptionGraceRetryTime >= v.subscriptionGraceDeadlineTime)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['subscriptionGraceDeadlineTime'],
+        message: 'grace deadline must follow retry',
+      });
+    if (v.supportFirstResponseSlaHours > v.supportResolutionSlaHours)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['supportResolutionSlaHours'],
+        message: 'resolution deadline must follow first response',
+      });
+    if (v.ratingEditHours > v.ratingWindowHours)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ratingEditHours'],
+        message: 'edit window cannot exceed rating window',
+      });
     if (v.zoneMinAreaM2 > v.zoneMaxAreaM2)
       ctx.addIssue({ code: 'custom', path: ['zoneMinAreaM2'], message: 'minimum exceeds maximum' });
     if (v.etaMinMinutes > v.etaMaxMinutes)
@@ -124,9 +201,9 @@ const configSchema = z
         path: ['mapMatrixTopK'],
         message: 'top K exceeds matrix pair limit',
       });
-    if (v.minOrderPaise > v.maxOrderPaise)
+    if (BigInt(v.minOrderPaise) > BigInt(v.maxOrderPaise))
       ctx.addIssue({ code: 'custom', path: ['minOrderPaise'], message: 'minimum exceeds maximum' });
-    if (v.topupMinPaise > v.topupMaxPaise)
+    if (BigInt(v.topupMinPaise) > BigInt(v.topupMaxPaise))
       ctx.addIssue({ code: 'custom', path: ['topupMinPaise'], message: 'minimum exceeds maximum' });
     if (v.paymentWindowSeconds > v.inventoryReservationTtlSeconds)
       ctx.addIssue({
@@ -145,7 +222,7 @@ const configSchema = z
             message: 'open-ended slab must be last',
           });
         nullSeen = true;
-      } else if (previous !== null && slab.maxOrderValuePaise <= previous) {
+      } else if (previous !== null && BigInt(slab.maxOrderValuePaise) <= BigInt(previous)) {
         ctx.addIssue({
           code: 'custom',
           path: ['deliveryFeeSlabs'],
@@ -169,18 +246,38 @@ export class ConfigService implements AppConfig, AdminConfig {
     { version: string; value: ConfigValues[ConfigKey] }
   >();
   constructor(private readonly db: Database) {}
-  async get<K extends ConfigKey>(key: K): Promise<ConfigValues[K]> {
+  async get<K extends ConfigKey>(key: K, tx?: TransactionContext): Promise<ConfigValues[K]> {
+    return (await this.getMany([key], tx))[key];
+  }
+  async getMany<K extends ConfigKey>(
+    keys: readonly K[],
+    tx?: TransactionContext,
+  ): Promise<Pick<ConfigValues, K>> {
+    for (const key of keys) {
+      if (!Object.hasOwn(definitions, key)) throw new Error('INVALID_CONFIG_KEY');
+    }
+    if (keys.length === 0) return {} as Pick<ConfigValues, K>;
     const result = await sql<{
+      key: K;
       value: Json;
       version: string;
-    }>`SELECT value,version::text FROM app_config WHERE key=${key}`.execute(this.db);
-    const row = result.rows[0];
-    const version = row?.version ?? 'default';
-    const cached = this.cache.get(key);
-    if (cached?.version === version) return structuredClone(cached.value) as ConfigValues[K];
-    const value = definitions[key].parse(row?.value) as ConfigValues[K];
-    this.cache.set(key, { version, value });
-    return structuredClone(value);
+    }>`SELECT key,value,version::text FROM app_config WHERE key IN (${sql.join(keys)})`.execute(
+      tx ?? this.db,
+    );
+    const rows = new Map(result.rows.map((row) => [row.key, row]));
+    const values = {} as Pick<ConfigValues, K>;
+    for (const key of keys) {
+      const row = rows.get(key);
+      const version = row?.version ?? 'default';
+      const cached = this.cache.get(key);
+      const value =
+        !tx && cached?.version === version
+          ? (cached.value as ConfigValues[K])
+          : (definitions[key].parse(row?.value) as ConfigValues[K]);
+      if (!tx && cached?.version !== version) this.cache.set(key, { version, value });
+      values[key] = structuredClone(value);
+    }
+    return values;
   }
   invalidate(): void {
     this.cache.clear();
@@ -205,7 +302,19 @@ export class ConfigService implements AppConfig, AdminConfig {
         values.rows.map((r) => [r.key, r.value]),
       );
       input[key] = parsed;
-      configSchema.parse(input);
+      const next = configSchema.parse(input);
+      if (['subscriptionGraceDeadlineTime', 'subscriptionDispatchLeadMinutes'].includes(key)) {
+        const schema = await sql<{
+          present: string | null;
+        }>`SELECT to_regclass('subscription_slots')::text AS present`.execute(tx);
+        if (schema.rows[0]?.present) {
+          const invalid = await sql`SELECT id FROM subscription_slots WHERE active AND
+            (extract(epoch FROM start_time)/60 - ${next.subscriptionDispatchLeadMinutes}) <= extract(epoch FROM ${next.subscriptionGraceDeadlineTime}::time)/60 LIMIT 1`.execute(
+            tx,
+          );
+          if (invalid.rows.length) throw new Error('INVALID_SLOT_TIMING');
+        }
+      }
       await sql`INSERT INTO app_config(key,value,updated_by) VALUES (${key},${JSON.stringify(parsed)}::jsonb,${actorId}::uuid)
         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,version=app_config.version+1,updated_by=EXCLUDED.updated_by,updated_at=clock_timestamp()`.execute(
         tx,
@@ -248,6 +357,18 @@ export class ConfigService implements AppConfig, AdminConfig {
         tx,
       );
       if (!actor.rows[0]) throw new Error('FORBIDDEN');
+      if (key === 'subscriptions_enabled' && enabled) {
+        const wallet = await sql<{
+          enabled: boolean;
+        }>`SELECT enabled FROM feature_flags WHERE key='wallet_enabled'`.execute(tx);
+        if (!wallet.rows[0]?.enabled) throw new Error('WALLET_REQUIRED_FOR_SUBSCRIPTIONS');
+      }
+      if (key === 'wallet_enabled' && !enabled) {
+        const subscriptions = await sql<{
+          enabled: boolean;
+        }>`SELECT enabled FROM feature_flags WHERE key='subscriptions_enabled'`.execute(tx);
+        if (subscriptions.rows[0]?.enabled) throw new Error('WALLET_REQUIRED_FOR_SUBSCRIPTIONS');
+      }
       const old = await sql<{
         enabled: boolean;
       }>`SELECT enabled FROM feature_flags WHERE key=${key}`.execute(tx);

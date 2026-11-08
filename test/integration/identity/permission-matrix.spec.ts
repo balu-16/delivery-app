@@ -102,6 +102,28 @@ test('each identity operation rejects missing credentials, the wrong pool, and i
         expect([route.url, role.statusCode]).toEqual([route.url, 403]);
       }
     }
+    // The same access token is evaluated against current database roles and status.
+    let currentToken = supportTokens.admin;
+    const currentRoleRequest = () =>
+      server.inject({
+        method: 'GET',
+        url: '/v1/admin/stores',
+        headers: { authorization: `Bearer ${currentToken}` },
+      });
+    await sql`INSERT INTO user_roles(user_id,role) VALUES (${support}::uuid,'ADMIN')`.execute(
+      db.db,
+    );
+    expect((await currentRoleRequest()).statusCode).toBe(403);
+    currentToken = await tokens.issue('WORKFORCE', 'matrix-support', 'admin', 'access');
+    expect((await currentRoleRequest()).statusCode).toBe(200);
+    await sql`DELETE FROM user_roles WHERE user_id=${support}::uuid AND role='ADMIN'`.execute(
+      db.db,
+    );
+    expect((await currentRoleRequest()).statusCode).toBe(403);
+    await sql`UPDATE users SET status='BLOCKED' WHERE id=${support}::uuid`.execute(db.db);
+    const blocked = await currentRoleRequest();
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.json().code).toBe('ACCOUNT_DISABLED');
   } finally {
     await app.close();
   }

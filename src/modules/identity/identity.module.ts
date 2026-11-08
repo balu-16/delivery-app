@@ -3,7 +3,7 @@ import { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-
 import { ConfigService as RuntimeConfig } from '../../config/config.service.js';
 import { PLATFORM_DATABASE } from '../../platform/contracts/runtime.js';
 import type { DatabaseHandle } from '../../platform/database/database.js';
-import { S3Client } from '@aws-sdk/client-s3';
+import { createS3Client } from '../../adapters/storage/s3-client.js';
 import { S3PrivateUploads } from '../../adapters/storage/s3-private.js';
 import { LocalPrivateUploads } from '../../adapters/storage/local-private.js';
 import { APP_CONFIG, type AppConfig } from '../app-config/contracts/config.js';
@@ -38,6 +38,7 @@ import { DatabaseIdentityAccess } from './infrastructure/identity-access.js';
 import { DatabaseUserProfiles } from './infrastructure/user-profiles.js';
 import { RiderProfileService } from './infrastructure/rider-profile.js';
 import { WorkforceProvisioning } from './infrastructure/workforce-provisioning.js';
+import { SharedWorkforceProvisioning } from './infrastructure/shared-workforce-provisioning.js';
 
 @Module({
   imports: [AppConfigModule, ComplianceModule],
@@ -95,9 +96,12 @@ import { WorkforceProvisioning } from './infrastructure/workforce-provisioning.j
     },
     {
       provide: WORKFORCE_PROVISIONER,
-      inject: [PLATFORM_DATABASE, IDENTITY_ADMIN],
-      useFactory: (handle: DatabaseHandle, provider: IdentityAdminPort) =>
-        new WorkforceProvisioning(handle.db, provider),
+      inject: [PLATFORM_DATABASE, IDENTITY_ADMIN, RuntimeConfig],
+      useFactory: (handle: DatabaseHandle, provider: IdentityAdminPort, config: RuntimeConfig) =>
+        config.get('AUTH_PROVIDER') === 'cognito' &&
+        config.get('COGNITO_CUSTOMER_POOL_ID') === config.get('COGNITO_WORKFORCE_POOL_ID')
+          ? new SharedWorkforceProvisioning(handle.db, provider)
+          : new WorkforceProvisioning(handle.db, provider),
     },
     {
       provide: IDENTITY_ADMINISTRATION,
@@ -126,12 +130,7 @@ import { WorkforceProvisioning } from './infrastructure/workforce-provisioning.j
             )
           : new S3PrivateUploads(
               handle.db,
-              new S3Client({
-                region: config.get('AWS_REGION'),
-                ...(config.get('S3_ENDPOINT')
-                  ? { endpoint: config.get('S3_ENDPOINT'), forcePathStyle: true }
-                  : {}),
-              }),
+              createS3Client(config),
               config.get('S3_PRIVATE_BUCKET')!,
               config.get('PRIVATE_UPLOAD_MAX_BYTES'),
               config.get('PRIVATE_UPLOAD_URL_TTL_SECONDS'),

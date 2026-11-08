@@ -43,6 +43,14 @@ import type { PostgresPickViews } from './postgres-pick-views.js';
  * store-scoped roles, history rows, change events).
  */
 export class PostgresPickTasks implements PickTasks {
+  async heartbeat(actorId: string, taskId: string): Promise<void> {
+    const updated =
+      await sql`UPDATE pick_tasks SET last_activity_at=clock_timestamp() WHERE id=${taskId}::uuid
+      AND assigned_to=${actorId}::uuid AND status IN ('ASSIGNED','IN_PROGRESS') RETURNING id`.execute(
+        this.db,
+      );
+    if (!updated.rows.length) throw new Error('RESOURCE_NOT_FOUND');
+  }
   constructor(
     private readonly db: Database,
     private readonly identity: IdentityAccess,
@@ -64,6 +72,13 @@ export class PostgresPickTasks implements PickTasks {
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`picking-task:${taskId}`},0))`.execute(
       tx,
     );
+    const projection = await loadTask(tx, taskId, false);
+    if (projection) {
+      const order = await sql<{
+        on_hold: boolean;
+      }>`SELECT on_hold FROM orders WHERE id=${projection.order_id}::uuid FOR UPDATE`.execute(tx);
+      if (order.rows[0]?.on_hold) throw new Error('ORDER_ON_HOLD');
+    }
     const task = await loadTask(tx, taskId, true);
     if (!task) throw new Error('RESOURCE_NOT_FOUND');
     return task;
@@ -80,6 +95,7 @@ export class PostgresPickTasks implements PickTasks {
         storeId: task!.store_id,
         variantIds: [...new Set(pending.map((item) => item.variant_id))],
         targetDeliveryAt: task!.sla_due_at.toISOString(),
+        orderId: task!.order_id,
       });
     const view = mapTask(task!, items);
     for (const item of view.items) item.fefoSuggestions = suggestions.get(item.variantId) ?? [];
@@ -109,7 +125,7 @@ export class PostgresPickTasks implements PickTasks {
             : sql`status NOT IN ('COMPLETED','CANCELLED')`;
       const rows = await sql<{
         id: string;
-      }>`SELECT id FROM pick_tasks WHERE store_id=${input.storeId}::uuid AND ${filter} AND (${cursor ? sql`(sla_due_at,id) > (${cursor.slaDueAt}::timestamptz,${cursor.id}::uuid)` : sql`true`}) ORDER BY sla_due_at,id LIMIT ${limit + 1}`.execute(
+      }>`SELECT id FROM pick_tasks WHERE store_id=${input.storeId}::uuid AND available_at <= clock_timestamp() AND ${filter} AND (${cursor ? sql`(sla_due_at,id) > (${cursor.slaDueAt}::timestamptz,${cursor.id}::uuid)` : sql`true`}) ORDER BY sla_due_at,id LIMIT ${limit + 1}`.execute(
         tx,
       );
       const page = rows.rows.slice(0, limit);
@@ -117,10 +133,43 @@ export class PostgresPickTasks implements PickTasks {
         tx,
         page.map((row) => row.id),
       );
+      const pendingByTask = new Map<string, string[]>();
+      for (const item of items)
+        if (item.status === 'PENDING')
+          pendingByTask.set(item.task_id, [
+            ...(pendingByTask.get(item.task_id) ?? []),
+            item.variant_id,
+          ]);
+      const suggestionsByTask = new Map<
+        string,
+        Map<
+          string,
+          { batchId: string; batchCode: string; expiresAt: string | null; availableQty: string }[]
+        >
+      >();
+      for (const [taskId, variantIds] of pendingByTask) {
+        const task = await loadTask(tx, taskId, false);
+        if (!task) continue;
+        suggestionsByTask.set(
+          taskId,
+          await this.guidance.suggest({
+            storeId: task.store_id,
+            variantIds: [...new Set(variantIds)],
+            targetDeliveryAt: task.sla_due_at.toISOString(),
+            orderId: task.order_id,
+          }),
+        );
+      }
       const tasks: PickTaskView[] = [];
       for (const row of page) {
         const task = await loadTask(tx, row.id, false);
-        if (task) tasks.push(mapTask(task, items));
+        if (!task) continue;
+        const view = mapTask(task, items);
+        const suggestions = suggestionsByTask.get(task.id);
+        if (suggestions)
+          for (const item of view.items)
+            item.fefoSuggestions = suggestions.get(item.variantId) ?? [];
+        tasks.push(view);
       }
       const last = page.at(-1);
       const full = last ? (await loadTask(tx, last.id, false))! : null;
@@ -136,6 +185,12 @@ export class PostgresPickTasks implements PickTasks {
     return this.run(undefined, async (tx) => {
       const task = await this.lockTask(tx, taskId);
       await assertStoreRole(this.identity, actorId, task.store_id, ['PICKER', 'STORE_MANAGER'], tx);
+      const availability = await sql<{
+        ready: boolean;
+      }>`SELECT available_at <= clock_timestamp() AS ready FROM pick_tasks WHERE id=${taskId}::uuid`.execute(
+        tx,
+      );
+      if (!availability.rows[0]?.ready) throw new Error('PICK_TASK_NOT_AVAILABLE');
       if (task.status === 'ASSIGNED' && task.assigned_to === actorId)
         return { task: await this.view(tx, task) };
       if (task.status !== 'PENDING') throw new Error('PICK_TASK_STATE_INVALID');
@@ -144,7 +199,7 @@ export class PostgresPickTasks implements PickTasks {
       const cap = await this.config.get('maxActivePickTasksPerPicker');
       if ((await activeTaskCount(tx, actorId)) >= cap) throw new Error('PICKER_AT_CAPACITY');
       transitionTask(task.status, 'ASSIGNED');
-      await sql`UPDATE pick_tasks SET status='ASSIGNED',assigned_to=${actorId}::uuid,version=version+1 WHERE id=${taskId}::uuid`.execute(
+      await sql`UPDATE pick_tasks SET last_activity_at=clock_timestamp(),status='ASSIGNED',assigned_to=${actorId}::uuid,version=version+1 WHERE id=${taskId}::uuid`.execute(
         tx,
       );
       await taskHistory(tx, taskId, task.status, 'ASSIGNED', actorId);
@@ -158,7 +213,7 @@ export class PostgresPickTasks implements PickTasks {
           status: 'ASSIGNED',
           assignedTo: actorId,
         },
-        ['dispatch', 'notifications'],
+        ['dispatch-trigger', 'notifications'],
       );
       return { task: await this.view(tx, await loadTask(tx, taskId, false)) };
     });
@@ -169,6 +224,12 @@ export class PostgresPickTasks implements PickTasks {
     return this.run(undefined, async (tx) => {
       const task = await this.lockTask(tx, taskId);
       await assertStoreRole(this.identity, actorId, task.store_id, ['PICKER', 'STORE_MANAGER'], tx);
+      const availability = await sql<{
+        ready: boolean;
+      }>`SELECT available_at <= clock_timestamp() AS ready FROM pick_tasks WHERE id=${taskId}::uuid`.execute(
+        tx,
+      );
+      if (!availability.rows[0]?.ready) throw new Error('PICK_TASK_NOT_AVAILABLE');
       if (task.status === 'IN_PROGRESS' && task.assigned_to === actorId) return this.view(tx, task);
       if (task.status !== 'ASSIGNED' || task.assigned_to !== actorId)
         throw new Error(
@@ -177,7 +238,7 @@ export class PostgresPickTasks implements PickTasks {
       if (!(await operation(tx, `start:${taskId}:${reference}`, 'START', { taskId })))
         return this.view(tx, task);
       const now = await databaseTimeAfterLock(tx);
-      await sql`UPDATE pick_tasks SET status='IN_PROGRESS',started_at=${now.toISOString()}::timestamptz,version=version+1 WHERE id=${taskId}::uuid`.execute(
+      await sql`UPDATE pick_tasks SET last_activity_at=clock_timestamp(),status='IN_PROGRESS',started_at=${now.toISOString()}::timestamptz,version=version+1 WHERE id=${taskId}::uuid`.execute(
         tx,
       );
       await taskHistory(tx, taskId, task.status, 'IN_PROGRESS', actorId);
@@ -190,7 +251,7 @@ export class PostgresPickTasks implements PickTasks {
           previous: task.status,
           status: 'IN_PROGRESS',
         },
-        ['dispatch', 'notifications'],
+        ['dispatch-trigger', 'notifications'],
       );
       // The order state machine (P6) moves CONFIRMED→PICKING in this transaction.
       await this.fulfillment.startPicking(task.order_id, actorId, tx);
@@ -231,7 +292,7 @@ export class PostgresPickTasks implements PickTasks {
       const cap = await this.config.get('maxActivePickTasksPerPicker');
       if ((await activeTaskCount(tx, toUserId)) >= cap) throw new Error('PICKER_AT_CAPACITY');
       transitionTask(task.status, 'ASSIGNED');
-      await sql`UPDATE pick_tasks SET status='ASSIGNED',assigned_to=${toUserId}::uuid,started_at=NULL,version=version+1 WHERE id=${taskId}::uuid`.execute(
+      await sql`UPDATE pick_tasks SET last_activity_at=clock_timestamp(),status='ASSIGNED',assigned_to=${toUserId}::uuid,started_at=NULL,version=version+1 WHERE id=${taskId}::uuid`.execute(
         tx,
       );
       await taskHistory(tx, taskId, task.status, 'ASSIGNED', actorId, reason);
@@ -246,7 +307,7 @@ export class PostgresPickTasks implements PickTasks {
           assignedTo: toUserId,
           reason,
         },
-        ['dispatch', 'notifications'],
+        ['dispatch-trigger', 'notifications'],
       );
       return this.view(tx, await loadTask(tx, taskId, false));
     });

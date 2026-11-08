@@ -1,3 +1,7 @@
+import type { TransactionContext } from '../../../platform/database/database.js';
+
+export type ServiceabilityTransaction = TransactionContext;
+
 export type ServiceabilityReason =
   'OUTSIDE_ZONE' | 'STORE_CLOSED' | 'STORE_PAUSED' | 'STORE_AT_CAPACITY' | 'NO_RIDERS_AVAILABLE';
 export interface ZoneSnapshot {
@@ -19,7 +23,7 @@ export interface ServiceabilityInput {
   targetTime: Date;
 }
 export interface Serviceability {
-  check(input: ServiceabilityInput): Promise<ServiceabilityResult>;
+  check(input: ServiceabilityInput, tx?: TransactionContext): Promise<ServiceabilityResult>;
 }
 export interface CapacityClaims {
   /** Claim within the caller's business transaction in the eventual checkout integration. */
@@ -27,5 +31,8 @@ export interface CapacityClaims {
     storeId: string,
     slotStart: Date,
     reference: string,
+    tx?: TransactionContext,
   ): Promise<'CLAIMED' | 'ALREADY_CLAIMED' | 'AT_CAPACITY'>;
+  /** Release all outstanding capacity claimed by this business reference once. */
+  release(reference: string, tx?: TransactionContext): Promise<boolean>;
 }

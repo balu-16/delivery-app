@@ -7,6 +7,8 @@ import { PostgresAddresses } from '../../../src/modules/addresses/infrastructure
 import { PostgresZones } from '../../../src/modules/stores/infrastructure/postgres-zones.js';
 import { PostgresStoreAvailability } from '../../../src/modules/stores/infrastructure/postgres-availability.js';
 import { PostgresServiceability } from '../../../src/modules/serviceability/infrastructure/postgres-serviceability.js';
+import { ServiceabilityQuery } from '../../../src/modules/serviceability/application/serviceability.js';
+import { ConfigService as AppConfigService } from '../../../src/modules/app-config/infrastructure/config-service.js';
 import { PostgresCapacityClaims } from '../../../src/modules/serviceability/infrastructure/postgres-capacity.js';
 import { PostgresStoreSignals } from '../../../src/modules/stores/infrastructure/store-signals.js';
 import { PostgresStoreAdministration } from '../../../src/modules/stores/infrastructure/store-administration.js';
@@ -116,6 +118,72 @@ describe('P2 serviceability against PostGIS', () => {
         targetTime: new Date('2026-11-02T12:00:00Z'),
       }),
     ).toBeNull();
+  });
+  it('uses a single caller connection and isolates transactional zone changes from the cache', async () => {
+    const single = createDatabase(services.databaseUrl, 1);
+    const ownStore = uuidV7();
+    const ownZone = uuidV7();
+    const input = { lat: 13.5, lng: 77.6, targetTime: new Date('2026-11-02T12:00:00Z') };
+    const cache = new Map<string, string>();
+    try {
+      await sql`INSERT INTO stores(id,legal_entity_id,city_id,name,location,status,hourly_capacity) VALUES (${ownStore},${entity},${city},'transaction',ST_SetSRID(ST_MakePoint(77.6,13.5),4326)::geography,'ONLINE',2)`.execute(
+        single.db,
+      );
+      await sql`INSERT INTO store_hours(store_id,weekday,start_minute,end_minute) SELECT ${ownStore},d,0,1440 FROM generate_series(0,6) d`.execute(
+        single.db,
+      );
+      await sql`INSERT INTO zones(id,store_id,name,polygon,priority,active) VALUES (${ownZone},${ownStore},'transaction',ST_Multi(ST_GeomFromText('POLYGON((77.5 13.4,77.7 13.4,77.7 13.6,77.5 13.6,77.5 13.4))',4326)),1,true)`.execute(
+        single.db,
+      );
+      const config = new AppConfigService(single.db);
+      const signals = new PostgresStoreSignals(single.db, async (tx) => ({
+        backlog: await config.get('storeBacklogPauseThreshold', tx),
+        minutes: await config.get('storeNoRidersPauseMinutes', tx),
+      }));
+      const repository = new PostgresServiceability(
+        single.db,
+        'Asia/Kolkata',
+        new PostgresStoreAvailability(single.db, 'Asia/Kolkata'),
+        (id, at, tx) => signals.noRiders(id, at, tx),
+        {
+          get: async (key) => cache.get(key) ?? null,
+          set: async (key, value) => {
+            cache.set(key, value);
+          },
+        },
+      );
+      const query = new ServiceabilityQuery(repository, async (tx) => ({
+        minMinutes: await config.get('etaMinMinutes', tx),
+        maxMinutes: await config.get('etaMaxMinutes', tx),
+      }));
+      expect((await query.check(input)).serviceable).toBe(true);
+      const originalCache = [...cache.entries()];
+      const rollback = new Error('rollback');
+      await expect(
+        single.db.transaction().execute(async (tx) => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const checked = await Promise.race([
+              query.check(input, tx),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error('transaction check timed out')), 3000);
+              }),
+            ]);
+            expect(checked.serviceable).toBe(true);
+            await sql`UPDATE zones SET active=false WHERE id=${ownZone}`.execute(tx);
+            expect((await query.check(input, tx)).reasons).toEqual(['OUTSIDE_ZONE']);
+            expect([...cache.entries()]).toEqual(originalCache);
+            throw rollback;
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        }),
+      ).rejects.toBe(rollback);
+      expect((await query.check(input)).serviceable).toBe(true);
+      expect([...cache.entries()]).toEqual(originalCache);
+    } finally {
+      await single.close();
+    }
   });
   it('serializes concurrent defaults and retains one after delete', async () => {
     const repository = new PostgresAddresses(db.db);

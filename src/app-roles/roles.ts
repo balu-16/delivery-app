@@ -19,8 +19,26 @@ import { CatalogImportWorkerModule } from '../modules/catalog/catalog.module.js'
 import { MediaWorkerModule } from '../modules/media/media-worker.module.js';
 import { InventoryWorkerModule } from '../modules/inventory/inventory-worker.module.js';
 import { PickingWorkerModule } from '../modules/picking/picking.module.js';
+import { CartWorkerModule } from '../modules/cart/cart-worker.module.js';
 import { NotificationsWorkerModule } from '../modules/notifications/notifications-worker.module.js';
 import { RealtimeModule } from '../platform/realtime/realtime.module.js';
+import { PaymentsWorkerModule } from '../modules/payments/payments-worker.module.js';
+import { WalletWorkerModule } from '../modules/wallet/wallet-worker.module.js';
+import { OrdersWorkerModule } from '../modules/orders/orders-worker.module.js';
+import { InvoicingWorkerModule } from '../modules/invoicing/invoicing-worker.module.js';
+import { RidersWorkerModule } from '../modules/riders/riders.module.js';
+import { TrackingModule, TrackingWorkerModule } from '../modules/tracking/tracking.module.js';
+import { DispatchWorkerModule } from '../modules/dispatch/dispatch.module.js';
+import { SubscriptionsWorkerModule } from '../modules/subscriptions/subscriptions-worker.module.js';
+import { SubscriptionsModule } from '../modules/subscriptions/subscriptions.module.js';
+import { P11WorkerModule } from '../modules/support/support-worker.module.js';
+import { P11PrivacyModule } from '../modules/support/support-privacy.module.js';
+import { PayoutsModule } from '../modules/payouts/payouts.module.js';
+import { IdentityModule } from '../modules/identity/identity.module.js';
+import { ComplianceWorkerModule } from '../modules/compliance/compliance-worker.module.js';
+import { MediaModule } from '../modules/media/media.module.js';
+import { AppConfigModule } from '../modules/app-config/app-config.module.js';
+import { ReportDataModule } from '../modules/compliance/compliance-report-data.module.js';
 
 export const surfaceModules = {
   customer: CustomerSurfaceModule,
@@ -56,7 +74,27 @@ export class RoleModule {
               MediaWorkerModule,
               InventoryWorkerModule,
               PickingWorkerModule,
+              CartWorkerModule,
               NotificationsWorkerModule,
+              PaymentsWorkerModule,
+              WalletWorkerModule,
+              OrdersWorkerModule,
+              InvoicingWorkerModule,
+              RidersWorkerModule,
+              TrackingWorkerModule,
+              DispatchWorkerModule,
+              SubscriptionsWorkerModule,
+              P11WorkerModule,
+              ComplianceWorkerModule.register([
+                IdentityModule,
+                SubscriptionsModule,
+                PayoutsModule,
+                P11PrivacyModule,
+                MediaModule,
+                AppConfigModule,
+                ReportDataModule,
+                TrackingModule,
+              ]),
             ]
           : []),
         ...surfacesFor(env.APP_ROLE).map((surface) => surfaceModules[surface]),

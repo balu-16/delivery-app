@@ -31,6 +31,7 @@ describe('S3 media adapter contract', () => {
       Key: 'public/abc/final',
       CopySource: 'private-bucket/staging/abc/def',
       CopySourceIfMatch: '"etag"',
+      IfNoneMatch: '*',
     });
     client.destroy();
   });

@@ -4,6 +4,7 @@ import type { Database } from '../../../platform/database/database.js';
 import type { PrivateUploadPort } from '../contracts/uploads.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import { documentsApproved, documentsReady } from '../domain/identity-policy.js';
+import { appendEvent } from '../../../platform/outbox/outbox.js';
 
 export class RiderOnboarding {
   constructor(
@@ -131,6 +132,27 @@ export class RiderOnboarding {
         );
       await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id) VALUES (${uuidV7()}::uuid,${reviewerId}::uuid,'RIDER_DOCUMENT_REVIEWED','rider_document',${documentId})`.execute(
         tx,
+      );
+      await appendEvent(
+        tx,
+        {
+          eventId: uuidV7(),
+          eventType: approved ? 'rider.document.approved' : 'rider.document.rejected',
+          schemaVersion: 1,
+          aggregateType: 'rider_document',
+          aggregateId: documentId,
+          aggregateVersion: '1',
+          occurredAt: new Date().toISOString(),
+          correlationId: row.rider_id,
+          causationId: null,
+          payload: {
+            documentId,
+            riderId: row.rider_id,
+            userId: row.rider_id,
+            reason: reason.trim().slice(0, 500),
+          },
+        },
+        ['notifications'],
       );
     });
   }

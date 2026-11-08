@@ -116,7 +116,7 @@
       "id": "PaymentGatewayPort-razorpay",
       "sourceSection": "7",
       "phase": "P6",
-      "status": "planned",
+      "status": "implemented",
       "port": "PaymentGatewayPort",
       "provider": "razorpay",
       "real": true,
@@ -128,13 +128,14 @@
         "refund",
         "fetchSettlements"
       ],
-      "testFiles": []
+      "testFiles": ["test/unit/payments/razorpay-contracts.spec.ts"],
+      "liveAcceptance": "pending credentialed provider activation; local tests use deterministic contracts"
     },
     {
       "id": "PaymentGatewayPort-fake",
       "sourceSection": "7",
       "phase": "P6",
-      "status": "planned",
+      "status": "implemented",
       "port": "PaymentGatewayPort",
       "provider": "fake",
       "real": false,
@@ -146,18 +147,22 @@
         "refund",
         "fetchSettlements"
       ],
-      "testFiles": []
+      "testFiles": [
+        "test/unit/payments/gateway-contracts.spec.ts",
+        "test/integration/commerce/journeys.spec.ts"
+      ]
     },
     {
       "id": "InvoiceRendererPort-html",
       "sourceSection": "16",
       "phase": "P6",
-      "status": "planned",
+      "status": "implemented",
       "port": "InvoiceRendererPort",
       "provider": "html",
       "real": true,
       "methods": ["render"],
-      "testFiles": []
+      "testFiles": ["test/integration/commerce/journeys.spec.ts"],
+      "liveAcceptance": "pending credentialed provider activation; local tests use deterministic contracts"
     },
     {
       "id": "StoragePort-s3",
@@ -187,56 +192,58 @@
       "id": "EmailPort-ses",
       "sourceSection": "7",
       "phase": "P9",
-      "status": "planned",
+      "status": "implemented",
       "port": "EmailPort",
       "provider": "ses",
       "real": true,
       "methods": ["send"],
-      "testFiles": []
+      "testFiles": ["test/unit/notifications/adapters.spec.ts"],
+      "liveAcceptance": "pending credentialed provider activation; local tests use deterministic contracts"
     },
     {
       "id": "EmailPort-smtp",
       "sourceSection": "7",
       "phase": "P9",
-      "status": "planned",
+      "status": "implemented",
       "port": "EmailPort",
       "provider": "smtp",
       "real": false,
       "methods": ["send"],
-      "testFiles": []
+      "testFiles": ["test/unit/notifications/adapters.spec.ts"]
     },
     {
       "id": "PushPort-fcm",
       "sourceSection": "7",
       "phase": "P9",
-      "status": "planned",
+      "status": "implemented",
       "port": "PushPort",
       "provider": "fcm",
       "real": true,
       "methods": ["send"],
-      "testFiles": []
+      "testFiles": ["test/unit/notifications/adapters.spec.ts"],
+      "liveAcceptance": "pending credentialed provider activation; local tests use deterministic contracts"
     },
     {
       "id": "PushPort-fake",
       "sourceSection": "7",
       "phase": "P9",
-      "status": "planned",
+      "status": "implemented",
       "port": "PushPort",
       "provider": "fake",
       "real": false,
       "methods": ["send"],
-      "testFiles": []
+      "testFiles": ["test/integration/notifications/delivery.spec.ts"]
     },
     {
       "id": "SmsPort-disabled",
       "sourceSection": "7",
       "phase": "P9",
-      "status": "planned",
+      "status": "implemented",
       "port": "SmsPort",
       "provider": "disabled",
       "real": false,
       "methods": ["send"],
-      "testFiles": []
+      "testFiles": ["test/unit/notifications/adapters.spec.ts"]
     },
     {
       "id": "SearchPort-postgres",

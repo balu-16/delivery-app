@@ -17,6 +17,7 @@ type ReservationRow = {
   quantity: string;
   state: 'HELD' | 'COMMITTED';
   expires_at: Date | null;
+  generation: number;
 };
 
 /**
@@ -58,7 +59,7 @@ export class PostgresSubstitutionSwaps implements InventorySubstitutionSwaps {
         { storeId: input.storeId, variantId: input.acquireVariantId, quantity: input.quantity },
       ]);
       const released =
-        await sql<ReservationRow>`SELECT quantity::text,state,expires_at FROM inventory_reservations WHERE order_id=${input.orderId}::uuid AND store_id=${input.storeId}::uuid AND variant_id=${input.releaseVariantId}::uuid FOR UPDATE`.execute(
+        await sql<ReservationRow>`SELECT quantity::text,state,expires_at,generation FROM inventory_reservations WHERE order_id=${input.orderId}::uuid AND store_id=${input.storeId}::uuid AND variant_id=${input.releaseVariantId}::uuid FOR UPDATE`.execute(
           tx,
         );
       const row = released.rows[0];
@@ -125,7 +126,7 @@ export class PostgresSubstitutionSwaps implements InventorySubstitutionSwaps {
       );
       const available = usable.reduce((sum, b) => sum + BigInt(b.available), 0n);
       if (available < move) throw new Error('INVENTORY_INSUFFICIENT');
-      await sql`INSERT INTO inventory_reservations(order_id,store_id,variant_id,quantity,state,expires_at,target_delivery_at) VALUES(${input.orderId}::uuid,${input.storeId}::uuid,${input.acquireVariantId}::uuid,${input.quantity}::bigint,${row.state},${row.expires_at},${target})`.execute(
+      await sql`INSERT INTO inventory_reservations(order_id,store_id,variant_id,quantity,state,expires_at,target_delivery_at,generation) VALUES(${input.orderId}::uuid,${input.storeId}::uuid,${input.acquireVariantId}::uuid,${input.quantity}::bigint,${row.state},${row.expires_at},${target},${row.generation})`.execute(
         tx,
       );
       let pending = move;

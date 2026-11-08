@@ -1,11 +1,8 @@
 import type { TransactionContext } from '../../../platform/database/database.js';
 
 /**
- * Consumer-side integration ports. P6 (orders/payments) binds real
- * implementations; until then the picking module boots with typed
- * FULFILLMENT_DEPENDENCY_UNAVAILABLE providers and tests use fakes.
- * The exact signatures below are the recorded P6 dependency assumptions
- * (ADR 0010); integration adapters reconcile naming differences.
+ * Fulfillment ports bound to the order aggregate. Stock consumption, line
+ * settlement and refund commitments share the picking transaction.
  */
 
 /** Expected shape of the `ORDER_CONFIRMED` outbox event payload (producer: P6 orders). */
@@ -55,6 +52,20 @@ export interface AdjustmentSummary {
 }
 export const FINANCIAL_ADJUSTMENTS = Symbol('FINANCIAL_ADJUSTMENTS');
 export interface FinancialAdjustments {
+  /** Settle every actual fulfilled quantity, including orders without shorts. */
+  settleFulfillment(input: {
+    orderId: string;
+    actorId: string;
+    lines: {
+      orderItemId: string;
+      variantId: string;
+      fulfilledQty: string;
+      shortQty: string;
+      reason?: string;
+      substituteVariantId?: string;
+    }[];
+    tx?: TransactionContext;
+  }): Promise<AdjustmentSummary>;
   /** Recomputes order totals from fulfilled quantities and triggers the refund once. */
   recordShort(input: {
     orderId: string;

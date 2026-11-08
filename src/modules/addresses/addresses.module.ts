@@ -9,15 +9,25 @@ import { PostgresAddresses } from './infrastructure/postgres-addresses.js';
 import { ServiceabilityModule } from '../serviceability/serviceability.module.js';
 import { MAPS } from '../serviceability/contracts/tokens.js';
 import type { MapsPort } from '../serviceability/contracts/maps.js';
+import { SubscriptionObligationsModule } from '../subscriptions/subscriptions-obligations.module.js';
+import {
+  ADDRESS_SUBSCRIPTIONS,
+  type AddressSubscriptions,
+} from '../subscriptions/contracts/subscriptions.js';
 @Module({
-  imports: [AppConfigModule, ServiceabilityModule],
+  imports: [AppConfigModule, ServiceabilityModule, SubscriptionObligationsModule],
   providers: [
     {
       provide: ADDRESSES,
-      inject: [PLATFORM_DATABASE, APP_CONFIG, MAPS],
-      useFactory: (db: DatabaseHandle, config: AppConfig, maps: MapsPort) =>
+      inject: [PLATFORM_DATABASE, APP_CONFIG, MAPS, ADDRESS_SUBSCRIPTIONS],
+      useFactory: (
+        db: DatabaseHandle,
+        config: AppConfig,
+        maps: MapsPort,
+        subscriptions: AddressSubscriptions,
+      ) =>
         new Addresses(
-          new PostgresAddresses(db.db),
+          new PostgresAddresses(db.db, subscriptions),
           () => config.get('addressMaxPerUser'),
           maps,
           () => config.get('addressPinMismatchMetres'),

@@ -1,3 +1,4 @@
+import type { TransactionContext } from '../../../platform/database/database.js';
 /**
  * Handover codes are derived with a versioned keyed HMAC over the order id and
  * never stored as plaintext (D20-style); only the verifier and key version are
@@ -7,12 +8,13 @@
 export interface HandoverIssueInput {
   orderId: string;
   storeId: string;
+  riderId?: string;
 }
 
 export const HANDOVER_CODES = Symbol('HANDOVER_CODES');
 export interface HandoverCodes {
   /** Derive the code and persist only its HMAC verifier (idempotent per order). */
-  issue(input: HandoverIssueInput): Promise<{ state: 'PENDING' }>;
+  issue(input: HandoverIssueInput, tx?: TransactionContext): Promise<{ state: 'PENDING' }>;
   /** Authorized read of the derived code for the assigned rider surface (P8). */
   presentCode(orderId: string): Promise<{ code: string; keyVersion: number }>;
   /** Store-side verification: attempt-limited, lockout aware; audited manager override. */
@@ -49,13 +51,4 @@ export interface PickPacking {
 export const HANDOVER_STATUS = Symbol('HANDOVER_STATUS');
 export interface HandoverStatus {
   verified(orderId: string): Promise<boolean>;
-}
-export interface PickPacking {
-  /** Records bags/seal/cold-chain and marks the order packed through P6. */
-  pack(
-    actorId: string,
-    orderId: string,
-    input: PackInput,
-    reference: string,
-  ): Promise<{ packedAt: string }>;
 }

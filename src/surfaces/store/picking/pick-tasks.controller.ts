@@ -30,6 +30,9 @@ import {
   Max,
   MaxLength,
   Min,
+  IsArray,
+  ArrayMaxSize,
+  ValidateNested,
 } from 'class-validator';
 import { DomainErrorInterceptor } from '../../domain-errors.js';
 import {
@@ -69,10 +72,21 @@ class ReassignDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() toUserId!: string;
   @ApiProperty({ maxLength: 300 }) @IsString() @Length(1, 300) reason!: string;
 }
+class PickBatchDto {
+  @ApiProperty({ format: 'uuid' }) @IsUUID() batchId!: string;
+  @ApiProperty({ pattern: '^[1-9][0-9]{0,18}$' }) @Matches(QTY) quantity!: string;
+}
 class PickItemDto {
   @ApiProperty({ maxLength: 100 }) @IsString() @Length(1, 100) scannedBarcode!: string;
   @ApiProperty({ pattern: '^[1-9][0-9]{0,18}$' }) @Matches(QTY) quantity!: string;
   @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() batchId?: string;
+  @ApiPropertyOptional({ type: [PickBatchDto], maxItems: 20 })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => PickBatchDto)
+  batches?: PickBatchDto[];
 }
 class ShortDto {
   @ApiProperty({ enum: ['OUT_OF_STOCK', 'DAMAGED', 'EXPIRED', 'NOT_FOUND'] })
@@ -112,6 +126,12 @@ function key(header?: string): string {
 @AuthPolicy({ audience: 'store', roles: ['PICKER', 'STORE_MANAGER'] })
 @UseGuards(IdentityGuard)
 export class StorePickTasksController {
+  @Post('pick-tasks/:id/heartbeat')
+  @ApiOperation({ operationId: 'storePickHeartbeat' })
+  async heartbeat(@CurrentPrincipal() p: Principal, @Param('id') id: string) {
+    await this.picking.heartbeat(p.userId, id);
+    return { state: 'ACTIVE' };
+  }
   constructor(@Inject(PICK_TASKS) private readonly picking: PickTasks) {}
   @Get('pick-tasks')
   @ApiOperation({ operationId: 'storePickQueue' })

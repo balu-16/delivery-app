@@ -1,3 +1,4 @@
+import type { TransactionContext } from '../../../platform/database/database.js';
 /** Internal P7 boundary: a return is quarantined until an authorized QC decision. */
 export interface ReturnReceipt {
   returnId: string;
@@ -8,7 +9,13 @@ export interface ReturnReceipt {
   expiresAt: string | null;
 }
 export interface InventoryReturns {
-  receiveReturn(actor: string, input: ReturnReceipt): Promise<void>;
+  /** Shared cancellation only: recover already-picked warehouse goods into quarantine. */
+  receiveCancelledOrder(
+    orderId: string,
+    actorId: string | null,
+    tx: TransactionContext,
+  ): Promise<void>;
+  receiveReturn(actor: string, input: ReturnReceipt, tx?: TransactionContext): Promise<void>;
   inspectReturn(
     actor: string,
     returnId: string,

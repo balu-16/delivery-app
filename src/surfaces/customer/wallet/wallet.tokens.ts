@@ -1,0 +1,1 @@
+export const WALLET_IDEMPOTENCY = Symbol('WALLET_IDEMPOTENCY');

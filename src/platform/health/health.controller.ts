@@ -1,11 +1,15 @@
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
+import { ConfigService } from '../../config/config.service.js';
 import { READINESS_PROBES, type ReadinessProbe } from './contracts.js';
 
 @ApiExcludeController()
 @Controller()
 export class HealthController {
-  constructor(@Inject(READINESS_PROBES) private readonly probes: readonly ReadinessProbe[]) {}
+  constructor(
+    @Inject(READINESS_PROBES) private readonly probes: readonly ReadinessProbe[],
+    private readonly config: ConfigService,
+  ) {}
   @Get('healthz') live(): { status: string } {
     return { status: 'ok' };
   }
@@ -16,7 +20,10 @@ export class HealthController {
       const results = await Promise.race([
         Promise.allSettled(this.probes.map((probe) => probe.check())),
         new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => reject(new Error('READINESS_TIMEOUT')), 3000);
+          timeout = setTimeout(
+            () => reject(new Error('READINESS_TIMEOUT')),
+            this.config.get('READINESS_TIMEOUT_MS'),
+          );
         }),
       ]);
       if (results.some((result) => result.status === 'rejected'))

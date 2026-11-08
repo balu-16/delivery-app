@@ -1,3 +1,5 @@
+import type { TransactionContext } from '../../../platform/database/database.js';
+
 export interface HoursWindow {
   startMinute: number;
   endMinute: number;
@@ -13,5 +15,5 @@ export interface StoreSchedule {
   lastOrderBufferMinutes: number;
 }
 export interface StoreAvailability {
-  isOpenAt(storeId: string, target: Date): Promise<boolean>;
+  isOpenAt(storeId: string, target: Date, tx?: TransactionContext): Promise<boolean>;
 }

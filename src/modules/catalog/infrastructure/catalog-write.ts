@@ -61,7 +61,7 @@ export class CatalogWrite {
               )
             : await sql<{
                 id: string;
-              }>`SELECT id,product_id AS "productId",name,sku,barcode FROM catalog_variants WHERE deleted_at IS NULL AND (${id ?? null}::uuid IS NULL OR id=${id ?? null}::uuid) AND (${after}::uuid IS NULL OR id>${after}::uuid) ORDER BY id LIMIT ${limit + 1}`.execute(
+              }>`SELECT id,product_id AS "productId",name,sku,barcode,base_unit AS "baseUnit" FROM catalog_variants WHERE deleted_at IS NULL AND (${id ?? null}::uuid IS NULL OR id=${id ?? null}::uuid) AND (${after}::uuid IS NULL OR id>${after}::uuid) ORDER BY id LIMIT ${limit + 1}`.execute(
                 this.db,
               );
     const items = result.rows.slice(0, limit);
@@ -164,7 +164,8 @@ export class CatalogWrite {
         !data.sku.trim() ||
         data.name.length > 200 ||
         data.sku.length > 100 ||
-        (data.barcode?.length ?? 0) > 100
+        (data.barcode?.length ?? 0) > 100 ||
+        (data.baseUnit !== undefined && !['PIECE', 'GRAM', 'MILLILITRE'].includes(data.baseUnit))
       )
         throw new Error('INVALID_CATALOG');
       const parent =
@@ -175,13 +176,16 @@ export class CatalogWrite {
       if (requestedId) {
         const old = await sql<{
           product_id: string;
-        }>`SELECT product_id FROM catalog_variants WHERE id=${id}::uuid AND deleted_at IS NULL FOR UPDATE`.execute(
+          base_unit: string;
+        }>`SELECT product_id,base_unit FROM catalog_variants WHERE id=${id}::uuid AND deleted_at IS NULL FOR UPDATE`.execute(
           tx,
         );
         if (!old.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
         if (old.rows[0].product_id !== data.productId) throw new Error('INVALID_CATALOG');
+        if (data.baseUnit && data.baseUnit !== old.rows[0].base_unit)
+          throw new Error('CATALOG_IN_USE');
       }
-      await sql`INSERT INTO catalog_variants(id,product_id,name,sku,barcode) VALUES(${id}::uuid,${data.productId}::uuid,${data.name.trim()},${data.sku.trim()},${data.barcode?.trim() || null})
+      await sql`INSERT INTO catalog_variants(id,product_id,name,sku,barcode,base_unit) VALUES(${id}::uuid,${data.productId}::uuid,${data.name.trim()},${data.sku.trim()},${data.barcode?.trim() || null},${data.baseUnit ?? 'PIECE'})
         ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,sku=EXCLUDED.sku,barcode=EXCLUDED.barcode,updated_at=clock_timestamp()`.execute(
         tx,
       );

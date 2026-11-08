@@ -37,8 +37,9 @@ it('upgrades an empty then populated previous schema, and reapplies a developmen
   const history = await client.query('SELECT count(*)::int AS count FROM pgmigrations');
   expect(history.rows[0]?.count).toBeGreaterThan(0);
   if (history.rows[0].count > 1) {
-    await runner({ ...options, direction: 'down', count: 1 });
-    await runner({ ...options, direction: 'up', count: 1 });
+    await expect(runner({ ...options, direction: 'down', count: 1 })).rejects.toThrow(
+      'migration 031 is forward-only',
+    );
     expect(
       (
         await client.query(

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { DOMAIN_ERROR_STATUS, PROBLEM_CODES } from './problem-codes.js';
 
 /** Preserve declared application codes without reflecting arbitrary vendor messages. */
 export function createProblem(status: number, traceId: string, supplied?: unknown) {
@@ -25,131 +26,14 @@ export function createProblem(status: number, traceId: string, supplied?: unknow
     503: ['Service Unavailable', 'SERVICE_UNAVAILABLE'],
     504: ['Gateway Timeout', 'GATEWAY_TIMEOUT'],
   };
-  const codes: Record<number, readonly string[]> = {
-    400: [
-      'INVALID_COORDINATES',
-      'INVALID_PINCODE',
-      'INVALID_CONTACT_PHONE',
-      'INVALID_ADDRESS',
-      'INVALID_VERSION',
-      'INVALID_ZONE',
-      'INVALID_ZONE_GEOMETRY',
-      'ZONE_OUTSIDE_BOUNDS_OR_AREA',
-      'INVALID_TARGET_TIME',
-      'MATRIX_BUDGET_EXCEEDED',
-      'INVALID_BOOTSTRAP_IDENTITY',
-      'INVALID_EMAIL',
-      'INVALID_CONSENT_VERSION',
-      'INVALID_CONFIG_VALUE',
-      'INVALID_CONFIG_KEY',
-      'INVALID_FLAG',
-      'INVALID_APPROVAL',
-      'INVALID_WORKFORCE_INPUT',
-      'ROLE_NOT_MANAGED',
-      'INVALID_SEARCH',
-      'INVALID_RIDER_PROFILE',
-      'INVALID_DOCUMENT',
-      'INVALID_MEDIA',
-      'INVALID_HOURS',
-      'INVALID_PAUSE_REASON',
-      'INVALID_INPUT',
-      'INVALID_PROFILE',
-      'REVIEW_REASON_REQUIRED',
-      'INVALID_SEARCH_QUERY',
-      'INVALID_CATALOG',
-      'INVALID_GST',
-      'INVALID_PRICE',
-      'INVALID_PRICE_TIME',
-      'INVALID_QUANTITY',
-      'INVALID_PAGE',
-      'INVALID_CSV',
-      'IMPORT_TOO_MANY_ROWS',
-    ],
-    401: ['INVALID_TOKEN'],
-    403: [
-      'PROFILE_NOT_INITIALIZED',
-      'ACCOUNT_DISABLED',
-      'RIDER_NOT_APPROVED',
-      'FORBIDDEN',
-      'CONSENT_REQUIRED',
-      'EMAIL_NOT_VERIFIED',
-    ],
-    404: [
-      'ADDRESS_NOT_FOUND',
-      'STORE_NOT_FOUND',
-      'ZONE_NOT_FOUND',
-      'PLACE_NOT_FOUND',
-      'DOCUMENT_NOT_FOUND',
-      'RESOURCE_NOT_FOUND',
-      'USER_NOT_FOUND',
-      'MEDIA_NOT_FOUND',
-      'ADDRESS_NOT_SERVICEABLE',
-    ],
-    409: [
-      'ADDRESS_LIMIT_REACHED',
-      'CONCURRENT_MODIFICATION',
-      'ZONE_STORE_IMMUTABLE',
-      'ADDRESS_CHANGE_NOT_ALLOWED',
-      'IDEMPOTENCY_KEY_REUSED',
-      'REQUEST_IN_PROGRESS',
-      'LAST_SUPER_ADMIN',
-      'CANNOT_DISABLE_SELF',
-      'APPROVAL_INVALID',
-      'APPROVAL_POLICY_CHANGED',
-      'PROVISIONING_INPUT_CONFLICT',
-      'ROLE_NOT_ASSIGNED',
-      'RESOURCE_CONFLICT',
-      'STORE_CITY_IMMUTABLE',
-      'DOCUMENT_STATE_INVALID',
-      'PRODUCT_NOT_PUBLISHABLE',
-      'CATALOG_IN_USE',
-      'APPROVAL_REQUIRED',
-      'INVENTORY_INSUFFICIENT',
-      'INVENTORY_RESERVED',
-      'RESERVATION_STATE_INVALID',
-      'RECEIPT_REQUIRED',
-      'BATCH_NOT_ELIGIBLE',
-      'RETURN_QUANTITY_EXCEEDED',
-      'REPORT_NOT_READY',
-      'PICK_TASK_STATE_INVALID',
-      'NOT_TASK_OWNER',
-      'ITEM_ALREADY_RESOLVED',
-      'PICKER_AT_CAPACITY',
-      'PICK_TASK_INCOMPLETE',
-      'PICK_TASK_NOT_COMPLETE',
-      'WRONG_ITEM',
-      'SUBSTITUTION_DISABLED',
-      'SUBSTITUTION_NOT_PERMITTED',
-      'SUBSTITUTION_STATE_INVALID',
-      'HANDOVER_CODE_INVALID',
-      'HANDOVER_LOCKED',
-      'HANDOVER_NOT_READY',
-      'OFFER_NO_LONGER_AVAILABLE',
-      'OFFER_ALREADY_RESPONDED',
-      'DELIVERY_TASK_STATE_INVALID',
-      'RIDER_NOT_APPROVED',
-      'RIDER_AT_CAPACITY',
-      'RIDER_OFFLINE',
-      'CASH_LIMIT_EXCEEDED',
-      'COD_MISMATCH',
-      'DELIVERY_CODE_INVALID',
-      'DELIVERY_CODE_LOCKED',
-      'LOCATION_INVALID',
-      'HANDOVER_NOT_VERIFIED',
-    ],
-    413: ['IMPORT_TOO_LARGE'],
-    502: ['ExternalServiceRejected'],
-    503: [
-      'ExternalServiceUnavailable',
-      'ExternalServiceTimeout',
-      'FULFILLMENT_DEPENDENCY_UNAVAILABLE',
-      'DISPATCH_DEPENDENCY_UNAVAILABLE',
-      'FEATURE_DISABLED',
-    ],
-  };
+
   const [title, fallback] = names[status] ?? ['Internal Server Error', 'INTERNAL_ERROR'];
   const code =
-    typeof supplied === 'string' && codes[status]?.includes(supplied) ? supplied : fallback;
+    typeof supplied === 'string' &&
+    (PROBLEM_CODES[status]?.includes(supplied) ||
+      (Object.hasOwn(DOMAIN_ERROR_STATUS, supplied) && DOMAIN_ERROR_STATUS[supplied] === status))
+      ? supplied
+      : fallback;
   return { type: 'about:blank', title, status, code, detail: title, traceId };
 }
 

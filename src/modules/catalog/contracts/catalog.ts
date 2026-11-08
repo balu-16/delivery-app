@@ -15,6 +15,7 @@ export interface VariantDraft {
   name: string;
   sku: string;
   barcode?: string | null;
+  baseUnit?: 'PIECE' | 'GRAM' | 'MILLILITRE';
 }
 export interface PriceDraft {
   storeId: string;

@@ -25,6 +25,9 @@ export async function createApplication(
   const adapter = new FastifyAdapter({
     loggerInstance: logger,
     bodyLimit: env.HTTP_BODY_LIMIT_BYTES,
+    requestTimeout: env.HTTP_REQUEST_TIMEOUT_MS,
+    connectionTimeout: env.HTTP_HEADERS_TIMEOUT_MS,
+    http: { connectionsCheckingInterval: Math.min(1000, env.HTTP_HEADERS_TIMEOUT_MS) },
     logController: new LogController({ disableRequestLogging: true }),
     genReqId: (request: IncomingMessage) => {
       const supplied = request.headers['x-request-id'];
@@ -39,6 +42,7 @@ export async function createApplication(
     { logger: createNestLogger(logger), abortOnError: false },
   );
   const fastify = adapter.getInstance();
+  fastify.server.headersTimeout = env.HTTP_HEADERS_TIMEOUT_MS;
   // Nest maps Fastify parser errors into the same global problem filter.
   const metrics = app.get(HttpMetrics);
   fastify.addHook('onResponse', async (request, reply) => {

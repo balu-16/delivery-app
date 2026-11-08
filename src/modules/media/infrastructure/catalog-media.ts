@@ -130,7 +130,8 @@ export class CatalogMediaService implements CatalogMedia {
     }>`SELECT object_key,content_type FROM catalog_media WHERE id=${id}::uuid AND purpose='PRODUCT_IMAGE' AND state='REGISTERED'`.execute(
       this.db,
     );
-    if (!found.rows[0]) throw new Error('MEDIA_NOT_FOUND');
+    if (!found.rows[0] || !found.rows[0].object_key.startsWith('public/'))
+      throw new Error('MEDIA_NOT_FOUND');
     return {
       body: await this.storage.open(found.rows[0].object_key),
       contentType: found.rows[0].content_type,

@@ -54,9 +54,35 @@ export async function claimCapacityInTransaction(
 }
 export class PostgresCapacityClaims implements CapacityClaims {
   constructor(private readonly db: Kysely<PlatformSchema>) {}
-  claim(storeId: string, slotStart: Date, reference: string) {
+  claim(storeId: string, slotStart: Date, reference: string, tx?: Tx) {
+    if (tx) return claimCapacityInTransaction(tx, storeId, slotStart, reference);
     return this.db
       .transaction()
       .execute((tx) => claimCapacityInTransaction(tx, storeId, slotStart, reference));
+  }
+  release(reference: string, outer?: Tx): Promise<boolean> {
+    if (!reference || reference.length > 200) throw new Error('INVALID_CAPACITY_CLAIM');
+    const run = async (tx: Tx): Promise<boolean> => {
+      const claims = await sql<{ store_id: string; slot_start: Date }>`SELECT store_id,slot_start
+        FROM store_capacity_claims WHERE reference=${reference} ORDER BY store_id,slot_start`.execute(
+        tx,
+      );
+      let released = false;
+      for (const claim of claims.rows) {
+        await sql`SELECT id FROM stores WHERE id=${claim.store_id}::uuid FOR UPDATE`.execute(tx);
+        await sql`SELECT store_id FROM store_capacity_buckets WHERE store_id=${claim.store_id}::uuid
+          AND slot_start=${claim.slot_start} FOR UPDATE`.execute(tx);
+        const removed =
+          await sql`DELETE FROM store_capacity_claims WHERE store_id=${claim.store_id}::uuid
+          AND slot_start=${claim.slot_start} AND reference=${reference}`.execute(tx);
+        if (removed.numAffectedRows) {
+          await sql`UPDATE store_capacity_buckets SET claimed=claimed-1
+            WHERE store_id=${claim.store_id}::uuid AND slot_start=${claim.slot_start}`.execute(tx);
+          released = true;
+        }
+      }
+      return released;
+    };
+    return outer ? run(outer) : this.db.transaction().execute(run);
   }
 }

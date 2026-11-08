@@ -2,6 +2,7 @@ import type {
   ServiceabilityInput,
   ServiceabilityReason,
   ServiceabilityResult,
+  ServiceabilityTransaction,
   ZoneSnapshot,
 } from '../contracts/serviceability.js';
 import { validateIndiaPoint } from '../domain/point.js';
@@ -14,7 +15,10 @@ export interface Candidate {
   noRidersAvailable: boolean;
 }
 export interface ServiceabilityRepository {
-  findCandidate(input: ServiceabilityInput): Promise<Candidate | null>;
+  findCandidate(
+    input: ServiceabilityInput,
+    tx?: ServiceabilityTransaction,
+  ): Promise<Candidate | null>;
 }
 export interface EtaSettings {
   minMinutes: number;
@@ -23,12 +27,15 @@ export interface EtaSettings {
 export class ServiceabilityQuery {
   constructor(
     private readonly repository: ServiceabilityRepository,
-    private readonly eta: () => Promise<EtaSettings>,
+    private readonly eta: (tx?: ServiceabilityTransaction) => Promise<EtaSettings>,
   ) {}
-  async check(input: ServiceabilityInput): Promise<ServiceabilityResult> {
+  async check(
+    input: ServiceabilityInput,
+    tx?: ServiceabilityTransaction,
+  ): Promise<ServiceabilityResult> {
     validateIndiaPoint(input);
     if (!Number.isFinite(input.targetTime.getTime())) throw new Error('INVALID_TARGET_TIME');
-    const candidate = await this.repository.findCandidate(input);
+    const candidate = await this.repository.findCandidate(input, tx);
     if (!candidate)
       return {
         serviceable: false,
@@ -42,7 +49,7 @@ export class ServiceabilityQuery {
     if (candidate.status === 'OFFLINE' || !candidate.open) reasons.push('STORE_CLOSED');
     if (!candidate.capacityRemaining) reasons.push('STORE_AT_CAPACITY');
     if (candidate.noRidersAvailable) reasons.push('NO_RIDERS_AVAILABLE');
-    const eta = reasons.length === 0 ? await this.eta() : null;
+    const eta = reasons.length === 0 ? await this.eta(tx) : null;
     if (
       eta &&
       (!Number.isFinite(eta.minMinutes) ||

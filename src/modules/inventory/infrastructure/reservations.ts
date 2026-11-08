@@ -49,13 +49,41 @@ export class PostgresReservations implements InventoryReservations {
     }
     const target = new Date(input.targetDeliveryAt);
     if (!Number.isFinite(target.getTime())) throw new Error('INVALID_TARGET_TIME');
+    if (
+      input.cycleReference !== undefined &&
+      (!input.cycleReference || input.cycleReference.length > 150)
+    )
+      throw new Error('INVALID_INPUT');
     await this.run(outer, async (tx) => {
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`inventory-order:${input.orderId}`},0))`.execute(
         tx,
       );
-      const reference = `reserve:${input.orderId}`;
+      const reference = `reserve:${input.orderId}${input.cycleReference ? `:${input.cycleReference}` : ''}`;
       if (!(await operation(tx, reference, 'RESERVE', { ...input, lines }))) return;
       const missing = await lockStock(tx, lines, true);
+      const previous = await sql<{
+        state: string;
+        generation: number;
+      }>`SELECT state,generation FROM inventory_reservations
+        WHERE order_id=${input.orderId}::uuid ORDER BY store_id,variant_id FOR UPDATE`.execute(tx);
+      let generation = 1;
+      if (previous.rows.length) {
+        if (!input.cycleReference || previous.rows.some((row) => row.state !== 'RESOLVED'))
+          throw new Error('RESERVATION_STATE_INVALID');
+        generation = Math.max(...previous.rows.map((row) => row.generation)) + 1;
+        await sql`INSERT INTO inventory_reservation_cycles(order_id,generation,reservations,allocations)
+          SELECT ${input.orderId}::uuid,${generation - 1},
+          (SELECT jsonb_agg(to_jsonb(r)) FROM inventory_reservations r WHERE order_id=${input.orderId}::uuid),
+          COALESCE((SELECT jsonb_agg(to_jsonb(a)) FROM inventory_allocations a WHERE order_id=${input.orderId}::uuid),'[]'::jsonb)`.execute(
+          tx,
+        );
+        await sql`DELETE FROM inventory_allocations WHERE order_id=${input.orderId}::uuid`.execute(
+          tx,
+        );
+        await sql`DELETE FROM inventory_reservations WHERE order_id=${input.orderId}::uuid`.execute(
+          tx,
+        );
+      }
       const candidates: Array<{
         line: ReservationLine;
         batches: Array<{
@@ -105,7 +133,7 @@ export class PostgresReservations implements InventoryReservations {
       }
       if (shortfalls.length) throw new InventoryInsufficient(shortfalls);
       for (const { line, batches } of candidates) {
-        await sql`INSERT INTO inventory_reservations(order_id,store_id,variant_id,quantity,state,expires_at,target_delivery_at) VALUES(${input.orderId}::uuid,${line.storeId}::uuid,${line.variantId}::uuid,${line.quantity}::bigint,'HELD',${new Date(now.getTime() + input.ttlSeconds * 1000)},${target})`.execute(
+        await sql`INSERT INTO inventory_reservations(order_id,store_id,variant_id,quantity,state,expires_at,target_delivery_at,generation) VALUES(${input.orderId}::uuid,${line.storeId}::uuid,${line.variantId}::uuid,${line.quantity}::bigint,'HELD',${new Date(now.getTime() + input.ttlSeconds * 1000)},${target},${generation})`.execute(
           tx,
         );
         let remaining = BigInt(line.quantity);

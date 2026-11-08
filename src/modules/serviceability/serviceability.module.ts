@@ -17,7 +17,8 @@ import { OlaMaps } from '../../adapters/maps/ola.js';
 import { ResilientMaps } from '../../adapters/maps/resilient.js';
 import { ServiceabilityQuery } from './application/serviceability.js';
 import { PostgresServiceability } from './infrastructure/postgres-serviceability.js';
-import { MAPS, SERVICEABILITY } from './contracts/tokens.js';
+import { PostgresCapacityClaims } from './infrastructure/postgres-capacity.js';
+import { CAPACITY_CLAIMS, MAPS, SERVICEABILITY } from './contracts/tokens.js';
 
 /** Provider-only composition: each audience owns its own controllers. */
 @Module({
@@ -46,7 +47,7 @@ import { MAPS, SERVICEABILITY } from './contracts/tokens.js';
           db.db,
           timezone,
           availability,
-          (storeId, at) => signals.noRiders(storeId, at),
+          (storeId, at, tx) => signals.noRiders(storeId, at, tx),
           {
             get: (key) => redis.get(key),
             set: async (key, value, ttl) => {
@@ -54,11 +55,16 @@ import { MAPS, SERVICEABILITY } from './contracts/tokens.js';
             },
           },
         );
-        return new ServiceabilityQuery(repository, async () => ({
-          minMinutes: await config.get('etaMinMinutes'),
-          maxMinutes: await config.get('etaMaxMinutes'),
+        return new ServiceabilityQuery(repository, async (tx) => ({
+          minMinutes: await config.get('etaMinMinutes', tx),
+          maxMinutes: await config.get('etaMaxMinutes', tx),
         }));
       },
+    },
+    {
+      provide: CAPACITY_CLAIMS,
+      inject: [PLATFORM_DATABASE],
+      useFactory: (handle: DatabaseHandle) => new PostgresCapacityClaims(handle.db),
     },
     {
       provide: MAPS,
@@ -116,6 +122,6 @@ import { MAPS, SERVICEABILITY } from './contracts/tokens.js';
       },
     },
   ],
-  exports: [SERVICEABILITY, MAPS],
+  exports: [SERVICEABILITY, MAPS, CAPACITY_CLAIMS],
 })
 export class ServiceabilityModule {}

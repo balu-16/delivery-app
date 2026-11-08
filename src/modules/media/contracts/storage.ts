@@ -11,6 +11,14 @@ export interface StoragePort {
   promote(source: string, destination: string, etag: string): Promise<void>;
   /** Server-only immutable write to a private key, never a client upload capability. */
   putPrivate(key: string, body: Buffer, contentType: string): Promise<void>;
+  putPrivateStream(
+    key: string,
+    body: Readable,
+    contentType: string,
+    options?: { maxBytes?: number; signal?: AbortSignal },
+  ): Promise<void>;
+  signedRead(key: string, expires: number): Promise<string>;
+  readCapability?(token: string): Promise<{ body: Readable; contentType: string }>;
   remove(key: string): Promise<void>;
   open(key: string): Promise<Readable>;
 }

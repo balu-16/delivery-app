@@ -17,6 +17,7 @@ export function createLogger(level: Env['LOG_LEVEL']): pino.Logger {
         'email',
         'phone',
         'address',
+        'deliveryCode',
         'body',
         'req.body',
         'webhookBody',

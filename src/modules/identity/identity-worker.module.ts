@@ -64,7 +64,15 @@ class IdentitySyncLifecycle implements OnApplicationBootstrap, BeforeApplication
                 config.get('COGNITO_BREAKER_FAILURES'),
                 config.get('COGNITO_BREAKER_COOLDOWN_MS'),
               );
-        return new IdentitySyncWorker(handle.db, { CUSTOMER: customer, WORKFORCE: workforce });
+        const sharedPool =
+          config.get('AUTH_PROVIDER') === 'cognito' &&
+          config.get('COGNITO_CUSTOMER_POOL_ID') === config.get('COGNITO_WORKFORCE_POOL_ID');
+        return new IdentitySyncWorker(
+          handle.db,
+          { CUSTOMER: customer, WORKFORCE: workforce },
+          60,
+          !sharedPool,
+        );
       },
     },
     IdentitySyncLifecycle,

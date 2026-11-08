@@ -73,6 +73,11 @@ class ListDto {
   @Max(100)
   limit?: number;
 }
+class BinDto {
+  @ApiProperty({ format: 'uuid' }) @IsUUID() storeId!: string;
+  @ApiProperty({ format: 'uuid' }) @IsUUID() variantId!: string;
+  @ApiProperty({ minLength: 1, maxLength: 60 }) @IsString() @Length(1, 60) location!: string;
+}
 @Controller('v1/store/inventory')
 @ApiBearerAuth()
 @InventoryApiErrors()
@@ -80,6 +85,13 @@ class ListDto {
 @AuthPolicy({ audience: 'store', roles: ['PICKER', 'STORE_MANAGER'] })
 @UseGuards(IdentityGuard)
 export class StoreInventoryController {
+  @Post('bin-location')
+  @ApiOperation({ operationId: 'storeInventorySetBin' })
+  @AuthPolicy({ audience: 'store', roles: ['STORE_MANAGER'] })
+  async bin(@CurrentPrincipal() p: Principal, @Body() body: BinDto) {
+    await this.inventory.setBinLocation(p.userId, body.storeId, body.variantId, body.location);
+    return { state: 'UPDATED' };
+  }
   constructor(
     @Inject(INVENTORY_MANAGEMENT) private readonly inventory: InventoryManagement,
     @Inject(APP_CONFIG) private readonly config: AppConfig,

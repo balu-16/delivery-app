@@ -46,16 +46,16 @@
       "eventType": "ORDER_CREATED",
       "sourceSection": "5.4",
       "phase": "P6",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["orders"],
-      "consumers": ["notifications"]
+      "consumers": []
     },
     {
       "id": "ORDER_CONFIRMED",
       "eventType": "ORDER_CONFIRMED",
       "sourceSection": "5.4",
       "phase": "P6",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["orders"],
       "consumers": ["picking", "dispatch", "notifications"]
     },
@@ -73,52 +73,52 @@
       "eventType": "ORDER_PACKED",
       "sourceSection": "5.4",
       "phase": "P7",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["picking"],
-      "consumers": ["dispatch", "notifications"]
+      "consumers": ["dispatch-trigger", "notifications"]
     },
     {
       "id": "ORDER_OUT_FOR_DELIVERY",
       "eventType": "ORDER_OUT_FOR_DELIVERY",
       "sourceSection": "5.4",
       "phase": "P8",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["dispatch"],
-      "consumers": ["notifications", "tracking"]
+      "consumers": ["notifications"]
     },
     {
       "id": "ORDER_DELIVERED",
       "eventType": "ORDER_DELIVERED",
       "sourceSection": "5.4",
       "phase": "P8",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["dispatch"],
-      "consumers": ["invoicing", "earnings", "notifications"]
+      "consumers": ["invoicing", "notifications"]
     },
     {
       "id": "ORDER_CANCELLED",
       "eventType": "ORDER_CANCELLED",
       "sourceSection": "5.4",
       "phase": "P6",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["orders"],
       "consumers": ["picking", "dispatch", "notifications"]
     },
     {
       "id": "REFUND_PROCESSED",
-      "eventType": "REFUND_PROCESSED",
+      "eventType": "payments.refund.settled",
       "sourceSection": "5.4",
       "phase": "P6",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["payments"],
-      "consumers": ["notifications", "invoicing"]
+      "consumers": ["wallet", "invoicing", "notifications"]
     },
     {
       "id": "SUBSCRIPTION_SKIPPED",
-      "eventType": "SUBSCRIPTION_SKIPPED",
+      "eventType": "subscription.skipped",
       "sourceSection": "5.4",
       "phase": "P10",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["subscriptions"],
       "consumers": ["notifications"]
     },
@@ -238,7 +238,7 @@
       "status": "implemented",
       "schemaVersion": 1,
       "producers": ["picking"],
-      "consumers": [],
+      "consumers": ["dispatch-trigger", "notifications"],
       "plannedConsumers": ["notifications"],
       "note": "Task lifecycle transitions and confirmation-created tasks; handover records and pack events remain P8 custody inputs."
     },
@@ -250,7 +250,7 @@
       "status": "implemented",
       "schemaVersion": 1,
       "producers": ["picking"],
-      "consumers": [],
+      "consumers": ["dispatch-trigger", "notifications"],
       "plannedConsumers": ["notifications"],
       "note": "Emitted after fulfilled stock is consumed and shorts are settled through the P6 adjustment contract."
     },
@@ -262,7 +262,7 @@
       "status": "implemented",
       "schemaVersion": 1,
       "producers": ["picking"],
-      "consumers": [],
+      "consumers": ["notifications"],
       "plannedConsumers": ["notifications", "audit"],
       "note": "One breach row per task; the SLA worker also feeds the store auto-pause evaluator and passes rider availability through."
     },
@@ -271,7 +271,7 @@
       "eventType": "rider.offer_created",
       "sourceSection": "23.2",
       "phase": "P8",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["dispatch"],
       "consumers": ["notifications"]
     },
@@ -280,25 +280,25 @@
       "eventType": "rider.offer_revoked",
       "sourceSection": "23.2",
       "phase": "P8",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["dispatch"],
-      "consumers": ["notifications"]
+      "consumers": ["notifications", "dispatch-realtime"]
     },
     {
       "id": "rider.document_approved",
-      "eventType": "rider.document_approved",
+      "eventType": "rider.document.approved",
       "sourceSection": "13",
       "phase": "P8",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["identity"],
       "consumers": ["notifications"]
     },
     {
       "id": "rider.document_rejected",
-      "eventType": "rider.document_rejected",
+      "eventType": "rider.document.rejected",
       "sourceSection": "13",
       "phase": "P8",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["identity"],
       "consumers": ["notifications"]
     },
@@ -307,7 +307,7 @@
       "eventType": "dispatch.no_rider",
       "sourceSection": "23.2",
       "phase": "P8",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["dispatch"],
       "consumers": ["notifications"]
     },
@@ -316,7 +316,7 @@
       "eventType": "delivery.completed",
       "sourceSection": "23.3",
       "phase": "P8",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["dispatch"],
       "consumers": ["notifications"]
     },
@@ -325,7 +325,7 @@
       "eventType": "delivery.failed",
       "sourceSection": "23.3",
       "phase": "P8",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["dispatch"],
       "consumers": ["notifications"]
     },
@@ -334,7 +334,7 @@
       "eventType": "reconciliation.finding",
       "sourceSection": "20.4",
       "phase": "P6",
-      "status": "planned",
+      "status": "implemented",
       "producers": ["payments"],
       "consumers": ["notifications"]
     },
@@ -345,6 +345,156 @@
       "phase": "P9",
       "status": "planned",
       "producers": ["operations"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "payments.funding.captured",
+      "eventType": "payments.funding.captured",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P6",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["payments"],
+      "consumers": ["orders"]
+    },
+    {
+      "id": "payments.funding.failed",
+      "eventType": "payments.funding.failed",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P6",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["payments"],
+      "consumers": ["orders", "notifications"]
+    },
+    {
+      "id": "payments.topup.captured",
+      "eventType": "payments.topup.captured",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P6",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["payments"],
+      "consumers": ["wallet", "notifications"]
+    },
+    {
+      "id": "payments.refund.initiated",
+      "eventType": "payments.refund.initiated",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P6",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["payments"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "wallet.low_balance",
+      "eventType": "wallet.low_balance",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P6",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["wallet"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "inventory.shortfall_detected",
+      "eventType": "inventory.shortfall_detected",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P4",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["inventory"],
+      "consumers": ["inventory-shortfalls"]
+    },
+    {
+      "id": "picking.item_changed",
+      "eventType": "picking.item_changed",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P7",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["picking"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "delivery.task_assigned",
+      "eventType": "delivery.task_assigned",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P8",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["dispatch"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "delivery.task_changed",
+      "eventType": "delivery.task_changed",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P8",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["dispatch"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "delivery.returned_to_store",
+      "eventType": "delivery.returned_to_store",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P8",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["dispatch"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "ops.anomaly",
+      "eventType": "ops.anomaly",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P9",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["payments", "picking"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "delivery.wrong_address_flagged",
+      "eventType": "delivery.wrong_address_flagged",
+      "sourceSection": "5.4,19-23,27",
+      "phase": "P8",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["dispatch"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "subscription.low_balance",
+      "eventType": "subscription.low_balance",
+      "sourceSection": "25",
+      "phase": "P10",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["subscriptions"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "subscription.price_increase",
+      "eventType": "subscription.price_increase",
+      "sourceSection": "25",
+      "phase": "P10",
+      "schemaVersion": 1,
+      "status": "implemented",
+      "producers": ["subscriptions"],
+      "consumers": ["notifications"]
+    },
+    {
+      "id": "subscription.generation_incomplete",
+      "eventType": "subscription.generation_incomplete",
+      "schemaVersion": 1,
+      "sourceSection": "25,27",
+      "phase": "P10",
+      "status": "implemented",
+      "producers": ["subscriptions"],
       "consumers": ["notifications"]
     }
   ]

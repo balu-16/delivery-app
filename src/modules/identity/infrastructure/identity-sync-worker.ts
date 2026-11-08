@@ -17,8 +17,10 @@ export class IdentitySyncWorker {
     private readonly db: Database,
     private readonly providers: Record<Pool, IdentityAdminPort>,
     private readonly leaseSeconds = 60,
+    private readonly allowCompensation = true,
   ) {}
   async compensateOne(): Promise<boolean> {
+    if (!this.allowCompensation) return false;
     const token = uuidV7();
     const operation = await this.db.transaction().execute(async (tx) => {
       const result = await sql<{

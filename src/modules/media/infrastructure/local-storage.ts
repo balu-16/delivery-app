@@ -1,10 +1,15 @@
 import { createHash, createHmac } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, open, readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import type { Readable } from 'node:stream';
+import { randomUUID } from 'node:crypto';
+import { mkdir, open, readFile, stat, unlink, writeFile, link } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { SignJWT, jwtVerify } from 'jose';
 import type { StoragePort } from '../contracts/storage.js';
 import { storageError } from '../../../common/security/storage-errors.js';
+import { boundedBytes } from './stream-limit.js';
 /** Development adapter: a capability authorizes one immutable staging write. */
 export class LocalStorage implements StoragePort {
   private readonly key: Uint8Array;
@@ -91,6 +96,56 @@ export class LocalStorage implements StoragePort {
       }
     };
     await Promise.all([remove(this.path(key)), remove(`${this.path(key)}.type`)]);
+  }
+  async putPrivateStream(
+    key: string,
+    body: Readable,
+    contentType: string,
+    options: { maxBytes?: number; signal?: AbortSignal } = {},
+  ): Promise<void> {
+    if (!key.startsWith('private/')) throw new Error('INVALID_MEDIA');
+    const path = this.path(key),
+      temporary = `${path}.${randomUUID()}.partial`;
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    let published = false;
+    try {
+      await pipeline(
+        body,
+        boundedBytes(options.maxBytes ?? 536870912),
+        createWriteStream(temporary, { flags: 'wx', mode: 0o600 }),
+        { signal: options.signal },
+      );
+      await link(temporary, path);
+      published = true;
+      await writeFile(`${path}.type`, contentType, { flag: 'wx', mode: 0o600 });
+    } catch (error) {
+      if (published) await unlink(path).catch(() => undefined);
+      throw error;
+    } finally {
+      await unlink(temporary).catch(() => undefined);
+    }
+  }
+  async signedRead(key: string, expires: number): Promise<string> {
+    if (!key.startsWith('private/') || !Number.isInteger(expires) || expires < 1 || expires > 300)
+      throw new Error('INVALID_MEDIA');
+    await stat(this.path(key));
+    const capability = await new SignJWT({ key })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setAudience('private-download')
+      .setIssuedAt()
+      .setExpirationTime(`${expires}s`)
+      .sign(this.key);
+    return `/dev/private-objects?capability=${encodeURIComponent(capability)}`;
+  }
+  async readCapability(token: string) {
+    const { payload } = await jwtVerify(token, this.key, {
+      algorithms: ['HS256'],
+      audience: 'private-download',
+    });
+    if (typeof payload.key !== 'string' || !payload.key.startsWith('private/'))
+      throw new Error('INVALID_MEDIA');
+    const contentType = await readFile(`${this.path(payload.key)}.type`, 'utf8');
+    return { body: await this.open(payload.key), contentType };
   }
   async open(key: string) {
     try {

@@ -9,6 +9,7 @@ import {
 } from '../../../platform/database/database.js';
 import { movement, operation } from './stock-primitives.js';
 import { resolveReservation } from './resolution.js';
+import { appendEvent } from '../../../platform/outbox/outbox.js';
 
 export class InventoryExpiry {
   constructor(private readonly db: Database) {}
@@ -169,6 +170,43 @@ export class InventoryExpiry {
         await sql`UPDATE inventory_batches SET maintenance_checked_at=clock_timestamp() WHERE store_id=${candidate.store_id}::uuid AND variant_id=${candidate.variant_id}::uuid AND on_hand>0 AND (state IN ('DAMAGED','QUARANTINED') OR expires_at<=clock_timestamp())`.execute(
           tx,
         );
+        const obligations = await sql<{
+          id: string;
+          order_id: string;
+          batch_id: string;
+          quantity: string;
+          reason: string;
+          event_version: string;
+        }>`
+          UPDATE inventory_shortfall_obligations SET published_quantity=quantity,event_version=event_version+1
+          WHERE store_id=${candidate.store_id}::uuid AND variant_id=${candidate.variant_id}::uuid
+            AND resolved_at IS NULL AND published_quantity<>quantity
+          RETURNING id,order_id,batch_id,quantity::text,reason,event_version::text`.execute(tx);
+        for (const obligation of obligations.rows)
+          await appendEvent(
+            tx,
+            {
+              eventId: uuidV7(),
+              eventType: 'inventory.shortfall_detected',
+              schemaVersion: 1,
+              aggregateType: 'inventory_shortfall',
+              aggregateId: obligation.id,
+              aggregateVersion: obligation.event_version,
+              occurredAt: now.toISOString(),
+              correlationId: obligation.order_id,
+              causationId: null,
+              payload: {
+                obligationId: obligation.id,
+                orderId: obligation.order_id,
+                storeId: candidate.store_id,
+                variantId: candidate.variant_id,
+                batchId: obligation.batch_id,
+                quantity: obligation.quantity,
+                reason: obligation.reason,
+              },
+            },
+            ['inventory-shortfalls'],
+          );
         await stockAlerts(tx, candidate.store_id, candidate.variant_id);
       });
     return candidates.rows.length;

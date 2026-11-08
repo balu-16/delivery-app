@@ -1,5 +1,6 @@
 import { Kysely, PostgresDialect, sql, type Generated, type Transaction } from 'kysely';
-import { Pool } from 'pg';
+import { Pool, type ClientConfig } from 'pg';
+import { Signer } from '@aws-sdk/rds-signer';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export interface PlatformSchema {
@@ -60,8 +61,46 @@ export type Database = Kysely<PlatformSchema>;
 export type TransactionContext = Transaction<PlatformSchema>;
 export interface DatabaseHandle {
   db: Database;
+  stats(): { total: number; idle: number; waiting: number };
   ping(): Promise<void>;
   close(): Promise<void>;
+}
+
+export function databaseIamRegion(env: NodeJS.ProcessEnv): string | undefined {
+  if (env.DATABASE_AUTH !== 'iam') return undefined;
+  if (!env.AWS_REGION) throw new Error('AWS_REGION is required for IAM database authentication');
+  return env.AWS_REGION;
+}
+
+/** IAM connections sign each connection separately and always verify TLS. */
+export function postgresConnectionConfig(
+  connectionString: string,
+  iamRegion?: string,
+): ClientConfig {
+  if (!iamRegion) return { connectionString };
+  const url = new URL(connectionString);
+  if (
+    !['postgres:', 'postgresql:'].includes(url.protocol) ||
+    !url.hostname ||
+    !url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    !url.pathname.slice(1)
+  )
+    throw new Error('Invalid IAM database configuration');
+  const host = url.hostname;
+  const port = Number(url.port || 5432);
+  const user = decodeURIComponent(url.username);
+  const signer = new Signer({ hostname: host, port, username: user, region: iamRegion });
+  return {
+    host,
+    port,
+    user,
+    database: decodeURIComponent(url.pathname.slice(1)),
+    password: () => signer.getAuthToken(),
+    ssl: { rejectUnauthorized: true },
+  };
 }
 
 /** Owns a pool. Application composition owns the lifetime. */
@@ -72,22 +111,36 @@ export function createDatabase(
   onIdleError: () => void = () => {
     process.stderr.write('{"level":"error","msg":"Idle database connection failed"}\n');
   },
+  acquireTimeoutMs = 5000,
+  iamRegion?: string,
 ): DatabaseHandle {
   if (
     !connectionString ||
     !Number.isSafeInteger(poolMax) ||
     poolMax < 1 ||
     !Number.isSafeInteger(statementTimeoutMs) ||
-    statementTimeoutMs < 1
+    statementTimeoutMs < 1 ||
+    !Number.isSafeInteger(acquireTimeoutMs) ||
+    acquireTimeoutMs < 1 ||
+    acquireTimeoutMs > 60000
   )
     throw new Error('Invalid database configuration');
-  const pool = new Pool({ connectionString, max: poolMax, statement_timeout: statementTimeoutMs });
+  const pool = new Pool({
+    ...postgresConnectionConfig(connectionString, iamRegion),
+    max: poolMax,
+    statement_timeout: statementTimeoutMs,
+    connectionTimeoutMillis: acquireTimeoutMs,
+  });
   // pg removes failed idle clients; the next checkout opens a fresh connection.
   // Do not include the driver's error, which can contain connection details.
   pool.on('error', () => onIdleError());
+  // A checked-out client can fail between statements, when pg otherwise emits
+  // an unhandled error. Queries still reject and the transaction cannot commit.
+  pool.on('connect', (client) => client.on('error', () => onIdleError()));
   const db = new Kysely<PlatformSchema>({ dialect: new PostgresDialect({ pool }) });
   return {
     db,
+    stats: () => ({ total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount }),
     async ping() {
       await sql`SELECT 1`.execute(db);
     },

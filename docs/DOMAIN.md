@@ -1,4 +1,4 @@
-# Implemented domain rules: P0–P4
+# Implemented domain rules: P0–P12
 
 ## Catalog and prices
 
@@ -22,9 +22,27 @@ Stock quantities are integer counts of one individually saleable variant unit; e
 
 `onHand` is physical stock, `reserved` is stock allocated to promises, and eligible availability excludes reserved, expired, quarantined, damaged and insufficient-shelf-life batches. Aggregate quantities reconcile to batch totals and immutable ledger deltas. P3 creates zero assortment rows; P4 receipts and authorized audited inventory operations supply quantities.
 
-Reservations are internal contracts for future commerce: `HELD` has a payment expiry, `COMMITTED` retains stock without that expiry, and `RESOLVED` records consumption/release. Multi-line holds succeed entirely or report shortages. FEFO allocation uses target delivery time and category shelf life. Pick completion consumes actual quantities and releases shorts. Repeated references cannot duplicate stock effects.
+Reservations integrate with checkout and fulfillment: `HELD` has a payment expiry, `COMMITTED` retains stock without that expiry, and `RESOLVED` records consumption/release. Multi-line holds succeed entirely or report shortages. FEFO allocation uses target delivery time and category shelf life. Pick completion consumes actual quantities and releases shorts. Repeated references cannot duplicate stock effects.
 
-Expiry and quality changes reallocate eligible batches where possible. A promise that cannot be reallocated creates a durable shortage obligation while preserving `0 <= reserved <= onHand`. P6/P7 must consume those obligations through real order/fulfillment compensation; a stock obligation does not mean a refund has happened. Quarantine removes saleability without writing off physical stock. Returned goods require a trusted QC decision before restocking.
+Expiry and quality changes reallocate eligible batches where possible. A promise that cannot be reallocated creates a durable shortage obligation while preserving `0 <= reserved <= onHand`. Real order/fulfillment consumers compensate these obligations; a stock obligation does not itself mean a refund has happened. Quarantine removes saleability without writing off physical stock. Returned goods require a trusted QC decision before restocking.
+
+## Orders, payment and fulfillment
+
+Checkout revalidates the cart, price/configuration snapshot, coupon quota, capacity and funding in the placement transaction. A consumed checkout intent cannot produce a second order. Integer wallet cash and promotional buckets have immutable ledger entries; spending obeys lot expiry and the configured promotional cap. Gateway captures require verified identity, amount and currency; excess or late captures remain separately refundable. Refund commitments reserve the original source cap before external calls, and repeated retries share their durable reference.
+
+Pick tasks consume actual selected batches. Shorts and substitutions produce final charge/tax snapshots and compensate stock/funding through shared order operations. Packing and handover preserve custody; riders cannot silently lose a parcel after pickup. Failed delivery requires the configured arrival/contact gates, then a full quarantined return before QC. COD expectation follows the final charge and remains distinct from cash collected, deposits and payout offsets. Invoices and later credit notes are immutable legal records with transactionally allocated numbers.
+
+## Subscriptions, support and payouts
+
+Subscription schedules use IST calendar dates and effective versions of quantity, frequency, slot and address. Exact cutoff decisions sample database time after locking. Generation claims store-scoped leased work, then uses the account-before-subscription lock order and existing wallet/stock/order contracts. Unique dated occurrences prevent replayed obligations. Insufficient balance retries within the grace window; terminal skips are explicit, repeated failures pause the subscription, and a short subscription parcel is cancelled/refunded as a whole. Picking and dispatch wait for slot lead times independently of nighttime generation.
+
+Ticket ownership and private attachments are enforced for customers and riders; staff internal notes never enter owner views or personal exports. Refund limits/approvals use the shared source-capped money path. Ratings require delivered ownership and a fulfilled target; edit windows, target uniqueness, aggregate thresholds and moderation are enforced.
+
+Weekly payout drafts uniquely claim unallocated earnings before the IST cutoff. Approval rechecks COD dues under the rider accounting lock. A zero-net payout settles internally; positive manual settlements and customer manual refunds require stable references and private evidence. Approved corrections are new records; original approved amounts are retained. No bank-transfer adapter is implied.
+
+## Privacy and durable effects
+
+Erasure serializes against new obligations under the account lock, checks current orders/subscriptions/balances/custody/settlement/holds, and revokes local access before provider/media/tracking cleanup. Completion waits for durable cleanup; an opaque deleted-identity tombstone prevents bootstrap resurrection. Financial/legal records and compact dedupe identities remain retained. Reports use bounded repeatable-read snapshots and private immutable export attempts. Redis delivery can replay or disappear; PostgreSQL obligations and consumer deduplication remain authoritative.
 
 ## Ownership and time
 

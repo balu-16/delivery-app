@@ -35,6 +35,22 @@ const input = (id: string, orderId = uuidV7()) => ({
   targetDeliveryAt: new Date(Date.now() + 60000).toISOString(),
   ttlSeconds: 900,
 });
+let fixtureOrderBatch = 0;
+/**
+ * Migration 007 enforces inventory_reservations.order_id -> orders(id) on NEW
+ * rows (NOT VALID only relieves pre-existing rows), so reservation fixtures
+ * insert a real minimal orders row before reserving. Assertions are unchanged.
+ */
+async function seedFixtureOrders(count: number): Promise<string[]> {
+  const ids = Array.from({ length: count }, () => uuidV7());
+  const batch = ++fixtureOrderBatch;
+  for (const [index, orderId] of ids.entries())
+    await sql`INSERT INTO orders(id,order_number,user_id,store_id,address_snapshot,status,payment_status,subtotal_paise,total_paise,amount_due_paise,placed_at)
+      VALUES(${orderId}::uuid,${'FIX' + batch + '-' + index + '-' + orderId.slice(0, 8).toUpperCase()}::text,${manager}::uuid,${store}::uuid,'{"line1":"road"}'::jsonb,'PENDING_PAYMENT','UNPAID',100,100,100,statement_timestamp())`.execute(
+      db.db,
+    );
+  return ids;
+}
 beforeAll(async () => {
   services = await startTestServices();
   await runner({
@@ -97,7 +113,9 @@ test('100 simultaneous attempts against ten units have exactly ten successes and
     await gate;
   });
   await acquired;
-  const attempts = Array.from({ length: 100 }, () => reservations.reserve(input(id)));
+  // Each concurrent attempt carries a distinct real order row (007 FK on new reservations).
+  const attemptOrderIds = await seedFixtureOrders(100);
+  const attempts = attemptOrderIds.map((orderId) => reservations.reserve(input(id, orderId)));
   const observer = new Client({ connectionString: services.databaseUrl });
   await observer.connect();
   const deadline = Date.now() + 5000;
@@ -141,8 +159,9 @@ test('100 simultaneous attempts against ten units have exactly ten successes and
   });
 }, 30000);
 test('FEFO and target shelf life; commit survives sweeper and pick releases shorts', async () => {
-  const id = await variant(),
-    order = uuidV7();
+  const id = await variant();
+  let order = uuidV7();
+  await seedFixtureOrders(1).then((ids) => (order = ids[0]!));
   await sql`INSERT INTO inventory_category_shelf_life(category_id,min_seconds) VALUES(${category}::uuid,3600) ON CONFLICT(category_id) DO UPDATE SET min_seconds=EXCLUDED.min_seconds`.execute(
     db.db,
   );
@@ -184,8 +203,9 @@ test('FEFO and target shelf life; commit survives sweeper and pick releases shor
   expect(stock.rows[0]).toEqual({ on_hand: '5', reserved: '0' });
 });
 test('expired committed allocation is reallocated or a durable shortfall remains without overselling', async () => {
-  const id = await variant(),
-    order = uuidV7();
+  const id = await variant();
+  let order = uuidV7();
+  await seedFixtureOrders(1).then((ids) => (order = ids[0]!));
   for (const code of ['first', 'second'])
     await inventory.receive(manager, {
       storeId: store,
@@ -221,8 +241,9 @@ test('expired committed allocation is reallocated or a durable shortfall remains
   await reservations.release(order);
 });
 test('concurrent release and pick resolve exactly once', async () => {
-  const id = await variant(),
-    order = uuidV7();
+  const id = await variant();
+  let order = uuidV7();
+  await seedFixtureOrders(1).then((ids) => (order = ids[0]!));
   await inventory.receive(manager, {
     storeId: store,
     variantId: id,
@@ -323,8 +344,9 @@ test('large cycle-count requires a different currently assigned manager and cann
 test('damaged allocated stock records a durable obligation and never violates reserved stock', async () => {
   const { PostgresInventoryQuality } =
     await import('../../../src/modules/inventory/infrastructure/quality.js');
-  const id = await variant(),
-    order = uuidV7();
+  const id = await variant();
+  let order = uuidV7();
+  await seedFixtureOrders(1).then((ids) => (order = ids[0]!));
   await inventory.receive(manager, {
     storeId: store,
     variantId: id,
@@ -398,7 +420,7 @@ test('multi-item shortfall rolls back every line and reports missing assortment'
     reference: uuidV7(),
   });
   const req = {
-    ...input(id),
+    ...input(id, (await seedFixtureOrders(1))[0]!),
     lines: [
       { storeId: store, variantId: id, quantity: '1' },
       { storeId: store, variantId: missing, quantity: '2' },
@@ -521,9 +543,11 @@ test('opposite line orders serialize without deadlock and never leave a partial 
     { storeId: store, variantId: a, quantity: '1' },
     { storeId: store, variantId: b, quantity: '1' },
   ];
+  // Sorted vs reversed line inputs for two distinct real order fixtures.
+  const [orderOne, orderTwo] = await seedFixtureOrders(2);
   const outcomes = await Promise.allSettled([
-    reservations.reserve({ ...input(a), lines }),
-    reservations.reserve({ ...input(a), lines: [...lines].reverse() }),
+    reservations.reserve({ ...input(a, orderOne!), lines }),
+    reservations.reserve({ ...input(a, orderTwo!), lines: [...lines].reverse() }),
   ]);
   expect(outcomes.filter((v) => v.status === 'fulfilled')).toHaveLength(1);
   const stocks = await sql<{
@@ -534,8 +558,9 @@ test('opposite line orders serialize without deadlock and never leave a partial 
   expect(stocks.rows.map((v) => v.reserved)).toEqual(['1', '1']);
 });
 test('commit versus hold expiry resolves to exactly one terminal path', async () => {
-  const id = await variant(),
-    order = uuidV7();
+  const id = await variant();
+  let order = uuidV7();
+  await seedFixtureOrders(1).then((ids) => (order = ids[0]!));
   await inventory.receive(manager, {
     storeId: store,
     variantId: id,
@@ -562,8 +587,9 @@ test('commit versus hold expiry resolves to exactly one terminal path', async ()
 test('internal return is bounded by picked units and remains quarantined until QC', async () => {
   const { PostgresInventoryReturns } =
     await import('../../../src/modules/inventory/infrastructure/returns.js');
-  const id = await variant(),
-    order = uuidV7();
+  const id = await variant();
+  let order = uuidV7();
+  await seedFixtureOrders(1).then((ids) => (order = ids[0]!));
   await inventory.receive(manager, {
     storeId: store,
     variantId: id,

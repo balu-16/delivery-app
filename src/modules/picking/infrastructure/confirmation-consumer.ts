@@ -72,12 +72,24 @@ export class OrderConfirmedConsumer {
   async handle(tx: TransactionContext, event: EventEnvelope): Promise<void> {
     if (event.eventType !== 'ORDER_CONFIRMED') return;
     const payload = parseOrderConfirmed(event.payload);
+    const order = await sql<{
+      status: string;
+      source: string;
+    }>`SELECT status,source FROM orders WHERE id=${payload.orderId}::uuid FOR UPDATE`.execute(tx);
+    if (!order.rows[0] || !['CONFIRMED', 'PICKING'].includes(order.rows[0].status)) return;
     if (!(await operation(tx, `confirm:${event.eventId}`, 'ORDER_CONFIRMED', payload))) return;
+    const active = await sql`SELECT id FROM pick_tasks WHERE order_id=${payload.orderId}::uuid
+      AND status NOT IN ('CANCELLED','COMPLETED')`.execute(tx);
+    if (active.rows.length) return;
     const minutes = await this.config.get('pickingSlaMinutes');
     const now = await sql<{ now: Date }>`SELECT clock_timestamp() AS now`.execute(tx);
-    const due = slaDueAt(now.rows[0]!.now, minutes);
+    const scheduled = order.rows[0]?.source === 'SUBSCRIPTION';
+    const target = new Date(payload.targetDeliveryAt);
+    const lead = scheduled ? await this.config.get('subscriptionPickLeadMinutes', tx) : 0;
+    const available = scheduled ? new Date(target.getTime() - lead * 60000) : now.rows[0]!.now;
+    const due = scheduled ? target : slaDueAt(now.rows[0]!.now, minutes);
     const taskId = uuidV7();
-    await sql`INSERT INTO pick_tasks(id,order_id,store_id,status,sla_due_at) VALUES(${taskId}::uuid,${payload.orderId}::uuid,${payload.storeId}::uuid,'PENDING',${due.toISOString()}::timestamptz)`.execute(
+    await sql`INSERT INTO pick_tasks(id,order_id,store_id,status,sla_due_at,available_at) VALUES(${taskId}::uuid,${payload.orderId}::uuid,${payload.storeId}::uuid,'PENDING',${due.toISOString()}::timestamptz,${available.toISOString()}::timestamptz)`.execute(
       tx,
     );
     for (const item of payload.items)

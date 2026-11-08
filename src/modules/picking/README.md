@@ -9,7 +9,7 @@ maintenance. Pick lists are walk-ordered; every mutation is idempotent by an
 
 - At most one active pick task per order (partial unique index on active
   statuses); the `ORDER_CONFIRMED` consumer is idempotent per delivery.
-- Item state changes before completion are freely revertible; the financial
+- Short and substitution decisions remain terminal before completion; the financial
   adjustment (refund obligation, substitution charge cap) is computed exactly
   once at completion through the P6 `FINANCIAL_ADJUSTMENTS` contract.
 - Completion consumes fulfilled stock through `INVENTORY_RESERVATIONS.pick`
@@ -27,7 +27,8 @@ maintenance. Pick lists are walk-ordered; every mutation is idempotent by an
 
 Consumes `ORDER_CONFIRMED` (producer: P6 orders; delivery consumer name
 `picking`). Emits `picking.task_changed`, `picking.task_completed` and
-`picking.sla_breached` (observability; no active consumers yet). The SLA
+`picking.sla_breached` to active notification/dispatch obligations as
+appropriate. `ORDER_PACKED` is emitted after packing metadata commits. The SLA
 worker reports store pick backlog to the existing auto-pause evaluator and
 passes rider availability through unchanged (P8 owns that signal).
 
@@ -35,8 +36,7 @@ passes rider availability through unchanged (P8 owns that signal).
 
 Order state transitions (`startPicking`, `markPacked`), financial
 adjustments, system cancellation and store order reads are P6-owned ports
-(`contracts/fulfillment.ts`). Until P6 binds real implementations, the module
-boots with a fail-closed stand-in: affected calls throw
-`FULFILLMENT_DEPENDENCY_UNAVAILABLE` (503) and roll back, so picking state can
-never diverge from order state. Full handover custody E2E belongs to P8, which
-issues handover records at rider assignment.
+(`contracts/fulfillment.ts`). They are bound to the actual orders module and covered by the real
+commerce journey tests. P8 issues handover records bound to the current
+rider; store verification checks custody. Heartbeats preserve active picks;
+stale tasks return to the pool with item progress retained.

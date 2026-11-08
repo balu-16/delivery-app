@@ -35,6 +35,7 @@ import {
   type PickingWorld,
 } from '../../helpers/picking-fixture.js';
 import { startTestServices, type TestServices } from '../../helpers/services.js';
+import { OrderHoldService } from '../../../src/modules/orders/infrastructure/order-holds.js';
 
 let services: TestServices,
   db: DatabaseHandle,
@@ -46,8 +47,64 @@ let services: TestServices,
 const fulfillmentCalls: string[] = [];
 const adjustmentLines: ShortAdjustmentLine[] = [];
 
+it('blocks picker start and item actions while held and resumes without losing progress', async () => {
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${world.manager}::uuid,'ADMIN') ON CONFLICT DO NOTHING`.execute(
+    db.db,
+  );
+  const variant = await world.makeVariant({ barcode: `hold-${uuidV7()}` });
+  const order = await confirmedOrder([{ variantId: variant, quantity: '1' }]);
+  const holds = new OrderHoldService(db.db);
+  await picking.claim(world.picker1, order.taskId, uuidV7());
+  await expect(holds.set(order.orderId, world.picker1, true, 'review')).rejects.toThrow(
+    'FORBIDDEN',
+  );
+  await holds.set(order.orderId, world.manager, true, 'review');
+  await expect(picking.start(world.picker1, order.taskId, uuidV7())).rejects.toThrow(
+    'ORDER_ON_HOLD',
+  );
+  await holds.set(order.orderId, world.manager, false, 'cleared');
+  await picking.start(world.picker1, order.taskId, uuidV7());
+  await holds.set(order.orderId, world.manager, true, 'review again');
+  await expect(
+    picking.shortItem(
+      world.picker1,
+      order.taskId,
+      order.items[0]!.orderItemId,
+      { reason: 'OUT_OF_STOCK' },
+      uuidV7(),
+    ),
+  ).rejects.toThrow('ORDER_ON_HOLD');
+  await holds.set(order.orderId, world.manager, false, 'cleared again');
+  const audit = await sql<{
+    action: string;
+  }>`SELECT action FROM audit_log WHERE subject_id=${order.orderId} AND action IN ('ORDER_HELD','ORDER_RESUMED') ORDER BY created_at`.execute(
+    db.db,
+  );
+  expect(audit.rows.map((row) => row.action)).toEqual([
+    'ORDER_HELD',
+    'ORDER_RESUMED',
+    'ORDER_HELD',
+    'ORDER_RESUMED',
+  ]);
+  const history = await sql<{
+    action: string;
+    reason: string;
+    version: string;
+  }>`SELECT h.action,h.reason,o.version::text AS version
+    FROM order_status_history h JOIN orders o ON o.id=h.order_id WHERE h.order_id=${order.orderId}::uuid AND h.action IN ('ORDER_HELD','ORDER_RESUMED') ORDER BY h.created_at`.execute(
+    db.db,
+  );
+  expect(history.rows.map((row) => row.reason)).toEqual([
+    'review',
+    'cleared',
+    'review again',
+    'cleared again',
+  ]);
+  expect(history.rows.every((row) => row.version === '5')).toBe(true);
+});
+
 const settings: Partial<Record<ConfigKey, unknown>> = {
-  maxActivePickTasksPerPicker: 2,
+  maxActivePickTasksPerPicker: 50,
   pickingSlaMinutes: 30,
 };
 const configFake: AppConfig = {
@@ -65,6 +122,19 @@ const fakeFulfillment: OrderFulfillment = {
   },
 };
 const fakeAdjustments: FinancialAdjustments = {
+  settleFulfillment: async (input) => {
+    adjustmentLines.push(
+      ...input.lines
+        .filter((l) => BigInt(l.shortQty) > 0n || l.substituteVariantId)
+        .map((l) => ({
+          orderItemId: l.orderItemId,
+          shortQty: l.shortQty,
+          reason: l.reason ?? 'PARTIAL_PICK',
+          ...(l.substituteVariantId ? { substituteVariantId: l.substituteVariantId } : {}),
+        })),
+    );
+    return { refundedPaise: '0', creditNoteRequired: false };
+  },
   recordShort: async (input) => {
     adjustmentLines.push(...input.lines);
     return { refundedPaise: '0', creditNoteRequired: false };
@@ -75,15 +145,31 @@ const fakeReads: OrderFulfillmentReads = {
   orderSummary: async () => null,
 };
 
-async function confirmedOrder(lines: { variantId: string; quantity: string }[], ttl = 900) {
+async function confirmedOrder(
+  lines: { variantId: string; quantity: string }[],
+  opts?: { receive?: boolean },
+  ttl = 900,
+) {
   const order = await emitOrderConfirmed(db, world, lines);
-  for (const line of lines)
-    await reservations.reserve({
-      orderId: order.orderId,
-      lines: [{ storeId: world.store, variantId: line.variantId, quantity: line.quantity }],
-      targetDeliveryAt: new Date(Date.now() + 600000).toISOString(),
-      ttlSeconds: ttl,
-    });
+  if (opts?.receive !== false)
+    for (const line of lines)
+      await inventory.receive(world.manager, {
+        storeId: world.store,
+        variantId: line.variantId,
+        batchCode: `AUTO-${uuidV7().slice(0, 8)}`,
+        quantity: line.quantity,
+        reference: uuidV7(),
+      });
+  await reservations.reserve({
+    orderId: order.orderId,
+    lines: lines.map((line) => ({
+      storeId: world.store,
+      variantId: line.variantId,
+      quantity: line.quantity,
+    })),
+    targetDeliveryAt: new Date(Date.now() + 600000).toISOString(),
+    ttlSeconds: ttl,
+  });
   await reservations.commit(order.orderId);
   const event = await sql<{
     id: string;
@@ -164,10 +250,18 @@ test('the confirmation consumer creates exactly one task per order with walk-ord
   const task = await picking.queue(world.manager, { storeId: world.store, scope: 'QUEUE' });
   expect(task.items).toHaveLength(1);
   expect(task.items[0]!.id).toBe(order.taskId);
-  expect(task.items[0]!.items.map((item) => item.name)).toEqual([
-    `item-${v2.slice(0, 8)}`,
-    `item-${v1.slice(0, 8)}`,
-  ]);
+  expect(
+    task.items.find((task) => task.id === order.taskId)!.items.map((item) => item.name),
+  ).toEqual([`item-${v1}`, `item-${v2}`]);
+  await expect(inventory.setBinLocation(world.picker1, world.store, v2, 'A0')).rejects.toThrow(
+    'STORE_NOT_FOUND',
+  );
+  await inventory.setBinLocation(world.manager, world.store, v2, 'A0');
+  const reordered = await picking.queue(world.manager, { storeId: world.store, scope: 'QUEUE' });
+  expect(reordered.items.find((t) => t.id === order.taskId)!.items.map((i) => i.variantId)).toEqual(
+    [v2, v1],
+  );
+  await inventory.setBinLocation(world.manager, world.store, v2, 'B2');
   // Duplicate delivery replays to a no-op.
   const event = await sql<{
     payload: unknown;
@@ -227,7 +321,7 @@ test('claim and start serialize, startPicking fires through the fulfillment cont
     world.picker2,
     order.taskId,
     item.id,
-    { scannedBarcode: '8901010', quantity: '1' },
+    { scannedBarcode: '8901010', quantity: '1', batchId: item.fefoSuggestions[0]!.batchId },
     uuidV7(),
   );
   expect(picked.items[0]!.status).toBe('PICKED');
@@ -239,28 +333,30 @@ test('absolute pick quantities are idempotent per reference and cumulative acros
   const order = await confirmedOrder([{ variantId: v, quantity: '5' }]);
   await picking.claim(world.picker1, order.taskId, uuidV7());
   await picking.start(world.picker1, order.taskId, uuidV7());
-  const item = (await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' }))
-    .items[0]!.items[0]!;
+  const item = (
+    await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' })
+  ).items.find((task) => task.id === order.taskId)!.items[0]!;
   const reference = uuidV7();
+  const batchId = item.fefoSuggestions[0]!.batchId;
   await picking.pickItem(
     world.picker1,
     order.taskId,
     item.id,
-    { scannedBarcode: '8901011', quantity: '2' },
+    { scannedBarcode: '8901011', quantity: '2', batchId },
     reference,
   );
   await picking.pickItem(
     world.picker1,
     order.taskId,
     item.id,
-    { scannedBarcode: '8901011', quantity: '2' },
+    { scannedBarcode: '8901011', quantity: '2', batchId },
     reference,
   );
   const after = await picking.pickItem(
     world.picker1,
     order.taskId,
     item.id,
-    { scannedBarcode: '8901011', quantity: '2' },
+    { scannedBarcode: '8901011', quantity: '2', batchId },
     uuidV7(),
   );
   expect(after.items[0]!.pickedQty).toBe('2');
@@ -268,7 +364,7 @@ test('absolute pick quantities are idempotent per reference and cumulative acros
     world.picker1,
     order.taskId,
     item.id,
-    { scannedBarcode: '8901011', quantity: '5' },
+    { scannedBarcode: '8901011', quantity: '5', batchId },
     uuidV7(),
   );
   expect(more.items[0]!.pickedQty).toBe('5');
@@ -277,7 +373,7 @@ test('absolute pick quantities are idempotent per reference and cumulative acros
       world.picker1,
       order.taskId,
       item.id,
-      { scannedBarcode: '8901011', quantity: '6' },
+      { scannedBarcode: '8901011', quantity: '6', batchId },
       uuidV7(),
     ),
   ).rejects.toThrow('INVALID_QUANTITY');
@@ -292,11 +388,12 @@ test('batched variants require the allocated batch and reject foreign batches', 
     quantity: '5',
     reference: uuidV7(),
   });
-  const order = await confirmedOrder([{ variantId: v, quantity: '2' }]);
+  const order = await confirmedOrder([{ variantId: v, quantity: '2' }], { receive: false });
   await picking.claim(world.picker1, order.taskId, uuidV7());
   await picking.start(world.picker1, order.taskId, uuidV7());
-  const item = (await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' }))
-    .items[0]!.items[0]!;
+  const item = (
+    await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' })
+  ).items.find((task) => task.id === order.taskId)!.items[0]!;
   expect(item.fefoSuggestions).toHaveLength(1);
   expect(item.fefoSuggestions[0]!.batchCode).toBe('B1');
   await expect(
@@ -357,9 +454,12 @@ test('FEFO suggestions order by earliest expiry and exclude expired batches', as
   });
   const order = await confirmedOrder([{ variantId: v, quantity: '1' }]);
   await picking.claim(world.picker1, order.taskId, uuidV7());
-  const item = (await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' }))
-    .items[0]!.items[0]!;
-  expect(item.fefoSuggestions.map((batch) => batch.batchCode)).toEqual(['EARLY', 'LATE']);
+  const item = (
+    await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' })
+  ).items.find((task) => task.id === order.taskId)!.items[0]!;
+  // The order's own FEFO allocation is what the picker scans; the expired
+  // batch was never allocated and LATE stays surplus.
+  expect(item.fefoSuggestions.map((batch) => batch.batchCode)).toEqual(['EARLY']);
 });
 
 test('shorts mark the remainder, completion consumes picked stock and reports the adjustment once', async () => {
@@ -379,16 +479,20 @@ test('shorts mark the remainder, completion consumes picked stock and reports th
     quantity: '4',
     reference: uuidV7(),
   });
-  const order = await confirmedOrder([
-    { variantId: v1, quantity: '4' },
-    { variantId: v2, quantity: '2' },
-  ]);
+  const order = await confirmedOrder(
+    [
+      { variantId: v1, quantity: '4' },
+      { variantId: v2, quantity: '2' },
+    ],
+    { receive: false },
+  );
   await picking.claim(world.picker1, order.taskId, uuidV7());
   await picking.start(world.picker1, order.taskId, uuidV7());
-  const items = (await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' }))
-    .items[0]!.items;
-  const first = items.find((item) => item.name === `item-${v1.slice(0, 8)}`)!;
-  const second = items.find((item) => item.name === `item-${v2.slice(0, 8)}`)!;
+  const items = (
+    await picking.queue(world.picker1, { storeId: world.store, scope: 'MINE' })
+  ).items.find((task) => task.id === order.taskId)!.items;
+  const first = items.find((item) => item.name === `item-${v1}`)!;
+  const second = items.find((item) => item.name === `item-${v2}`)!;
   const batch1 = first.fefoSuggestions[0]!.batchId;
   await picking.pickItem(
     world.picker1,
@@ -421,9 +525,12 @@ test('shorts mark the remainder, completion consumes picked stock and reports th
   adjustmentLines.length = 0;
   const done = await picking.complete(world.picker1, order.taskId, uuidV7());
   expect(done.status).toBe('COMPLETED');
-  expect(adjustmentLines).toEqual([
-    { orderItemId: second.orderItemId, shortQty: '1', reason: 'DAMAGED' },
-  ]);
+  expect(adjustmentLines).toEqual(
+    expect.arrayContaining([
+      { orderItemId: second.orderItemId, shortQty: '1', reason: 'DAMAGED' },
+      { orderItemId: first.orderItemId, shortQty: '2', reason: 'PARTIAL_PICK' },
+    ]),
+  );
   // Stock reconciles: picked units consumed, shorts released.
   const stock = await sql<{
     on_hand: string;

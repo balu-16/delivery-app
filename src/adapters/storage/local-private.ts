@@ -1,11 +1,16 @@
 import { createHmac } from 'node:crypto';
 import { mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import type { TransactionContext } from '../../platform/database/database.js';
+import { fencePrivateMedia, erasePrivateMedia } from './private-erasure.js';
 import { SignJWT, jwtVerify } from 'jose';
 import { sql } from 'kysely';
 import { uuidV7 } from '../../common/ids/ids.js';
 import type { Database } from '../../platform/database/database.js';
-import type { PrivateUploadPort } from '../../modules/identity/contracts/uploads.js';
+import type {
+  PrivateMediaPurpose,
+  PrivateUploadPort,
+} from '../../modules/identity/contracts/uploads.js';
 
 /** Local development disk storage. Capabilities are scoped and never reveal filesystem paths. */
 export class LocalPrivateUploads implements PrivateUploadPort {
@@ -26,8 +31,9 @@ export class LocalPrivateUploads implements PrivateUploadPort {
     ttl: number,
     ownerId: string,
     nonce?: string,
+    purpose: PrivateMediaPurpose = 'RIDER_KYC',
   ): Promise<string> {
-    return new SignJWT({ operation, ownerId, purpose: 'RIDER_KYC', nonce })
+    return new SignJWT({ operation, ownerId, purpose, nonce })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(id)
       .setIssuer('delivery-private-media')
@@ -40,7 +46,11 @@ export class LocalPrivateUploads implements PrivateUploadPort {
     id: string,
     token: string,
     operation: string,
-  ): Promise<{ ownerId: string; nonce: string | undefined }> {
+  ): Promise<{
+    ownerId: string;
+    nonce: string | undefined;
+    purpose: PrivateMediaPurpose;
+  }> {
     const { payload } = await jwtVerify(token, this.key, {
       issuer: 'delivery-private-media',
       audience: 'private-media',
@@ -49,18 +59,33 @@ export class LocalPrivateUploads implements PrivateUploadPort {
     if (
       payload.sub !== id ||
       payload.operation !== operation ||
-      payload.purpose !== 'RIDER_KYC' ||
+      (payload.purpose !== 'RIDER_KYC' &&
+        payload.purpose !== 'DELIVERY_POD' &&
+        payload.purpose !== 'SUPPORT_ATTACHMENT' &&
+        payload.purpose !== 'PAYOUT_EVIDENCE') ||
       typeof payload.ownerId !== 'string'
     )
       throw new Error('INVALID_MEDIA_CAPABILITY');
     return {
       ownerId: payload.ownerId,
+      purpose: payload.purpose,
       nonce: typeof payload.nonce === 'string' ? payload.nonce : undefined,
     };
   }
+  fenceForErasure(userId: string, tx: TransactionContext): Promise<void> {
+    return fencePrivateMedia(tx, userId, 'local', this.uploadTtl, this.readTtl);
+  }
+  eraseFenced(userId: string): Promise<boolean> {
+    return erasePrivateMedia(this.db, userId, async (key) => {
+      if (!/^[0-9a-f-]{36}$/i.test(key)) throw new Error('INVALID_MEDIA_KEY');
+      await unlink(resolve(this.directory, key)).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+    });
+  }
   async createTarget(
     ownerId: string,
-    purpose: 'RIDER_KYC',
+    purpose: PrivateMediaPurpose,
     contentType: string,
     size: number,
   ): Promise<{ mediaId: string; url: string; fields: Record<string, string> }> {
@@ -76,7 +101,7 @@ export class LocalPrivateUploads implements PrivateUploadPort {
     await this.db.transaction().execute(async (tx) => {
       const actor = await sql<{
         id: string;
-      }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${ownerId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role='RIDER' AND EXISTS (SELECT 1 FROM rider_profiles p WHERE p.user_id=u.id AND p.status IN ('PENDING','REJECTED')) FOR SHARE OF u,r`.execute(
+      }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${ownerId}::uuid AND u.status='ACTIVE' AND ((r.role='RIDER' AND u.pool='WORKFORCE' AND EXISTS (SELECT 1 FROM rider_profiles p WHERE p.user_id=u.id AND (( ${purpose} = 'RIDER_KYC' AND p.status IN ('PENDING','REJECTED')) OR (${purpose} = 'DELIVERY_POD' AND p.status='APPROVED')))) OR (${purpose}='SUPPORT_ATTACHMENT' AND r.role IN ('CUSTOMER','RIDER','SUPPORT_AGENT','ADMIN','SUPER_ADMIN')) OR (${purpose}='PAYOUT_EVIDENCE' AND u.pool='WORKFORCE' AND r.role IN ('ADMIN','SUPER_ADMIN'))) FOR SHARE OF u,r`.execute(
         tx,
       );
       if (!actor.rows[0]) throw new Error('FORBIDDEN');
@@ -88,7 +113,7 @@ export class LocalPrivateUploads implements PrivateUploadPort {
       mediaId: id,
       url: `/dev/private-media/${id}`,
       fields: {
-        authorization: `Bearer ${await this.sign(id, 'upload', this.uploadTtl, ownerId, nonce)}`,
+        authorization: `Bearer ${await this.sign(id, 'upload', this.uploadTtl, ownerId, nonce, purpose)}`,
       },
     };
   }
@@ -101,7 +126,7 @@ export class LocalPrivateUploads implements PrivateUploadPort {
     const claimed = await sql<{
       size_bytes: number;
       content_type: string;
-    }>`UPDATE private_media SET state='UPLOADING',lease_token=${lease}::uuid,lease_until=clock_timestamp()+interval '5 minutes' WHERE id=${id}::uuid AND owner_id=${capability.ownerId}::uuid AND purpose='RIDER_KYC' AND upload_nonce=${nonce}::uuid AND (state='PENDING' OR (state='UPLOADING' AND lease_until<clock_timestamp())) RETURNING size_bytes,content_type`.execute(
+    }>`UPDATE private_media SET state='UPLOADING',lease_token=${lease}::uuid,lease_until=clock_timestamp()+interval '5 minutes' WHERE id=${id}::uuid AND owner_id=${capability.ownerId}::uuid AND purpose=${capability.purpose} AND upload_nonce=${nonce}::uuid AND (state='PENDING' OR (state='UPLOADING' AND lease_until<clock_timestamp())) RETURNING size_bytes,content_type`.execute(
       this.db,
     );
     if (!claimed.rows[0] || claimed.rows[0].size_bytes !== body.length) {
@@ -151,7 +176,7 @@ export class LocalPrivateUploads implements PrivateUploadPort {
   async assertOwnedRegistered(
     ownerId: string,
     mediaId: string,
-    purpose: 'RIDER_KYC',
+    purpose: PrivateMediaPurpose,
   ): Promise<void> {
     const found = await sql<{
       id: string;
@@ -163,18 +188,19 @@ export class LocalPrivateUploads implements PrivateUploadPort {
   async signedRead(mediaId: string): Promise<string> {
     const media = await sql<{
       owner_id: string;
-    }>`SELECT owner_id FROM private_media WHERE id=${mediaId}::uuid AND purpose='RIDER_KYC' AND state='STORED'`.execute(
+      purpose: PrivateMediaPurpose;
+    }>`SELECT owner_id,purpose FROM private_media WHERE id=${mediaId}::uuid AND purpose IN ('RIDER_KYC','SUPPORT_ATTACHMENT','PAYOUT_EVIDENCE') AND state='STORED'`.execute(
       this.db,
     );
     if (!media.rows[0]) throw new Error('MEDIA_NOT_FOUND');
-    return `/dev/private-media/${mediaId}?capability=${encodeURIComponent(await this.sign(mediaId, 'read', this.readTtl, media.rows[0].owner_id))}`;
+    return `/dev/private-media/${mediaId}?capability=${encodeURIComponent(await this.sign(mediaId, 'read', this.readTtl, media.rows[0].owner_id, undefined, media.rows[0].purpose))}`;
   }
   async read(id: string, capability: string): Promise<{ body: Buffer; contentType: string }> {
     const verified = await this.verify(id, capability, 'read');
     const found = await sql<{
       file_key: string;
       content_type: string;
-    }>`SELECT file_key,content_type FROM private_media WHERE id=${id}::uuid AND owner_id=${verified.ownerId}::uuid AND purpose='RIDER_KYC' AND state='STORED'`.execute(
+    }>`SELECT file_key,content_type FROM private_media WHERE id=${id}::uuid AND owner_id=${verified.ownerId}::uuid AND purpose=${verified.purpose} AND purpose IN ('RIDER_KYC','SUPPORT_ATTACHMENT','PAYOUT_EVIDENCE') AND state='STORED'`.execute(
       this.db,
     );
     const row = found.rows[0];

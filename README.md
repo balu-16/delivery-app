@@ -1,6 +1,6 @@
 # Delivery platform backend
 
-NestJS/Fastify backend for hyperlocal groceries and scheduled subscriptions, implemented from [the master specification](delivery-platform-agent-prompt.md). Current work covers P0–P4; [progress](docs/PROGRESS.md) records verified scope and remaining activation checks. Later commerce, fulfillment and subscription phases are planned.
+NestJS/Fastify backend for hyperlocal groceries and scheduled subscriptions, implemented from [the master specification](delivery-platform-agent-prompt.md). The working tree integrates P0–P12, including purchasing, delivery, subscriptions, support, payouts and compliance operations. [Progress](docs/PROGRESS.md) records phase acceptance, test evidence and the remaining P13 work.
 
 Read [the implementation plan](docs/IMPLEMENTATION_PLAN.md), [current progress](docs/PROGRESS.md), and [edge-case register](docs/EDGE_CASES.md) before making changes.
 
@@ -17,7 +17,9 @@ pnpm seed
 pnpm start:dev
 ```
 
-Local provider switches in `.env.example` select local authentication, fake maps/payments/push, local storage and Mailpit SMTP. They require no real AWS, map, or payment credentials. Local KYC and catalog uploads work without S3 credentials. Payment and notification business workflows remain assigned to their later phases.
+Local provider switches in `.env.example` select local authentication, fake maps/payments/push, local storage and Mailpit SMTP. They require no real AWS, map, or payment credentials. Local KYC and catalog uploads work without S3 credentials. Payment and notification workflows use the selected local providers; credentialed provider activation remains separate.
+
+For S3 development storage, configure separate `S3_MEDIA_BUCKET` and `S3_PRIVATE_BUCKET` values and select `STORAGE_PROVIDER=s3`. `AWS_S3_PROFILE` optionally selects a dedicated AWS profile; otherwise the standard AWS credential chain is used. With no development CDN URL, registered product images are served by `/media/:id`. Upload targets contain a URL and form fields: submit every returned field and the file as a multipart POST to the URL. Signed upload and download values are temporary credentials and must not be logged. The local seed writes local image files and is blocked while S3 storage is selected.
 
 Services bind to loopback: PostgreSQL/PostGIS on 5432, Redis on 6379, LocalStack on 4566, SMTP on 1025, and Mailpit's inbox at [localhost:8025](http://localhost:8025). The application defaults to port 3000. Operational metrics require `Authorization: Bearer <METRICS_BEARER_TOKEN>` and return 404 when the token is unset. Do not put this token in client applications.
 
@@ -68,6 +70,12 @@ LOCAL-NEW,,Whole Wheat Flour,1 kg,<category-uuid>,1101,500,false,false,9900,1100
 Use the category IDs and configured GST values from your local environment. Import creation supplies `mediaId`, `storeId` and `dryRun`; poll its job/report for validation, approval and completion. A dry run changes no catalog data. The same file/store/mode returns the existing job, while a dry run and real run are distinct operations.
 
 Store inventory APIs require current staff assignment; stock-changing requests require `Idempotency-Key`. Stock quantities are integer variant units serialized as decimal strings. See [domain rules](docs/DOMAIN.md), [stock decisions](docs/DECISIONS/0006-stock-units-reservations-and-expiry.md) and the [runbook](docs/RUNBOOK.md) before changing allocation, expiry or approval behavior.
+
+## Subscriptions, support and compliance
+
+Seeds include a subscribable variant and morning delivery slots. A SUPER_ADMIN must enable `wallet_enabled` before `subscriptions_enabled` through the feature-flag API. Fund the customer wallet, select an owned serviceable address, and create a subscription under `/v1/customer/subscriptions` with an idempotency key. Scheduled orders use ordinary checkout prices, fees and minimums. Changes return their effective IST date; picking and dispatch wait for the delivery slot's configured lead time.
+
+Customer and rider tickets, delivered-order ratings and administrative payout records use the existing order, refund and earnings contracts. Positive manual settlements require a payment reference and private evidence; the backend does not initiate bank transfers. Admin reports run as private asynchronous CSV exports. Personal export and erasure workflows enforce current ownership, legal holds and outstanding obligations. [API conventions](docs/API.md) and [operational procedures](docs/RUNBOOK.md) describe these surfaces and their recovery paths.
 
 ## Verification
 

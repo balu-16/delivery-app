@@ -2,6 +2,7 @@ import { sql, type Kysely, type Transaction } from 'kysely';
 import type { PlatformSchema } from '../../../platform/database/database.js';
 import { uuidV7 } from '../../../common/ids/ids.js';
 import type { Address, AddressDraft, AddressRepository } from '../contracts/addresses.js';
+import type { AddressSubscriptions } from '../../subscriptions/contracts/subscriptions.js';
 
 type DB = Kysely<PlatformSchema> | Transaction<PlatformSchema>;
 interface AddressRow {
@@ -34,7 +35,8 @@ function map(row: AddressRow): Address {
   };
 }
 async function lockOwner(db: DB, userId: string): Promise<void> {
-  const result = await sql`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`.execute(db);
+  const result =
+    await sql`SELECT id FROM users WHERE id = ${userId} AND status='ACTIVE' FOR UPDATE`.execute(db);
   if (!result.rows.length) throw new Error('PROFILE_NOT_INITIALIZED');
 }
 async function find(db: DB, userId: string, id: string): Promise<Address> {
@@ -47,7 +49,10 @@ async function find(db: DB, userId: string, id: string): Promise<Address> {
   return map(row);
 }
 export class PostgresAddresses implements AddressRepository {
-  constructor(private readonly db: Kysely<PlatformSchema>) {}
+  constructor(
+    private readonly db: Kysely<PlatformSchema>,
+    private readonly subscriptions?: AddressSubscriptions,
+  ) {}
   async list(userId: string): Promise<Address[]> {
     const result =
       await sql<AddressRow>`SELECT ${columns} FROM addresses WHERE user_id = ${userId} AND deleted_at IS NULL ORDER BY created_at, id`.execute(
@@ -117,6 +122,7 @@ export class PostgresAddresses implements AddressRepository {
     await this.db.transaction().execute(async (tx) => {
       await lockOwner(tx, userId);
       const old = await find(tx, userId, id);
+      if (this.subscriptions) await this.subscriptions.pauseForDeletedAddress(userId, id, tx);
       await sql`UPDATE addresses SET deleted_at=clock_timestamp(), is_default=false, version=version+1, updated_at=clock_timestamp() WHERE id=${id} AND user_id=${userId} AND deleted_at IS NULL`.execute(
         tx,
       );

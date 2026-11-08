@@ -26,7 +26,14 @@ export default tseslint.config(
         require: 'readonly',
         URL: 'readonly',
         structuredClone: 'readonly',
+        fetch: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
       },
     },
+  },
+  {
+    files: ['test/load/*.js'],
+    languageOptions: { globals: { __ENV: 'readonly', open: 'readonly', console: 'readonly' } },
   },
 );

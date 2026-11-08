@@ -2,6 +2,23 @@ import { parseMoney } from '../../../common/money/money.js';
 import type { PickItemStatus, PickTaskStatus, ShortReason } from '../contracts/tasks.js';
 
 const MAX_PG_BIGINT = 9_223_372_036_854_775_807n;
+/** Loose-item shortages inside the configured band can settle without a separate short action. */
+export function withinWeightTolerance(
+  expected: bigint,
+  picked: bigint,
+  toleranceBps: number,
+): boolean {
+  if (
+    expected <= 0n ||
+    picked < 0n ||
+    picked > expected ||
+    !Number.isSafeInteger(toleranceBps) ||
+    toleranceBps < 0 ||
+    toleranceBps > 10000
+  )
+    return false;
+  return (expected - picked) * 10000n <= expected * BigInt(toleranceBps);
+}
 
 /** Quantities are whole saleable units as canonical decimal strings. */
 export function pickQuantity(value: string, allowZero = false): bigint {
@@ -35,7 +52,7 @@ export const PICK_TASK_TRANSITIONS: Readonly<Record<PickTaskStatus, readonly Pic
   PENDING: ['ASSIGNED', 'CANCELLED'],
   // Reassignment can send a task back to the pool with progress preserved.
   ASSIGNED: ['IN_PROGRESS', 'PENDING', 'ASSIGNED', 'CANCELLED'],
-  IN_PROGRESS: ['COMPLETED', 'CANCELLED', 'IN_PROGRESS'],
+  IN_PROGRESS: ['COMPLETED', 'CANCELLED', 'ASSIGNED', 'IN_PROGRESS'],
   COMPLETED: [],
   CANCELLED: [],
 };

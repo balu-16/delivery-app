@@ -45,9 +45,9 @@ import { PostgresStoreAdministration } from './infrastructure/store-administrati
       provide: STORE_SIGNALS,
       inject: [PLATFORM_DATABASE, APP_CONFIG],
       useFactory: (db: DatabaseHandle, config: AppConfig) =>
-        new PostgresStoreSignals(db.db, async () => ({
-          backlog: await config.get('storeBacklogPauseThreshold'),
-          minutes: await config.get('storeNoRidersPauseMinutes'),
+        new PostgresStoreSignals(db.db, async (tx) => ({
+          backlog: await config.get('storeBacklogPauseThreshold', tx),
+          minutes: await config.get('storeNoRidersPauseMinutes', tx),
         })),
     },
   ],
