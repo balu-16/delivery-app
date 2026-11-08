@@ -188,8 +188,8 @@ importers:
         specifier: 3.1162.0
         version: 3.1162.0
       '@aws-sdk/s3-presigned-post':
-        specifier: 3.1162.0
-        version: 3.1162.0
+        specifier: 3.1163.0
+        version: 3.1163.0
       '@aws-sdk/s3-request-presigner':
         specifier: 3.1162.0
         version: 3.1162.0
@@ -378,6 +378,10 @@ packages:
     resolution: {integrity: sha512-WIPNPTQJnZBpWeeejEp7TPb2Jajy2kHqOkq5GzbI/vCU9Hu8Ks8kdHBFUuu7IC+bZuC/OuvPKL3ciet0RQkiAA==}
     engines: {node: '>=20.0.0'}
 
+  '@aws-sdk/client-s3@3.1163.0':
+    resolution: {integrity: sha512-exn6SxrqC0NMqJ1YmzbhTDj4hJ4GWnzt2Oq0Rafy2BGSWncFnrquK+RX7mG9DzWxTEyYg/gzbrEk93yvm+ibQA==}
+    engines: {node: '>=20.0.0'}
+
   '@aws-sdk/client-sesv2@3.1163.0':
     resolution: {integrity: sha512-XXAx+6NWTFwA6lnx4i2iH5AQ93HjkgEcnthYUZlhrr+Sg/ttrHyf9/+TmQEPEv5AbKrQ7p21M0ulDl+q60xWBA==}
     engines: {node: '>=20.0.0'}
@@ -454,8 +458,8 @@ packages:
     resolution: {integrity: sha512-jKNT1pIAFC0VdfSKVNI7TS1/QRS1NDvL0U2tuDFP2mtwLvwvK0X5FUuM3CjxVe5zY4ZaIiteeRt+WHyodzRwSA==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/s3-presigned-post@3.1162.0':
-    resolution: {integrity: sha512-Yv+8WE4vxe6TL8EHKD/oLCd9ku4ZWX4zwsCDVkWayD1xSH7ydy7wrFIBSi1KbWX3CW2KArJ153y/IKUQDyD34w==}
+  '@aws-sdk/s3-presigned-post@3.1163.0':
+    resolution: {integrity: sha512-vP3POIdOjx6BEQ0m3abmXb+FHZy4TXsE5BfH3CR56UAmWXfbL73Iqf7Ji4BOprnHg/GyDEyEzc23bEPwm5bPYQ==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/s3-request-presigner@3.1162.0':
@@ -4150,6 +4154,20 @@ snapshots:
       '@smithy/types': 4.20.0
       tslib: 2.9.1
 
+  '@aws-sdk/client-s3@3.1163.0':
+    dependencies:
+      '@aws-sdk/checksums': 3.1002.2
+      '@aws-sdk/core': 3.980.0
+      '@aws-sdk/credential-provider-node': 3.972.93
+      '@aws-sdk/middleware-sdk-s3': 3.972.86
+      '@aws-sdk/signature-v4-multi-region': 3.996.51
+      '@aws-sdk/types': 3.975.0
+      '@smithy/core': 3.39.0
+      '@smithy/fetch-http-handler': 5.8.0
+      '@smithy/node-http-handler': 4.14.2
+      '@smithy/types': 4.20.0
+      tslib: 2.9.1
+
   '@aws-sdk/client-sesv2@3.1163.0':
     dependencies:
       '@aws-sdk/core': 3.980.0
@@ -4354,9 +4372,9 @@ snapshots:
       '@smithy/types': 4.20.0
       tslib: 2.9.1
 
-  '@aws-sdk/s3-presigned-post@3.1162.0':
+  '@aws-sdk/s3-presigned-post@3.1163.0':
     dependencies:
-      '@aws-sdk/client-s3': 3.1162.0
+      '@aws-sdk/client-s3': 3.1163.0
       '@aws-sdk/core': 3.980.0
       '@aws-sdk/types': 3.975.0
       '@smithy/core': 3.39.0

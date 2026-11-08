@@ -49,7 +49,7 @@
     "@aws-sdk/credential-provider-ini": "3.973.26",
     "@aws-sdk/credential-provider-node": "3.972.93",
     "@aws-sdk/rds-signer": "3.1162.0",
-    "@aws-sdk/s3-presigned-post": "3.1162.0",
+    "@aws-sdk/s3-presigned-post": "3.1163.0",
     "@aws-sdk/s3-request-presigner": "3.1162.0",
     "@fastify/cors": "11.4.1",
     "@fastify/static": "10.1.10",
