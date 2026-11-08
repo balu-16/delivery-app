@@ -167,8 +167,8 @@ importers:
   .:
     dependencies:
       '@aws-sdk/client-cognito-identity-provider':
-        specifier: 3.1162.0
-        version: 3.1162.0
+        specifier: 3.1163.0
+        version: 3.1163.0
       '@aws-sdk/client-s3':
         specifier: 3.1162.0
         version: 3.1162.0
@@ -370,8 +370,8 @@ packages:
     resolution: {integrity: sha512-u57THWR5YOCqjIzg5og8r5dDc54n7hENs2eVy+aw1+Fd+QERa2x72qNlsiMNJI9svSpQp3WevkSKljzIG6x1YA==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-cognito-identity-provider@3.1162.0':
-    resolution: {integrity: sha512-ZmrPHFg1WJ+38PRmiLETk+a+gcGvtkSESTFCSkRBxR0jnDKMWDTIN7ehzqPBK674GLBfIEV8Hp2V6sX5KVLfXQ==}
+  '@aws-sdk/client-cognito-identity-provider@3.1163.0':
+    resolution: {integrity: sha512-kvx0gAMEAiR+e77P44plTqv5fIIg5nzcP0PsIacBmRYCAfeKm4OIad+M1fbEm3TYDeOPv+VbL91+5CrKvARb4g==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-s3@3.1162.0':
@@ -4125,7 +4125,7 @@ snapshots:
       '@smithy/types': 4.20.0
       tslib: 2.9.1
 
-  '@aws-sdk/client-cognito-identity-provider@3.1162.0':
+  '@aws-sdk/client-cognito-identity-provider@3.1163.0':
     dependencies:
       '@aws-sdk/core': 3.980.0
       '@aws-sdk/credential-provider-node': 3.972.93
