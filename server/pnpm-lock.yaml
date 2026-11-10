@@ -191,8 +191,8 @@ importers:
         specifier: 3.1162.0
         version: 3.1162.0
       '@aws-sdk/s3-request-presigner':
-        specifier: 3.1162.0
-        version: 3.1162.0
+        specifier: 3.1164.0
+        version: 3.1164.0
       '@fastify/cors':
         specifier: 11.4.1
         version: 11.4.1
@@ -461,8 +461,8 @@ packages:
     resolution: {integrity: sha512-Yv+8WE4vxe6TL8EHKD/oLCd9ku4ZWX4zwsCDVkWayD1xSH7ydy7wrFIBSi1KbWX3CW2KArJ153y/IKUQDyD34w==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/s3-request-presigner@3.1162.0':
-    resolution: {integrity: sha512-jXpFMFYUGyhOqKDHeN0QWfpGv6Qbead1EOAI3UujNK7NoD7ytpaqLoq1dMEMI8XPGqNZ5IoJKbuQ2fgNtpE6Eg==}
+  '@aws-sdk/s3-request-presigner@3.1164.0':
+    resolution: {integrity: sha512-4zxMzbE9/NEHRLs3QMNaFryHwzYQHC8YzbOpF+JTvscJD+HXvh/7f8W6bDeTg5l5khAGziRTMY58S14Eb6oa/w==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/signature-v4-multi-region@3.996.51':
@@ -4394,9 +4394,9 @@ snapshots:
       '@smithy/types': 4.20.0
       tslib: 2.9.1
 
-  '@aws-sdk/s3-request-presigner@3.1162.0':
+  '@aws-sdk/s3-request-presigner@3.1164.0':
     dependencies:
-      '@aws-sdk/core': 3.980.0
+      '@aws-sdk/core': 3.980.1
       '@aws-sdk/signature-v4-multi-region': 3.996.51
       '@aws-sdk/types': 3.975.0
       '@smithy/core': 3.39.0
