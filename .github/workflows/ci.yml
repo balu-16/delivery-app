@@ -51,13 +51,13 @@ jobs:
           set -o pipefail
           pnpm openapi:export 2>&1 | tee artifacts/openapi.log
           node scripts/verify-manifests.mjs 2>&1 | tee artifacts/openapi-manifests.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: verification-logs
           path: server/artifacts/
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: success()
         with:
           name: openapi
@@ -95,7 +95,7 @@ jobs:
       - name: Stop local services
         if: always()
         run: docker compose down --remove-orphans
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: container-logs
@@ -124,7 +124,7 @@ jobs:
         env:
           LOAD_OUTPUT_DIR: artifacts/p13-load
         run: node --import tsx test/load/run-local.ts --profile=smoke
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: load-smoke-reports
