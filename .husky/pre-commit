@@ -1,1 +1,2 @@
-pnpm exec lint-staged
+cd server
+pnpm exec lint-staged --cwd . --config .lintstagedrc.json

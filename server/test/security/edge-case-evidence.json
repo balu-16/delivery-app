@@ -1,0 +1,3516 @@
+{
+  "schemaVersion": 1,
+  "source": "docs/EDGE_CASES.md source checklist rows, additional tests and invariant ownership",
+  "scope": "Actual named test references; planned names and old P0–P4 status prose are not accepted as evidence. Partial marks identify an outstanding assertion review, not a proven failure.",
+  "cases": [
+    {
+      "id": "CON-01",
+      "requirement": "Two users buy the last unit simultaneously → exactly one succeeds",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/concurrency/inventory/reservation.spec.ts",
+          "test": "100 simultaneous attempts against ten units have exactly ten successes and reconcile"
+        },
+        {
+          "file": "test/concurrency/picking/claim.spec.ts",
+          "test": "substitution cannot oversell: exactly one contending reservation wins"
+        },
+        {
+          "file": "test/integration/payments/checkout-customer-race.spec.ts",
+          "test": "two customer checkouts contend for the last unit and only one commits"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "One replacement unit contested by substitution and reservation",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/picking/claim.spec.ts",
+              "test": "substitution cannot oversell: exactly one contending reservation wins"
+            }
+          ]
+        },
+        {
+          "description": "two customer checkouts contend for the last unit and only one commits",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/payments/checkout-customer-race.spec.ts",
+              "test": "two customer checkouts contend for the last unit and only one commits"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CON-02",
+      "requirement": "Same user double-taps \"Place order\" / retries after timeout → one order (idempotency)",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/payments/checkout-flow.spec.ts",
+          "test": "places at most one order for concurrent different keys bound to the same intent"
+        },
+        {
+          "file": "test/integration/payments/checkout-customer-race.spec.ts",
+          "test": "same-key concurrent HTTP placement rejects an in-progress request and replays the committed order"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "places at most one order for concurrent different keys bound to the same intent",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/payments/checkout-flow.spec.ts",
+              "test": "places at most one order for concurrent different keys bound to the same intent"
+            }
+          ]
+        },
+        {
+          "description": "same-key concurrent HTTP placement rejects an in-progress request and replays the committed order",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/payments/checkout-customer-race.spec.ts",
+              "test": "same-key concurrent HTTP placement rejects an in-progress request and replays the committed order"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CON-03",
+      "requirement": "Cancel and payment-capture arrive together → serialised, consistent final state",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "cancelled pending checkout releases capacity and stock once, and late capture becomes a refund"
+        }
+      ],
+      "missingCriteria": "Concurrent cancel-versus-capture in both lock orders is not established.",
+      "criteria": [
+        {
+          "description": "cancelled pending checkout releases capacity and stock once, and late capture becomes a refund",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "cancelled pending checkout releases capacity and stock once, and late capture becomes a refund"
+            }
+          ]
+        },
+        {
+          "description": "Concurrent cancel-versus-capture in both lock orders is not established.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "CON-04",
+      "requirement": "Cancel and pick-complete race; cancel and rider pickup race",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/concurrency/picking/claim.spec.ts",
+          "test": "cancel and pick-complete serialize into one consistent terminal state"
+        }
+      ],
+      "missingCriteria": "Rider pickup versus cancellation race remains unverified.",
+      "criteria": [
+        {
+          "description": "cancel and pick-complete serialize into one consistent terminal state",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/picking/claim.spec.ts",
+              "test": "cancel and pick-complete serialize into one consistent terminal state"
+            }
+          ]
+        },
+        {
+          "description": "Rider pickup versus cancellation race remains unverified.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "CON-05",
+      "requirement": "Two riders accept one offer; rider accepts after expiry",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/dispatch.spec.ts",
+          "test": "offer expiry returns the task to the pool; decline honours the cooldown"
+        },
+        {
+          "file": "test/concurrency/p13/rider-accept.spec.ts",
+          "test": "serializes two riders accepting offers for one task with a single assignment and one capacity charge"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "offer expiry returns the task to the pool; decline honours the cooldown",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/dispatch.spec.ts",
+              "test": "offer expiry returns the task to the pool; decline honours the cooldown"
+            }
+          ]
+        },
+        {
+          "description": "Focused test passed against real isolated PostgreSQL and Redis.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/p13/rider-accept.spec.ts",
+              "test": "serializes two riders accepting offers for one task with a single assignment and one capacity charge"
+            }
+          ]
+        },
+        {
+          "description": "Accepting an expired offer fails with OFFER_EXPIRED",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/p13/rider-accept.spec.ts",
+              "test": "serializes two riders accepting offers for one task with a single assignment and one capacity charge"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CON-06",
+      "requirement": "Modify subscription vs generation job race",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/subscriptions/scheduled-checkout.spec.ts",
+          "test": "serializes a cutoff-locked quantity change against generation using the original quantity"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Concurrent schedule edit and generation keep original cutoff-locked quantity",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/subscriptions/scheduled-checkout.spec.ts",
+              "test": "serializes a cutoff-locked quantity change against generation using the original quantity"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CON-07",
+      "requirement": "Concurrent wallet spends from two devices; coupon over-redemption",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/concurrency/coupons/redemption.spec.ts",
+          "test": "50 parallel attempts for a 10-use coupon reserve exactly ten across users and devices"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "mixed wallet funding reverses its own buckets once and cannot also be refunded after cancellation"
+        },
+        {
+          "file": "test/concurrency/p13/payout-wallet.spec.ts",
+          "test": "concurrent wallet spends cannot both consume the last available funds"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "50 parallel attempts for a 10-use coupon reserve exactly ten across users and devices",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/coupons/redemption.spec.ts",
+              "test": "50 parallel attempts for a 10-use coupon reserve exactly ten across users and devices"
+            }
+          ]
+        },
+        {
+          "description": "mixed wallet funding reverses its own buckets once and cannot also be refunded after cancellation",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "mixed wallet funding reverses its own buckets once and cannot also be refunded after cancellation"
+            }
+          ]
+        },
+        {
+          "description": "Focused test passed against real isolated PostgreSQL and Redis.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/p13/payout-wallet.spec.ts",
+              "test": "concurrent wallet spends cannot both consume the last available funds"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CON-08",
+      "requirement": "Deadlock on multi-item reservation (sorted lock order) and automatic retry",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/concurrency/inventory/reservation.spec.ts",
+          "test": "opposite line orders serialize without deadlock and never leave a partial reservation"
+        },
+        {
+          "file": "test/unit/platform/transaction-retry.spec.ts",
+          "test": "retries injected serialization and deadlock rollbacks and executes the effect once"
+        },
+        {
+          "file": "test/unit/platform/transaction-retry.spec.ts",
+          "test": "bounds repeated deadlocks and never retries arbitrary or ambiguous connection errors"
+        },
+        {
+          "file": "test/unit/platform/transaction-retry.spec.ts",
+          "test": "reruns the callback after a commit-time serialization rollback"
+        }
+      ],
+      "missingCriteria": "An actual PostgreSQL deadlock victim and automatic retry during contended reservation remains untested; fake rollback errors prove bounded retry behavior.",
+      "criteria": [
+        {
+          "description": "Opposite line order and bounded retry after injected rollback",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/inventory/reservation.spec.ts",
+              "test": "opposite line orders serialize without deadlock and never leave a partial reservation"
+            },
+            {
+              "file": "test/unit/platform/transaction-retry.spec.ts",
+              "test": "retries injected serialization and deadlock rollbacks and executes the effect once"
+            },
+            {
+              "file": "test/unit/platform/transaction-retry.spec.ts",
+              "test": "bounds repeated deadlocks and never retries arbitrary or ambiguous connection errors"
+            }
+          ]
+        },
+        {
+          "description": "An actual PostgreSQL deadlock victim and automatic retry during contended reservation remains untested; fake rollback errors prove bounded retry behavior.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "CON-09",
+      "requirement": "Outbox relay crash after publish before mark-published (consumer idempotency)",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/platform/outbox-recovery.spec.ts",
+          "test": "recovers publish-before-ack crash, then applies DB effect once"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "recovers publish-before-ack crash, then applies DB effect once",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/platform/outbox-recovery.spec.ts",
+              "test": "recovers publish-before-ack crash, then applies DB effect once"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CON-10",
+      "requirement": "Optimistic-lock conflicts return `409 CONCURRENT_MODIFICATION`",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/concurrency/coupons/cart-version.spec.ts",
+          "test": "concurrent writes against one cart version produce exactly one winner"
+        },
+        {
+          "file": "test/integration/cart/cart.spec.ts",
+          "test": "stale versions conflict and every accepted mutation bumps the version"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "concurrent writes against one cart version produce exactly one winner",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/coupons/cart-version.spec.ts",
+              "test": "concurrent writes against one cart version produce exactly one winner"
+            }
+          ]
+        },
+        {
+          "description": "Actual HTTP stale cart version returns 409 CONCURRENT_MODIFICATION.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/cart/cart.spec.ts",
+              "test": "stale versions conflict and every accepted mutation bumps the version"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "PAY-01",
+      "requirement": "Webhook duplicate / out-of-order / delayed / missing (poller recovers)",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "customer retries share the unresolved attempt and a verified provider capture confirms without a webhook"
+        }
+      ],
+      "missingCriteria": "Duplicate, out-of-order, delayed, and missing callbacks require direct combined event-order cases.",
+      "criteria": [
+        {
+          "description": "customer retries share the unresolved attempt and a verified provider capture confirms without a webhook",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "customer retries share the unresolved attempt and a verified provider capture confirms without a webhook"
+            }
+          ]
+        },
+        {
+          "description": "Duplicate, out-of-order, delayed, and missing callbacks require direct combined event-order cases.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "PAY-02",
+      "requirement": "Webhook arrives before the create-order response is persisted",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "holds an early capture webhook until its gateway attempt mapping is committed"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "A signed early capture is durably retried before mapping exists, then processed once after the mapping is persisted.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "holds an early capture webhook until its gateway attempt mapping is committed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "PAY-03",
+      "requirement": "Amount or currency mismatch; tampered client amount; replayed webhook with changed body",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/payments/inbox-integrity.spec.ts",
+          "test": "quarantines invalid signatures atomically and grants only one due claim"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "holds an early capture webhook until its gateway attempt mapping is committed"
+        }
+      ],
+      "missingCriteria": "Direct mismatch and tampered-client-total assertions still need identifying; changed signed-body replay is covered.",
+      "criteria": [
+        {
+          "description": "quarantines invalid signatures atomically and grants only one due claim",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/payments/inbox-integrity.spec.ts",
+              "test": "quarantines invalid signatures atomically and grants only one due claim"
+            }
+          ]
+        },
+        {
+          "description": "A repeated signed event ID with a changed payment body is quarantined.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "holds an early capture webhook until its gateway attempt mapping is committed"
+            }
+          ]
+        },
+        {
+          "description": "Direct mismatch and tampered-client-total assertions still need identifying; changed signed-body replay is covered.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "PAY-04",
+      "requirement": "Payment captured after order expired/cancelled → refund or reinstate per config",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "cancelled pending checkout releases capacity and stock once, and late capture becomes a refund"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "a capture after the payment window expires atomically refunds or reinstates (flag=%s)"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "cancelled pending checkout releases capacity and stock once, and late capture becomes a refund",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "cancelled pending checkout releases capacity and stock once, and late capture becomes a refund"
+            }
+          ]
+        },
+        {
+          "description": "Both configured late-capture branches assert refund versus reinstatement and stock outcomes.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "a capture after the payment window expires atomically refunds or reinstates (flag=%s)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "PAY-05",
+      "requirement": "User pays twice for one order → second auto-refunded",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "additional distinct captures are refundable once and cannot refund a different order"
+        }
+      ],
+      "missingCriteria": "A true simultaneous double-capture race is not asserted.",
+      "criteria": [
+        {
+          "description": "additional distinct captures are refundable once and cannot refund a different order",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "additional distinct captures are refundable once and cannot refund a different order"
+            }
+          ]
+        },
+        {
+          "description": "A true simultaneous double-capture race is not asserted.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "PAY-06",
+      "requirement": "Gateway outage / timeout on create-order and on refund",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/unit/payments/razorpay-contracts.spec.ts",
+          "test": "recovers a lost create response through the documented receipt lookup, never a second create"
+        },
+        {
+          "file": "test/unit/payments/razorpay-contracts.spec.ts",
+          "test": "sends the documented X-Refund-Idempotency header and maps refund statuses"
+        }
+      ],
+      "missingCriteria": "Known failures and refund timeout-after-success reconciliation require direct fault cases.",
+      "criteria": [
+        {
+          "description": "recovers a lost create response through the documented receipt lookup, never a second create",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/payments/razorpay-contracts.spec.ts",
+              "test": "recovers a lost create response through the documented receipt lookup, never a second create"
+            }
+          ]
+        },
+        {
+          "description": "sends the documented X-Refund-Idempotency header and maps refund statuses",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/payments/razorpay-contracts.spec.ts",
+              "test": "sends the documented X-Refund-Idempotency header and maps refund statuses"
+            }
+          ]
+        },
+        {
+          "description": "Known failures and refund timeout-after-success reconciliation require direct fault cases.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "PAY-07",
+      "requirement": "Refund exceeding captured; repeated refund requests; refund failure retries",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "approved manual refunds enforce separate identities, stable effects, and the paid source cap"
+        },
+        {
+          "file": "test/integration/payments/refund-fencing.spec.ts",
+          "test": "serializes overlapping dispatches before a gateway success can race wallet fallback"
+        }
+      ],
+      "missingCriteria": "Concurrent pending commitments and refund failure retry require additional direct assertions.",
+      "criteria": [
+        {
+          "description": "approved manual refunds enforce separate identities, stable effects, and the paid source cap",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "approved manual refunds enforce separate identities, stable effects, and the paid source cap"
+            }
+          ]
+        },
+        {
+          "description": "serializes overlapping dispatches before a gateway success can race wallet fallback",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/payments/refund-fencing.spec.ts",
+              "test": "serializes overlapping dispatches before a gateway success can race wallet fallback"
+            }
+          ]
+        },
+        {
+          "description": "Concurrent pending commitments and refund failure retry require additional direct assertions.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "PAY-08",
+      "requirement": "Partial wallet + gateway, reversal on failure",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "mixed wallet funding reverses its own buckets once and cannot also be refunded after cancellation"
+        }
+      ],
+      "missingCriteria": "A gateway-failure path for partial funding must be exercised directly; cited path cancels the order.",
+      "criteria": [
+        {
+          "description": "mixed wallet funding reverses its own buckets once and cannot also be refunded after cancellation",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "mixed wallet funding reverses its own buckets once and cannot also be refunded after cancellation"
+            }
+          ]
+        },
+        {
+          "description": "A gateway-failure path for partial funding must be exercised directly; cited path cancels the order.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "PAY-09",
+      "requirement": "Zero-total order; COD over cap; COD ineligible; COD amount mismatch",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/custody.spec.ts",
+          "test": "COD collection gates automatic completion; mismatches block delivery (PAY-09)"
+        }
+      ],
+      "missingCriteria": "Zero-total gateway bypass and COD cap/ineligibility need direct tests in addition to mismatch.",
+      "criteria": [
+        {
+          "description": "COD collection gates automatic completion; mismatches block delivery (PAY-09)",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/custody.spec.ts",
+              "test": "COD collection gates automatic completion; mismatches block delivery (PAY-09)"
+            }
+          ]
+        },
+        {
+          "description": "Zero-total gateway bypass and COD cap/ineligibility need direct tests in addition to mismatch.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "PAY-10",
+      "requirement": "Rounding: discount allocation sums exact; GST per line; credit note after shorts",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/unit/pricing/pricing.spec.ts",
+          "test": "rounding never loses or creates paise in allocation for adversarial splits"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note"
+        },
+        {
+          "file": "test/unit/pricing/pricing.spec.ts",
+          "test": "totals reconcile exactly, allocations sum, and no amount is negative or created"
+        },
+        {
+          "file": "test/unit/payments/fulfillment-amounts.spec.ts",
+          "test": "a partial short keeps integer rounding equal to the refund and invoice"
+        }
+      ],
+      "missingCriteria": "Actual pre-issuance invoice after a short needs a direct persistence-level assertion; tax and post-issuance credit note are covered.",
+      "criteria": [
+        {
+          "description": "rounding never loses or creates paise in allocation for adversarial splits",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/pricing/pricing.spec.ts",
+              "test": "rounding never loses or creates paise in allocation for adversarial splits"
+            }
+          ]
+        },
+        {
+          "description": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note"
+            }
+          ]
+        },
+        {
+          "description": "Randomized property test checks per-line inclusive tax and exact allocation.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/pricing/pricing.spec.ts",
+              "test": "totals reconcile exactly, allocations sum, and no amount is negative or created"
+            }
+          ]
+        },
+        {
+          "description": "Shorted line adjustment reconciles refund and invoice at domain level.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/payments/fulfillment-amounts.spec.ts",
+              "test": "a partial short keeps integer rounding equal to the refund and invoice"
+            }
+          ]
+        },
+        {
+          "description": "Actual pre-issuance invoice after a short needs a direct persistence-level assertion; tax and post-issuance credit note are covered.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "PAY-11",
+      "requirement": "Test-mode keys refused in production",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/unit/runtime/env.spec.ts",
+          "test": "rejects test gateway keys and local service endpoints"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Production startup rejects Razorpay test key",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/runtime/env.spec.ts",
+              "test": "rejects test gateway keys and local service endpoints"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "INV-01",
+      "requirement": "Reservation expiry sweep releases stock; late payment after sweep",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/concurrency/inventory/reservation.spec.ts",
+          "test": "commit versus hold expiry resolves to exactly one terminal path"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "cancelled pending checkout releases capacity and stock once, and late capture becomes a refund"
+        },
+        {
+          "file": "test/concurrency/inventory/reservation.spec.ts",
+          "test": "FEFO and target shelf life; commit survives sweeper and pick releases shorts"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "a capture after the payment window expires atomically refunds or reinstates (flag=%s)"
+        }
+      ],
+      "missingCriteria": "The late-capture case expires the reservation but does not explicitly run the stock sweep before capture.",
+      "criteria": [
+        {
+          "description": "commit versus hold expiry resolves to exactly one terminal path",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/inventory/reservation.spec.ts",
+              "test": "commit versus hold expiry resolves to exactly one terminal path"
+            }
+          ]
+        },
+        {
+          "description": "cancelled pending checkout releases capacity and stock once, and late capture becomes a refund",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "cancelled pending checkout releases capacity and stock once, and late capture becomes a refund"
+            }
+          ]
+        },
+        {
+          "description": "Committed allocation survives expiry sweep.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/inventory/reservation.spec.ts",
+              "test": "FEFO and target shelf life; commit survives sweeper and pick releases shorts"
+            }
+          ]
+        },
+        {
+          "description": "Expired held reservation resolves once under competing commit and repeated sweep.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/inventory/reservation.spec.ts",
+              "test": "commit versus hold expiry resolves to exactly one terminal path"
+            }
+          ]
+        },
+        {
+          "description": "Late capture exercises refund and reinstatement after an expired hold.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "a capture after the payment window expires atomically refunds or reinstates (flag=%s)"
+            }
+          ]
+        },
+        {
+          "description": "The late-capture case expires the reservation but does not explicitly run the stock sweep before capture.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "INV-02",
+      "requirement": "Shortage at pick; all items short; damaged/expired batches; FEFO order",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/picking/picking.spec.ts",
+          "test": "shorts mark the remainder, completion consumes picked stock and reports the adjustment once"
+        },
+        {
+          "file": "test/integration/picking/fulfillment.spec.ts",
+          "test": "an all-short task goes through the shared cancel routine and never completes"
+        },
+        {
+          "file": "test/integration/picking/picking.spec.ts",
+          "test": "FEFO suggestions order by earliest expiry and exclude expired batches"
+        }
+      ],
+      "missingCriteria": "The cited cases cover part of the requirement; remaining boundary and failure paths need explicit assertion review.",
+      "criteria": [
+        {
+          "description": "shorts mark the remainder, completion consumes picked stock and reports the adjustment once",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/picking/picking.spec.ts",
+              "test": "shorts mark the remainder, completion consumes picked stock and reports the adjustment once"
+            }
+          ]
+        },
+        {
+          "description": "an all-short task goes through the shared cancel routine and never completes",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/picking/fulfillment.spec.ts",
+              "test": "an all-short task goes through the shared cancel routine and never completes"
+            }
+          ]
+        },
+        {
+          "description": "FEFO suggestions order by earliest expiry and exclude expired batches",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/picking/picking.spec.ts",
+              "test": "FEFO suggestions order by earliest expiry and exclude expired batches"
+            }
+          ]
+        },
+        {
+          "description": "The cited cases cover part of the requirement; remaining boundary and failure paths need explicit assertion review.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "INV-03",
+      "requirement": "Item unpublished or price changed while in cart → flagged, never silently altered at payment",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/cart/cart.spec.ts",
+          "test": "stale prices surface PRICE_CHANGED at refresh with fresh-priced lines"
+        },
+        {
+          "file": "test/unit/cart/cart-domain.spec.ts",
+          "test": "unavailable, unpublished or zero-stock lines are flagged, never dropped"
+        },
+        {
+          "file": "test/integration/payments/quote-stock-isolation.spec.ts",
+          "test": "genuine %s changes invalidate the quote without effects"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Unpublished and unavailable cart lines remain visible as issues",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/cart/cart-domain.spec.ts",
+              "test": "unavailable, unpublished or zero-stock lines are flagged, never dropped"
+            }
+          ]
+        },
+        {
+          "description": "stale prices surface PRICE_CHANGED at refresh with fresh-priced lines",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/cart/cart.spec.ts",
+              "test": "stale prices surface PRICE_CHANGED at refresh with fresh-priced lines"
+            }
+          ]
+        },
+        {
+          "description": "Parameterized actual checkout tests reject changed price and unpublished products without order or stock effects.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/payments/quote-stock-isolation.spec.ts",
+              "test": "genuine %s changes invalidate the quote without effects"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "INV-04",
+      "requirement": "Store switch on address change re-evaluates cart",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/cart/cart.spec.ts",
+          "test": "store change flags unavailable lines, reprices and clamps without dropping anything"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Address-driven store switch retains unavailable items and reprices",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/cart/cart.spec.ts",
+              "test": "store change flags unavailable lines, reprices and clamps without dropping anything"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "INV-05",
+      "requirement": "Import: duplicate SKUs, bad GST, BOM/encoding, huge file, re-run idempotency",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/unit/catalog/import.spec.ts",
+          "test": "accepts BOM, rejects duplicates, and escapes spreadsheet formulas"
+        },
+        {
+          "file": "test/unit/catalog/import.spec.ts",
+          "test": "rejects malformed UTF-8 and file or row limit violations"
+        },
+        {
+          "file": "test/integration/catalog/import.spec.ts",
+          "test": "keeps dry runs isolated and applies replay-safe batches with durable checkpoints"
+        },
+        {
+          "file": "test/integration/catalog/queue-report.spec.ts",
+          "test": "recreates a lost queue hint and persists a recoverable private report"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "BOM and duplicate SKU",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/catalog/import.spec.ts",
+              "test": "accepts BOM, rejects duplicates, and escapes spreadsheet formulas"
+            }
+          ]
+        },
+        {
+          "description": "Malformed encoding and size/row caps",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/catalog/import.spec.ts",
+              "test": "rejects malformed UTF-8 and file or row limit violations"
+            }
+          ]
+        },
+        {
+          "description": "Dry-run versus replay-safe real import",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/catalog/import.spec.ts",
+              "test": "keeps dry runs isolated and applies replay-safe batches with durable checkpoints"
+            }
+          ]
+        },
+        {
+          "description": "Import worker reports invalid GST for a disallowed tax rate.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/catalog/queue-report.spec.ts",
+              "test": "recreates a lost queue hint and persists a recoverable private report"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "GEO-01",
+      "requirement": "Point on zone boundary; overlapping zones with priority; zone edited mid-order",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/serviceability/zone-address.spec.ts",
+          "test": "validates polygons and includes boundary points"
+        },
+        {
+          "file": "test/integration/serviceability/zone-address.spec.ts",
+          "test": "orders overlaps by priority then distance and preserves zone version snapshots"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "freezes the selected zone versions when a placed order outlives a zone edit"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "validates polygons and includes boundary points",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/serviceability/zone-address.spec.ts",
+              "test": "validates polygons and includes boundary points"
+            }
+          ]
+        },
+        {
+          "description": "orders overlaps by priority then distance and preserves zone version snapshots",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/serviceability/zone-address.spec.ts",
+              "test": "orders overlaps by priority then distance and preserves zone version snapshots"
+            }
+          ]
+        },
+        {
+          "description": "Database geometry covers boundary and excludes outside points.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/serviceability/zone-address.spec.ts",
+              "test": "validates polygons and includes boundary points"
+            }
+          ]
+        },
+        {
+          "description": "Placed order retains its zone and city versions after zone edits and a same-zone address change.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "freezes the selected zone versions when a placed order outlives a zone edit"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "GEO-02",
+      "requirement": "Store overnight hours, holiday, last-order buffer, capacity limit, auto-pause",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/serviceability/zone-address.spec.ts",
+          "test": "admits only available capacity under competing claims"
+        },
+        {
+          "file": "test/integration/serviceability/zone-address.spec.ts",
+          "test": "persists auto-pause and does not overwrite a manual pause"
+        },
+        {
+          "file": "test/unit/serviceability/hours.spec.ts",
+          "test": "includes an overnight window until the exact last-order buffer"
+        },
+        {
+          "file": "test/unit/serviceability/hours.spec.ts",
+          "test": "treats a closed holiday as closed across an overnight window"
+        },
+        {
+          "file": "test/unit/serviceability/hours.spec.ts",
+          "test": "honours a holiday replacement schedule"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Overnight schedule, closed/replacement holiday and last-order buffer",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/serviceability/hours.spec.ts",
+              "test": "includes an overnight window until the exact last-order buffer"
+            },
+            {
+              "file": "test/unit/serviceability/hours.spec.ts",
+              "test": "treats a closed holiday as closed across an overnight window"
+            },
+            {
+              "file": "test/unit/serviceability/hours.spec.ts",
+              "test": "honours a holiday replacement schedule"
+            }
+          ]
+        },
+        {
+          "description": "Capacity under contention and automatic pause",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/serviceability/zone-address.spec.ts",
+              "test": "admits only available capacity under competing claims"
+            },
+            {
+              "file": "test/integration/serviceability/zone-address.spec.ts",
+              "test": "persists auto-pause and does not overwrite a manual pause"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "GEO-03",
+      "requirement": "Maps provider down; geocode vs pin mismatch; address change after placing order",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/unit/serviceability/maps.spec.ts",
+          "test": "opens the breaker and falls back to haversine without provider calls per ping"
+        },
+        {
+          "file": "test/unit/serviceability/maps.spec.ts",
+          "test": "flags a geocode/pin mismatch and permits address writes when maps fail"
+        },
+        {
+          "file": "test/unit/serviceability/hours.spec.ts",
+          "test": "only allows pre-pick changes in the same zone for the same fee"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Provider fallback and mismatch",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/serviceability/maps.spec.ts",
+              "test": "opens the breaker and falls back to haversine without provider calls per ping"
+            },
+            {
+              "file": "test/unit/serviceability/maps.spec.ts",
+              "test": "flags a geocode/pin mismatch and permits address writes when maps fail"
+            }
+          ]
+        },
+        {
+          "description": "Pre-pick same-zone and same-fee address change",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/serviceability/hours.spec.ts",
+              "test": "only allows pre-pick changes in the same zone for the same fee"
+            }
+          ]
+        }
+      ],
+      "externalAcceptance": "Credentialed live Ola Maps availability and provider behavior remain external."
+    },
+    {
+      "id": "GEO-04",
+      "requirement": "Missing contact phone; phone visibility window for riders",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/custody.spec.ts",
+          "test": "rider contact is visible only inside the custody window (GEO-04)"
+        },
+        {
+          "file": "test/unit/serviceability/hours.spec.ts",
+          "test": "requires a valid address, contact and India coordinates"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Valid phone required",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/serviceability/hours.spec.ts",
+              "test": "requires a valid address, contact and India coordinates"
+            }
+          ]
+        },
+        {
+          "description": "Assigned-rider contact visibility window",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/custody.spec.ts",
+              "test": "rider contact is visible only inside the custody window (GEO-04)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "DSP-01",
+      "requirement": "No rider available (radius widening, admin alert, auto-cancel threshold)",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/dispatch.spec.ts",
+          "test": "a rider outside eligibility (offline) is never offered, widening and alerts follow"
+        }
+      ],
+      "missingCriteria": "Auto-cancellation threshold after widening and alert requires direct assertion.",
+      "criteria": [
+        {
+          "description": "a rider outside eligibility (offline) is never offered, widening and alerts follow",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/dispatch.spec.ts",
+              "test": "a rider outside eligibility (offline) is never offered, widening and alerts follow"
+            }
+          ]
+        },
+        {
+          "description": "Auto-cancellation threshold after widening and alert requires direct assertion.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "DSP-02",
+      "requirement": "Rider silent before vs after pickup; app crash/reinstall resume; rider suspended mid-task",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/dispatch.spec.ts",
+          "test": "silent riders re-dispatch before pickup and escalate after it (D21)"
+        }
+      ],
+      "missingCriteria": "Process restart/reinstall resume and suspension during custody require direct tests.",
+      "criteria": [
+        {
+          "description": "silent riders re-dispatch before pickup and escalate after it (D21)",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/dispatch.spec.ts",
+              "test": "silent riders re-dispatch before pickup and escalate after it (D21)"
+            }
+          ]
+        },
+        {
+          "description": "Process restart/reinstall resume and suspension during custody require direct tests.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "DSP-03",
+      "requirement": "Mock GPS, teleport, stale or out-of-order points, oversized batches",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/dispatch.spec.ts",
+          "test": "GPS history samples from the last persisted point and rejects stale cross-instance writes"
+        },
+        {
+          "file": "test/unit/tracking/integrity.spec.ts",
+          "test": "mock GPS points are dropped, never stored or published"
+        },
+        {
+          "file": "test/unit/tracking/integrity.spec.ts",
+          "test": "poor accuracy and future skew are rejected"
+        },
+        {
+          "file": "test/unit/tracking/integrity.spec.ts",
+          "test": "teleports between consecutive points are rejected (impossible speed)"
+        },
+        {
+          "file": "test/unit/tracking/integrity.spec.ts",
+          "test": "duplicate timestamps and out-of-order points never replace newer state"
+        },
+        {
+          "file": "test/unit/tracking/integrity.spec.ts",
+          "test": "points older than the last stored point are pruned (ADD-19 ordering)"
+        },
+        {
+          "file": "test/unit/tracking/integrity.spec.ts",
+          "test": "oversized batches fail the whole request"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Mock, poor accuracy, future skew, impossible speed, duplicate/out-of-order and size cap",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/tracking/integrity.spec.ts",
+              "test": "mock GPS points are dropped, never stored or published"
+            },
+            {
+              "file": "test/unit/tracking/integrity.spec.ts",
+              "test": "poor accuracy and future skew are rejected"
+            },
+            {
+              "file": "test/unit/tracking/integrity.spec.ts",
+              "test": "teleports between consecutive points are rejected (impossible speed)"
+            },
+            {
+              "file": "test/unit/tracking/integrity.spec.ts",
+              "test": "duplicate timestamps and out-of-order points never replace newer state"
+            },
+            {
+              "file": "test/unit/tracking/integrity.spec.ts",
+              "test": "points older than the last stored point are pruned (ADD-19 ordering)"
+            },
+            {
+              "file": "test/unit/tracking/integrity.spec.ts",
+              "test": "oversized batches fail the whole request"
+            }
+          ]
+        },
+        {
+          "description": "Cross-instance stale location rejected",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/dispatch.spec.ts",
+              "test": "GPS history samples from the last persisted point and rejects stale cross-instance writes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "DSP-04",
+      "requirement": "Wrong handover code; wrong delivery code attempts limit; contactless proof-of-delivery",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/picking/fulfillment.spec.ts",
+          "test": "handover verification is attempt-limited, lockable and manager override is audited"
+        },
+        {
+          "file": "test/integration/dispatch/custody.spec.ts",
+          "test": "wrong delivery codes are attempt-limited and lock out durably (DSP-04)"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "contactless POD must be privately uploaded by the assigned rider and bound to this task"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Handover/delivery attempts and contactless proof ownership",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/picking/fulfillment.spec.ts",
+              "test": "handover verification is attempt-limited, lockable and manager override is audited"
+            },
+            {
+              "file": "test/integration/dispatch/custody.spec.ts",
+              "test": "wrong delivery codes are attempt-limited and lock out durably (DSP-04)"
+            },
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "contactless POD must be privately uploaded by the assigned rider and bound to this task"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "DSP-05",
+      "requirement": "Customer unreachable / wrong address / failed delivery → RTO → QC → restock",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "a failed parcel keeps custody until a full return is quarantined and refunded once"
+        },
+        {
+          "file": "test/integration/dispatch/custody.spec.ts",
+          "test": "wrong address requires rider flag and audited admin failure after the wait"
+        }
+      ],
+      "missingCriteria": "Explicit contact wait and QC outcomes for restock versus damage require additional assertions.",
+      "criteria": [
+        {
+          "description": "a failed parcel keeps custody until a full return is quarantined and refunded once",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "a failed parcel keeps custody until a full return is quarantined and refunded once"
+            }
+          ]
+        },
+        {
+          "description": "wrong address requires rider flag and audited admin failure after the wait",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/custody.spec.ts",
+              "test": "wrong address requires rider flag and audited admin failure after the wait"
+            }
+          ]
+        },
+        {
+          "description": "Explicit contact wait and QC outcomes for restock versus damage require additional assertions.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "DSP-06",
+      "requirement": "Cash-in-hand limit blocks COD offers; settlement discrepancies",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/dispatch.spec.ts",
+          "test": "COD capacity uses the adjusted expected amount of existing assignments"
+        }
+      ],
+      "missingCriteria": "Audited settlement discrepancies and payout netting need direct evidence.",
+      "criteria": [
+        {
+          "description": "COD capacity uses the adjusted expected amount of existing assignments",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/dispatch.spec.ts",
+              "test": "COD capacity uses the adjusted expected amount of existing assignments"
+            }
+          ]
+        },
+        {
+          "description": "Audited settlement discrepancies and payout netting need direct evidence.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "RTN-01",
+      "requirement": "Socket reconnect resumes via snapshot; unauthorised room join rejected; location visible only in the allowed window",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/custody.spec.ts",
+          "test": "customer tracking snapshots are ownership-scoped and hide terminal locations (RTN-01)"
+        },
+        {
+          "file": "test/integration/realtime/p13-order-reconnect.spec.ts",
+          "test": "restores an owner order snapshot across instances and removes terminal room access"
+        },
+        {
+          "file": "test/unit/platform/realtime.spec.ts",
+          "test": "room authorization re-checks every join and unauthorized rooms are rejected"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Unauthorized room joins are rejected.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/platform/realtime.spec.ts",
+              "test": "room authorization re-checks every join and unauthorized rooms are rejected"
+            }
+          ]
+        },
+        {
+          "description": "Real customer room rejects foreign owner, resumes snapshot across app instances with HTTP tracking parity, and terminal cancellation removes room and location.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/realtime/p13-order-reconnect.spec.ts",
+              "test": "restores an owner order snapshot across instances and removes terminal room access"
+            }
+          ]
+        },
+        {
+          "description": "Real two-instance owner reconnect and snapshot/HTTP parity, foreign room denial, terminal eviction and location removal.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/realtime/p13-order-reconnect.spec.ts",
+              "test": "restores an owner order snapshot across instances and removes terminal room access"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "RTN-02",
+      "requirement": "Duplicate notification suppressed; invalid FCM token cleanup; locale fallback; promotional quiet hours",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/notifications/notifications.spec.ts",
+          "test": "a replayed event creates one logical notification; a distinct transition notifies again"
+        },
+        {
+          "file": "test/integration/notifications/notifications.spec.ts",
+          "test": "device tokens are reassigned on login and invalid tokens are deactivated"
+        },
+        {
+          "file": "test/integration/notifications/notifications.spec.ts",
+          "test": "user locale is stored and English fallback applies to email"
+        },
+        {
+          "file": "test/integration/notifications/notifications.spec.ts",
+          "test": "promotional quiet hours hold only the promotional class (IST boundaries)"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Transition deduplication, token invalidation, locale fallback and promotional quiet hours",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/notifications/notifications.spec.ts",
+              "test": "a replayed event creates one logical notification; a distinct transition notifies again"
+            },
+            {
+              "file": "test/integration/notifications/notifications.spec.ts",
+              "test": "device tokens are reassigned on login and invalid tokens are deactivated"
+            },
+            {
+              "file": "test/integration/notifications/notifications.spec.ts",
+              "test": "user locale is stored and English fallback applies to email"
+            },
+            {
+              "file": "test/integration/notifications/notifications.spec.ts",
+              "test": "promotional quiet hours hold only the promotional class (IST boundaries)"
+            }
+          ]
+        }
+      ],
+      "externalAcceptance": "Live FCM credentialed delivery is outside these local fake-provider tests."
+    },
+    {
+      "id": "RTN-03",
+      "requirement": "Notification failure never breaks order flow",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/notifications/delivery.spec.ts",
+          "test": "a failed send never rolls back committed producer work (RTN-03)"
+        }
+      ],
+      "missingCriteria": "A complete order delivery under provider failure is not established by producer transaction isolation alone.",
+      "criteria": [
+        {
+          "description": "a failed send never rolls back committed producer work (RTN-03)",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/notifications/delivery.spec.ts",
+              "test": "a failed send never rolls back committed producer work (RTN-03)"
+            }
+          ]
+        },
+        {
+          "description": "A complete order delivery under provider failure is not established by producer transaction isolation alone.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "SEC-01",
+      "requirement": "Expired / wrong-pool / wrong-client / tampered tokens; JWKS rotation; clock skew",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/unit/identity/cognito-token.spec.ts",
+          "test": "Cognito tokens enforce signature, pool, client, use and expiry and refresh rotated keys"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Signature, issuer, pool/client, token use, expiry, sixty-second clock tolerance and JWKS rotation are verified locally.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/identity/cognito-token.spec.ts",
+              "test": "Cognito tokens enforce signature, pool, client, use and expiry and refresh rotated keys"
+            }
+          ]
+        },
+        {
+          "description": "Expiry boundary accepts 30-second grace and rejects 61-second expiry along with signature, issuer, client, use and rotated keys.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/identity/cognito-token.spec.ts",
+              "test": "Cognito tokens enforce signature, pool, client, use and expiry and refresh rotated keys"
+            }
+          ]
+        }
+      ],
+      "externalAcceptance": "Live Cognito provider resources and JWKS network acceptance remain external."
+    },
+    {
+      "id": "SEC-02",
+      "requirement": "Blocked user with valid token; role removed mid-session",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/identity/identity.spec.ts",
+          "test": "same email in separate pools remains distinct and stale workforce token cannot retain revoked role"
+        },
+        {
+          "file": "test/integration/identity/identity.spec.ts",
+          "test": "bootstrap is idempotent for the same verified pool and subject, and rejects blocked users"
+        },
+        {
+          "file": "test/integration/identity/permission-matrix.spec.ts",
+          "test": "each identity operation rejects missing credentials, the wrong pool, and inappropriate workforce roles"
+        },
+        {
+          "file": "test/unit/platform/realtime-security.spec.ts",
+          "test": "disconnects at token expiry and re-authenticates on reconnect"
+        },
+        {
+          "file": "test/unit/platform/realtime-security.spec.ts",
+          "test": "removes a room after role revocation and disconnects a blocked identity"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Current HTTP identity state revokes a role and blocks an account despite an existing token.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/permission-matrix.spec.ts",
+              "test": "each identity operation rejects missing credentials, the wrong pool, and inappropriate workforce roles"
+            }
+          ]
+        },
+        {
+          "description": "WebSocket expiry disconnects and reconnect requires valid authentication.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/platform/realtime-security.spec.ts",
+              "test": "disconnects at token expiry and re-authenticates on reconnect"
+            }
+          ]
+        },
+        {
+          "description": "Role revocation removes room access and blocked user disconnects.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/platform/realtime-security.spec.ts",
+              "test": "removes a room after role revocation and disconnects a blocked identity"
+            }
+          ]
+        },
+        {
+          "description": "Socket expiry and current identity changes remove access and disconnect blocked users.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/platform/realtime-security.spec.ts",
+              "test": "disconnects at token expiry and re-authenticates on reconnect"
+            },
+            {
+              "file": "test/unit/platform/realtime-security.spec.ts",
+              "test": "removes a room after role revocation and disconnects a blocked identity"
+            }
+          ]
+        },
+        {
+          "description": "Current grant/revoke/block and wrong-role HTTP checks.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/permission-matrix.spec.ts",
+              "test": "each identity operation rejects missing credentials, the wrong pool, and inappropriate workforce roles"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-03",
+      "requirement": "IDOR attempts on every resource type; wrong-role access on every surface",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/e2e/p13-admin-crud.spec.ts",
+          "test": "manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+        },
+        {
+          "file": "test/e2e/foundation-journey.spec.ts",
+          "test": "rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+        }
+      ],
+      "missingCriteria": "Owner/store and wrong-role outcomes are not demonstrated for every operation; see operation inventory.",
+      "criteria": [
+        {
+          "description": "manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/e2e/p13-admin-crud.spec.ts",
+              "test": "manages entities, cities, stores and zones with role checks, strict bodies, version fencing and audits"
+            }
+          ]
+        },
+        {
+          "description": "rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/e2e/foundation-journey.spec.ts",
+              "test": "rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+            }
+          ]
+        },
+        {
+          "description": "Owner/store and wrong-role outcomes are not demonstrated for every operation; see operation inventory.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "SEC-04",
+      "requirement": "Workforce user saga failure and compensation; last SUPER_ADMIN protection",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/identity/identity.spec.ts",
+          "test": "failed local provisioning leaves recoverable compensation and retries deletion before recreation"
+        },
+        {
+          "file": "test/concurrency/identity/identity-concurrency.spec.ts",
+          "test": "two concurrent super-admin blocks cannot remove the last active super-admin"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Failed provisioning and failed compensation recover; last super-admin survives concurrency",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/identity.spec.ts",
+              "test": "failed local provisioning leaves recoverable compensation and retries deletion before recreation"
+            },
+            {
+              "file": "test/concurrency/identity/identity-concurrency.spec.ts",
+              "test": "two concurrent super-admin blocks cannot remove the last active super-admin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-05",
+      "requirement": "Erasure blocked by active order/subscription; anonymisation keeps legal records",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/compliance/admin-operations.spec.ts",
+          "test": "erasure retries blockers and revokes locally before provider cleanup"
+        },
+        {
+          "file": "test/integration/compliance/cross-phase-privacy.spec.ts",
+          "test": "live P10 subscriptions and P11 payout records gate erasure until resolved"
+        }
+      ],
+      "missingCriteria": "Verify balance and all active-obligation blockers, legal-record retention and provider retries individually.",
+      "criteria": [
+        {
+          "description": "erasure retries blockers and revokes locally before provider cleanup",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/compliance/admin-operations.spec.ts",
+              "test": "erasure retries blockers and revokes locally before provider cleanup"
+            }
+          ]
+        },
+        {
+          "description": "live P10 subscriptions and P11 payout records gate erasure until resolved",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/compliance/cross-phase-privacy.spec.ts",
+              "test": "live P10 subscriptions and P11 payout records gate erasure until resolved"
+            }
+          ]
+        },
+        {
+          "description": "Verify balance and all active-obligation blockers, legal-record retention and provider retries individually.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "SEC-06",
+      "requirement": "Rate limit and abuse scenarios (coupon guessing, search spam, location flooding)",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/coupons/coupons.spec.ts",
+          "test": "coupon validation attempts are rate limited per user"
+        },
+        {
+          "file": "test/integration/platform/rate-limit.spec.ts",
+          "test": "shares counters across Redis clients, separates route classes, and sets an expiry"
+        }
+      ],
+      "missingCriteria": "Search spam, location flooding, payload bounds and retry-after need route-specific assertions.",
+      "criteria": [
+        {
+          "description": "coupon validation attempts are rate limited per user",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/coupons/coupons.spec.ts",
+              "test": "coupon validation attempts are rate limited per user"
+            }
+          ]
+        },
+        {
+          "description": "shares counters across Redis clients, separates route classes, and sets an expiry",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/platform/rate-limit.spec.ts",
+              "test": "shares counters across Redis clients, separates route classes, and sets an expiry"
+            }
+          ]
+        },
+        {
+          "description": "Search spam, location flooding, payload bounds and retry-after need route-specific assertions.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "TIM-01",
+      "requirement": "Cutoff boundaries (21:00 IST exact second), financial-year rollover (31 Mar → 1 Apr) for invoice sequences",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/unit/subscriptions/schedule.spec.ts",
+          "test": "locks tomorrow at exactly 21:00 IST"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note"
+        },
+        {
+          "file": "test/unit/invoicing/financial-year.spec.ts",
+          "test": "uses IST midnight for fiscal year and preserves century rollover labels"
+        },
+        {
+          "file": "test/integration/invoicing/financial-year-recovery.spec.ts",
+          "test": "separates IST fiscal-year invoice sequences and retries rendering without changing issued data"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "locks tomorrow at exactly 21:00 IST",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/subscriptions/schedule.spec.ts",
+              "test": "locks tomorrow at exactly 21:00 IST"
+            }
+          ]
+        },
+        {
+          "description": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note"
+            }
+          ]
+        },
+        {
+          "description": "Pure financial-year boundary immediately before, at, and after IST midnight, plus century labels.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/invoicing/financial-year.spec.ts",
+              "test": "uses IST midnight for fiscal year and preserves century rollover labels"
+            }
+          ]
+        },
+        {
+          "description": "Real invoice counters roll over at IST midnight with immutable documents.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/invoicing/financial-year-recovery.spec.ts",
+              "test": "separates IST fiscal-year invoice sequences and retries rendering without changing issued data"
+            }
+          ]
+        },
+        {
+          "description": "Real invoice counters roll over at IST midnight with immutable documents.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/invoicing/financial-year-recovery.spec.ts",
+              "test": "separates IST fiscal-year invoice sequences and retries rendering without changing issued data"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "TIM-02",
+      "requirement": "Cron run twice / late / crashed midway (idempotent)",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/subscriptions/scheduled-checkout.spec.ts",
+          "test": "fences a lost generation lease and recovers an expired claim"
+        }
+      ],
+      "missingCriteria": "Late and crash/replay behavior is not demonstrated for every scheduler family.",
+      "criteria": [
+        {
+          "description": "fences a lost generation lease and recovers an expired claim",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/subscriptions/scheduled-checkout.spec.ts",
+              "test": "fences a lost generation lease and recovers an expired claim"
+            }
+          ]
+        },
+        {
+          "description": "Late and crash/replay behavior is not demonstrated for every scheduler family.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "TIM-03",
+      "requirement": "Month-end, leap-year schedule maths; start date after cutoff",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/unit/subscriptions/schedule.spec.ts",
+          "test": "anchors alternate and every-N schedules across leap days and month ends"
+        },
+        {
+          "file": "test/unit/subscriptions/schedule.spec.ts",
+          "test": "locks tomorrow at exactly 21:00 IST"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Leap day and month end recurrence",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/subscriptions/schedule.spec.ts",
+              "test": "anchors alternate and every-N schedules across leap days and month ends"
+            }
+          ]
+        },
+        {
+          "description": "Exact cutoff determines next editable date",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/subscriptions/schedule.spec.ts",
+              "test": "locks tomorrow at exactly 21:00 IST"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "TIM-04",
+      "requirement": "Clock skew between app instances (single source: DB time or injected Clock for critical decisions)",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/subscriptions/scheduled-checkout.spec.ts",
+          "test": "reads the database cutoff after a competing subscription lock is released"
+        }
+      ],
+      "missingCriteria": "Host-clock skew across payment expiry and dispatch offers needs direct multi-instance tests.",
+      "criteria": [
+        {
+          "description": "reads the database cutoff after a competing subscription lock is released",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/subscriptions/scheduled-checkout.spec.ts",
+              "test": "reads the database cutoff after a competing subscription lock is released"
+            }
+          ]
+        },
+        {
+          "description": "Host-clock skew across payment expiry and dispatch offers needs direct multi-instance tests.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "OPS-01",
+      "requirement": "Graceful shutdown mid-job; DLQ replay; migration applied on live data",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/platform/outbox-recovery.spec.ts",
+          "test": "waits for an in-flight recovery before closing its queue"
+        },
+        {
+          "file": "test/integration/platform/outbox-recovery.spec.ts",
+          "test": "rolls back a forcibly killed worker and permits replay of its unfinished effect"
+        },
+        {
+          "file": "test/integration/platform/migration-p5.spec.ts",
+          "test": "upgrades a populated 005 schema to 006, enforces P5 constraints, and survives a rollback round-trip"
+        }
+      ],
+      "missingCriteria": "The forced-kill test injects replay; automatic stalled-job recovery and bounded drain timeout need evidence.",
+      "criteria": [
+        {
+          "description": "waits for an in-flight recovery before closing its queue",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/platform/outbox-recovery.spec.ts",
+              "test": "waits for an in-flight recovery before closing its queue"
+            }
+          ]
+        },
+        {
+          "description": "rolls back a forcibly killed worker and permits replay of its unfinished effect",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/platform/outbox-recovery.spec.ts",
+              "test": "rolls back a forcibly killed worker and permits replay of its unfinished effect"
+            }
+          ]
+        },
+        {
+          "description": "upgrades a populated 005 schema to 006, enforces P5 constraints, and survives a rollback round-trip",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/platform/migration-p5.spec.ts",
+              "test": "upgrades a populated 005 schema to 006, enforces P5 constraints, and survives a rollback round-trip"
+            }
+          ]
+        },
+        {
+          "description": "The forced-kill test injects replay; automatic stalled-job recovery and bounded drain timeout need evidence.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "OPS-02",
+      "requirement": "Redis outage degraded behaviour; Postgres failover reconnect; adapter circuit breaker open/half-open",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/platform/outbox-recovery.spec.ts",
+          "test": "recovers a committed delivery after a disposable Redis instance loses its data"
+        },
+        {
+          "file": "test/integration/platform/database-recovery.spec.ts",
+          "test": "rolls back an active terminated connection and permits an explicit retry"
+        },
+        {
+          "file": "test/unit/serviceability/maps.spec.ts",
+          "test": "opens the breaker and falls back to haversine without provider calls per ping"
+        },
+        {
+          "file": "test/integration/runtime/real-roles.spec.ts",
+          "test": "fails open for ordinary routes and closes location ingestion when Redis rate limits fail"
+        },
+        {
+          "file": "test/unit/identity/resilient-admin.spec.ts",
+          "test": "provider breaker bounds repeated outages and recovers after the cooldown"
+        }
+      ],
+      "missingCriteria": "PostgreSQL failover across a replacement primary and Redis read-path fallback are not established; tests cover active backend termination/retry, ingest fail-closed, actual lost Redis data recovery and breaker recovery.",
+      "criteria": [
+        {
+          "description": "recovers a committed delivery after a disposable Redis instance loses its data",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/platform/outbox-recovery.spec.ts",
+              "test": "recovers a committed delivery after a disposable Redis instance loses its data"
+            }
+          ]
+        },
+        {
+          "description": "rolls back an active terminated connection and permits an explicit retry",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/platform/database-recovery.spec.ts",
+              "test": "rolls back an active terminated connection and permits an explicit retry"
+            }
+          ]
+        },
+        {
+          "description": "opens the breaker and falls back to haversine without provider calls per ping",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/serviceability/maps.spec.ts",
+              "test": "opens the breaker and falls back to haversine without provider calls per ping"
+            }
+          ]
+        },
+        {
+          "description": "fails open for ordinary routes and closes location ingestion when Redis rate limits fail",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/runtime/real-roles.spec.ts",
+              "test": "fails open for ordinary routes and closes location ingestion when Redis rate limits fail"
+            }
+          ]
+        },
+        {
+          "description": "provider breaker bounds repeated outages and recovers after the cooldown",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/identity/resilient-admin.spec.ts",
+              "test": "provider breaker bounds repeated outages and recovers after the cooldown"
+            }
+          ]
+        },
+        {
+          "description": "PostgreSQL failover across a replacement primary and Redis read-path fallback are not established; tests cover active backend termination/retry, ingest fail-closed, actual lost Redis data recovery and breaker recovery.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "OPS-03",
+      "requirement": "Config change takes effect without redeploy and is audited",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/e2e/p13-admin-crud.spec.ts",
+          "test": "enforces super-admin configuration authority and audits typed settings and flags"
+        },
+        {
+          "file": "test/integration/identity/subscription-config.spec.ts",
+          "test": "validates related phase policies atomically before writing history or config"
+        }
+      ],
+      "missingCriteria": "Cross-role invalidation, frozen money snapshots and audit redaction need direct assertions.",
+      "criteria": [
+        {
+          "description": "enforces super-admin configuration authority and audits typed settings and flags",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/e2e/p13-admin-crud.spec.ts",
+              "test": "enforces super-admin configuration authority and audits typed settings and flags"
+            }
+          ]
+        },
+        {
+          "description": "validates related phase policies atomically before writing history or config",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/subscription-config.spec.ts",
+              "test": "validates related phase policies atomically before writing history or config"
+            }
+          ]
+        },
+        {
+          "description": "Cross-role invalidation, frozen money snapshots and audit redaction need direct assertions.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-01",
+      "requirement": "`bigint-wire.contract` :: values round-trip as decimal strings; unsafe gateway-number conversion fails before sending.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/unit/payments/gateway-contracts.spec.ts",
+          "test": "keeps paise as decimal strings and fences unsafe gateway conversions"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "keeps paise as decimal strings and fences unsafe gateway conversions",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/payments/gateway-contracts.spec.ts",
+              "test": "keeps paise as decimal strings and fences unsafe gateway conversions"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-02",
+      "requirement": "`role-route-isolation.api` :: all six roles boot; audience routes/gateways and webhook ingress appear only on intended roles; worker has only internal operational endpoints.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/runtime/real-roles.spec.ts",
+          "test": "boots %s with live dependency probes and isolates actual audience routes"
+        }
+      ],
+      "missingCriteria": "Webhooks, sockets and every role-specific endpoint require a complete isolation assertion.",
+      "criteria": [
+        {
+          "description": "boots %s with live dependency probes and isolates actual audience routes",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/runtime/real-roles.spec.ts",
+              "test": "boots %s with live dependency probes and isolates actual audience routes"
+            }
+          ]
+        },
+        {
+          "description": "Webhooks, sockets and every role-specific endpoint require a complete isolation assertion.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-03",
+      "requirement": "`outbox-fanout.int` :: one queue failing during fan-out does not lose another consumer's delivery or apply an effect twice.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/platform/outbox-recovery.spec.ts",
+          "test": "keeps fan-out obligations independent and fences a stale enqueue acknowledgement"
+        }
+      ],
+      "missingCriteria": "The cited test proves independent obligations but not concurrent transport failure of one consumer.",
+      "criteria": [
+        {
+          "description": "keeps fan-out obligations independent and fences a stale enqueue acknowledgement",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/platform/outbox-recovery.spec.ts",
+              "test": "keeps fan-out obligations independent and fences a stale enqueue acknowledgement"
+            }
+          ]
+        },
+        {
+          "description": "The cited test proves independent obligations but not concurrent transport failure of one consumer.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-04",
+      "requirement": "`idempotency-lease.conc` :: crash recovery/fencing cannot steal a live mutation or create a second business operation after cache expiry.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/concurrency/platform/idempotency.spec.ts",
+          "test": "serializes same-key claims and permanently fences the operation after response pruning"
+        },
+        {
+          "file": "test/concurrency/platform/idempotency.spec.ts",
+          "test": "does not steal an expired lease while a mutation holds the row lock"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "serializes same-key claims and permanently fences the operation after response pruning",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/platform/idempotency.spec.ts",
+              "test": "serializes same-key claims and permanently fences the operation after response pruning"
+            }
+          ]
+        },
+        {
+          "description": "does not steal an expired lease while a mutation holds the row lock",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/platform/idempotency.spec.ts",
+              "test": "does not steal an expired lease while a mutation holds the row lock"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-05",
+      "requirement": "`pool-email.int` :: identical normalized email is allowed across pools, unique within a pool; users never merge.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/identity/identity.spec.ts",
+          "test": "same email in separate pools remains distinct and stale workforce token cannot retain revoked role"
+        },
+        {
+          "file": "test/integration/identity/email-uniqueness.spec.ts",
+          "test": "enforces normalized email uniqueness within each identity pool without merging subjects"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "same email in separate pools remains distinct and stale workforce token cannot retain revoked role",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/identity.spec.ts",
+              "test": "same email in separate pools remains distinct and stale workforce token cannot retain revoked role"
+            }
+          ]
+        },
+        {
+          "description": "Same-pool normalized-email uniqueness prevents merging distinct identities.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/email-uniqueness.spec.ts",
+              "test": "enforces normalized email uniqueness within each identity pool without merging subjects"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-06",
+      "requirement": "`bootstrap-onboarding.api` :: missing-profile bootstrap and pending-rider document submission work without relaxing operational guards.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/identity/identity.spec.ts",
+          "test": "bootstrap is idempotent for the same verified pool and subject, and rejects blocked users"
+        },
+        {
+          "file": "test/integration/identity/private-media.spec.ts",
+          "test": "exposes onboarding upload and restricts reviewer access over HTTP"
+        },
+        {
+          "file": "test/integration/identity/identity.spec.ts",
+          "test": "rider review serializes concurrent approvals and accepts profile after documents"
+        }
+      ],
+      "missingCriteria": "Pending rider onboarding and customer bootstrap service paths are asserted; an HTTP onboarding request proving operational guard remains restrictive needs direct evidence.",
+      "criteria": [
+        {
+          "description": "bootstrap is idempotent for the same verified pool and subject, and rejects blocked users",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/identity.spec.ts",
+              "test": "bootstrap is idempotent for the same verified pool and subject, and rejects blocked users"
+            }
+          ]
+        },
+        {
+          "description": "exposes onboarding upload and restricts reviewer access over HTTP",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/private-media.spec.ts",
+              "test": "exposes onboarding upload and restricts reviewer access over HTTP"
+            }
+          ]
+        },
+        {
+          "description": "Pending rider registers documents and receives profile before approval.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/identity.spec.ts",
+              "test": "rider review serializes concurrent approvals and accepts profile after documents"
+            }
+          ]
+        },
+        {
+          "description": "Pending rider onboarding and customer bootstrap service paths are asserted; an HTTP onboarding request proving operational guard remains restrictive needs direct evidence.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-07",
+      "requirement": "`maker-checker.conc` :: self-approval, expired/version-changed payload and duplicate execution fail; successful approval executes the original use case exactly once.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/concurrency/identity/identity-concurrency.spec.ts",
+          "test": "maker-checker enforces current roles, immutable policy, expiration and one execution"
+        },
+        {
+          "file": "test/integration/compliance/approval-tampering.spec.ts",
+          "test": "rejects a tampered approval payload without executing or auditing approval"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Self approval, expired request, changed policy version and exactly-one execution",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/identity/identity-concurrency.spec.ts",
+              "test": "maker-checker enforces current roles, immutable policy, expiration and one execution"
+            }
+          ]
+        },
+        {
+          "description": "Tampered stored payload is rejected without execution or an approval audit.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/compliance/approval-tampering.spec.ts",
+              "test": "rejects a tampered approval payload without executing or auditing approval"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-08",
+      "requirement": "`address-default.conc` :: create/default/delete races leave exactly one default when any active address remains.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/serviceability/zone-address.spec.ts",
+          "test": "serializes concurrent defaults and retains one after delete"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "Create/default/delete race leaves one default",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/serviceability/zone-address.spec.ts",
+              "test": "serializes concurrent defaults and retains one after delete"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-09",
+      "requirement": "`maps-cost.contract` :: matrix calls use only configured top-K; repeated GPS pings trigger no unbounded directions/matrix calls.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/unit/serviceability/maps.spec.ts",
+          "test": "opens the breaker and falls back to haversine without provider calls per ping"
+        },
+        {
+          "file": "test/unit/serviceability/maps.spec.ts",
+          "test": "uses documented methods, parameters and numeric routing fields"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "opens the breaker and falls back to haversine without provider calls per ping",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/serviceability/maps.spec.ts",
+              "test": "opens the breaker and falls back to haversine without provider calls per ping"
+            }
+          ]
+        },
+        {
+          "description": "Matrix origin count over configured limit rejects before an extra provider call.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/serviceability/maps.spec.ts",
+              "test": "uses documented methods, parameters and numeric routing fields"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-10",
+      "requirement": "`private-media.api` :: another actor cannot register/read KYC, POD or private exports; content/size/purpose restrictions are enforced.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/identity/private-media.spec.ts",
+          "test": "limits upload to owner, expected type, size and one successful capability use"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "contactless POD must be privately uploaded by the assigned rider and bound to this task"
+        },
+        {
+          "file": "test/integration/compliance/admin-operations.spec.ts",
+          "test": "personal export streams privately, scopes downloads and excludes internal support notes"
+        }
+      ],
+      "missingCriteria": "Wrong actor for every KYC/POD/export operation and all media purpose limits need full route matrix.",
+      "criteria": [
+        {
+          "description": "limits upload to owner, expected type, size and one successful capability use",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/private-media.spec.ts",
+              "test": "limits upload to owner, expected type, size and one successful capability use"
+            }
+          ]
+        },
+        {
+          "description": "contactless POD must be privately uploaded by the assigned rider and bound to this task",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "contactless POD must be privately uploaded by the assigned rider and bound to this task"
+            }
+          ]
+        },
+        {
+          "description": "personal export streams privately, scopes downloads and excludes internal support notes",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/compliance/admin-operations.spec.ts",
+              "test": "personal export streams privately, scopes downloads and excludes internal support notes"
+            }
+          ]
+        },
+        {
+          "description": "Wrong actor for every KYC/POD/export operation and all media purpose limits need full route matrix.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-11",
+      "requirement": "`catalog-stock-bridge.int` :: P3 zero-stock assortment is visible as out of stock; P4 receipt adds matching on-hand and ledger balance.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/concurrency/inventory/reservation.spec.ts",
+          "test": "100 simultaneous attempts against ten units have exactly ten successes and reconcile"
+        }
+      ],
+      "missingCriteria": "Zero-stock catalog visibility then stock receipt bridging is not shown by reservation concurrency.",
+      "criteria": [
+        {
+          "description": "100 simultaneous attempts against ten units have exactly ten successes and reconcile",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/inventory/reservation.spec.ts",
+              "test": "100 simultaneous attempts against ten units have exactly ten successes and reconcile"
+            }
+          ]
+        },
+        {
+          "description": "Zero-stock catalog visibility then stock receipt bridging is not shown by reservation concurrency.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-12",
+      "requirement": "`perishable-allocation.conc` :: expired/quarantined/short-shelf-life stock cannot be promised; batch allocation reconciles with aggregate stock.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/concurrency/inventory/reservation.spec.ts",
+          "test": "FEFO and target shelf life; commit survives sweeper and pick releases shorts"
+        },
+        {
+          "file": "test/concurrency/inventory/reservation.spec.ts",
+          "test": "damaged allocated stock records a durable obligation and never violates reserved stock"
+        },
+        {
+          "file": "test/integration/inventory/quarantined-reservation.spec.ts",
+          "test": "never reserves quarantined stock even when the aggregate has sufficient units"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "FEFO and target shelf life; commit survives sweeper and pick releases shorts",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/inventory/reservation.spec.ts",
+              "test": "FEFO and target shelf life; commit survives sweeper and pick releases shorts"
+            }
+          ]
+        },
+        {
+          "description": "damaged allocated stock records a durable obligation and never violates reserved stock",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/inventory/reservation.spec.ts",
+              "test": "damaged allocated stock records a durable obligation and never violates reserved stock"
+            }
+          ]
+        },
+        {
+          "description": "Quarantined stock cannot be reserved and active batches are allocated instead.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/inventory/quarantined-reservation.spec.ts",
+              "test": "never reserves quarantined stock even when the aggregate has sufficient units"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-13",
+      "requirement": "`refund-allocation.conc` :: concurrent pending refunds and wallet reversals cannot refund more than funded or restore the same bucket twice.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/payments/inbox-integrity.spec.ts",
+          "test": "restores only each partial wallet refund once under concurrent retries"
+        }
+      ],
+      "missingCriteria": "Concurrent pending refund cap and mixed-bucket reversals need additional assertions.",
+      "criteria": [
+        {
+          "description": "restores only each partial wallet refund once under concurrent retries",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/payments/inbox-integrity.spec.ts",
+              "test": "restores only each partial wallet refund once under concurrent retries"
+            }
+          ]
+        },
+        {
+          "description": "Concurrent pending refund cap and mixed-bucket reversals need additional assertions.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-14",
+      "requirement": "`invoice-issue.conc` :: rollback consumes no committed document number; rendering failure reuses the issued number and immutable payload.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note"
+        },
+        {
+          "file": "test/integration/invoicing/financial-year-recovery.spec.ts",
+          "test": "separates IST fiscal-year invoice sequences and retries rendering without changing issued data"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note"
+            }
+          ]
+        },
+        {
+          "description": "Invoice rendering retries with the issued number and immutable payload.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/invoicing/financial-year-recovery.spec.ts",
+              "test": "separates IST fiscal-year invoice sequences and retries rendering without changing issued data"
+            }
+          ]
+        },
+        {
+          "description": "Invoice rendering retries with the issued number and immutable payload.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/invoicing/financial-year-recovery.spec.ts",
+              "test": "separates IST fiscal-year invoice sequences and retries rendering without changing issued data"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-15",
+      "requirement": "`delivery-code.int` :: authorized code retrieval survives process restart/key rotation, stores no plaintext, and attempt lockout remains effective.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/payments/delivery-code-reset.spec.ts",
+          "test": "requires an authorized audited reset before a locked delivery code can be verified"
+        },
+        {
+          "file": "test/integration/identity/delivery-code-rotation.spec.ts",
+          "test": "retains delivery code retrieval across restart and key rotation without storing plaintext"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "requires an authorized audited reset before a locked delivery code can be verified",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/payments/delivery-code-reset.spec.ts",
+              "test": "requires an authorized audited reset before a locked delivery code can be verified"
+            }
+          ]
+        },
+        {
+          "description": "A separate process retrieves the historical code after key rotation; verifiers omit plaintext and lockout survives service restart.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/identity/delivery-code-rotation.spec.ts",
+              "test": "retains delivery code retrieval across restart and key rotation without storing plaintext"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-16",
+      "requirement": "[Substitution race](../test/concurrency/picking/claim.spec.ts) :: `substitution_cannot_oversell_exactly_one_contending_reservation_wins`; [guards and reconciliation](../test/integration/picking/fulfillment.spec.ts) :: `substitution_guards_fail_closed_and_a_listed_swap_reconciles_reservations` (charge cap executes through the P6 adjustment contract).",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/concurrency/picking/claim.spec.ts",
+          "test": "substitution cannot oversell: exactly one contending reservation wins"
+        },
+        {
+          "file": "test/integration/picking/fulfillment.spec.ts",
+          "test": "substitution guards fail closed and a listed swap reconciles reservations"
+        }
+      ],
+      "missingCriteria": "An explicit substitution charge-cap rejection must be tied to the P6 adjustment contract; the concurrent stock race and candidate/barcode checks are tested.",
+      "criteria": [
+        {
+          "description": "substitution cannot oversell: exactly one contending reservation wins",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/picking/claim.spec.ts",
+              "test": "substitution cannot oversell: exactly one contending reservation wins"
+            }
+          ]
+        },
+        {
+          "description": "substitution guards fail closed and a listed swap reconciles reservations",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/picking/fulfillment.spec.ts",
+              "test": "substitution guards fail closed and a listed swap reconciles reservations"
+            }
+          ]
+        },
+        {
+          "description": "substitution guards fail closed and a listed swap reconciles reservations",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/picking/fulfillment.spec.ts",
+              "test": "substitution guards fail closed and a listed swap reconciles reservations"
+            }
+          ]
+        },
+        {
+          "description": "An explicit substitution charge-cap rejection must be tied to the P6 adjustment contract; the concurrent stock race and candidate/barcode checks are tested.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-17",
+      "requirement": "`geo-expiry.int` :: expired rider hash/stale heartbeat excludes a remaining GEO member from assignment.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/unit/riders/status.spec.ts",
+          "test": "location freshness gates dispatch candidates (D22/ADD-17)"
+        },
+        {
+          "file": "test/integration/tracking/geo-expiry.spec.ts",
+          "test": "excludes and prunes a stale GEO member after its freshness hash expires"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "location freshness gates dispatch candidates (D22/ADD-17)",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/riders/status.spec.ts",
+              "test": "location freshness gates dispatch candidates (D22/ADD-17)"
+            }
+          ]
+        },
+        {
+          "description": "An expired freshness hash excludes and prunes a stale GEO member in AWS Valkey.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/tracking/geo-expiry.spec.ts",
+              "test": "excludes and prunes a stale GEO member after its freshness hash expires"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-18",
+      "requirement": "`rider-capacity.conc` :: one rider accepting two different tasks cannot exceed configured task or COD cash limits.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/dispatch.spec.ts",
+          "test": "COD capacity uses the adjusted expected amount of existing assignments"
+        }
+      ],
+      "missingCriteria": "Concurrent accepts for different tasks and cash-limit serialization need direct race tests.",
+      "criteria": [
+        {
+          "description": "COD capacity uses the adjusted expected amount of existing assignments",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/dispatch.spec.ts",
+              "test": "COD capacity uses the adjusted expected amount of existing assignments"
+            }
+          ]
+        },
+        {
+          "description": "Concurrent accepts for different tasks and cash-limit serialization need direct race tests.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-19",
+      "requirement": "`location-sampling.int` :: timestamp ordering is atomic across ingest instances; 15-second OR 50-metre sampling and partition rollover work.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/dispatch.spec.ts",
+          "test": "GPS history samples from the last persisted point and rejects stale cross-instance writes"
+        },
+        {
+          "file": "test/integration/platform/runtime-privileges.spec.ts",
+          "test": "enforces the current retention policy and supports safe replay"
+        },
+        {
+          "file": "test/unit/tracking/integrity.spec.ts",
+          "test": "sampling persists on the interval OR the distance condition (ADD-19)"
+        }
+      ],
+      "missingCriteria": "Partition creation/retention replay is tested separately; rollover of live ingest across UTC midnight is not directly asserted.",
+      "criteria": [
+        {
+          "description": "Elapsed time OR travel distance sampling",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/tracking/integrity.spec.ts",
+              "test": "sampling persists on the interval OR the distance condition (ADD-19)"
+            }
+          ]
+        },
+        {
+          "description": "Cross-instance ordering",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/dispatch.spec.ts",
+              "test": "GPS history samples from the last persisted point and rejects stale cross-instance writes"
+            }
+          ]
+        },
+        {
+          "description": "Partition creation/retention replay is tested separately; rollover of live ingest across UTC midnight is not directly asserted.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-20",
+      "requirement": "`notification-transition.int` :: same delivery retry dedupes, but a distinct valid transition/version can notify again; ambiguous provider sends are tracked.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/notifications/notifications.spec.ts",
+          "test": "a replayed event creates one logical notification; a distinct transition notifies again"
+        },
+        {
+          "file": "test/integration/notifications/ambiguous-send.spec.ts",
+          "test": "records an ambiguous provider timeout and retries the same logical delivery"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "a replayed event creates one logical notification; a distinct transition notifies again",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/notifications/notifications.spec.ts",
+              "test": "a replayed event creates one logical notification; a distinct transition notifies again"
+            }
+          ]
+        },
+        {
+          "description": "A provider timeout is recorded and retried using the same logical delivery.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/notifications/ambiguous-send.spec.ts",
+              "test": "records an ambiguous provider timeout and retries the same logical delivery"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-21",
+      "requirement": "`generation-target-slot.int` :: closed-now/open-at-delivery store is evaluated correctly; slot capacity/reservations survive the ordinary payment TTL.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/serviceability/zone-address.spec.ts",
+          "test": "locks admin authority for configuration writes and evaluates target-slot hours"
+        }
+      ],
+      "missingCriteria": "Scheduled slot capacity and reservations surviving payment TTL need direct integration evidence.",
+      "criteria": [
+        {
+          "description": "locks admin authority for configuration writes and evaluates target-slot hours",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/serviceability/zone-address.spec.ts",
+              "test": "locks admin authority for configuration writes and evaluates target-slot hours"
+            }
+          ]
+        },
+        {
+          "description": "Scheduled slot capacity and reservations surviving payment TTL need direct integration evidence.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-22",
+      "requirement": "`subscription-occurrence.conc` :: occurrence conflict rolls back debit, stock and coupon changes; each skipped/retried date has one durable outcome.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/subscriptions/scheduled-checkout.spec.ts",
+          "test": "serializes simultaneous generation and records one occurrence, order and debit"
+        }
+      ],
+      "missingCriteria": "Occurrence conflict rollback of debit, stock and coupon in the same transaction needs direct evidence.",
+      "criteria": [
+        {
+          "description": "serializes simultaneous generation and records one occurrence, order and debit",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/subscriptions/scheduled-checkout.spec.ts",
+              "test": "serializes simultaneous generation and records one occurrence, order and debit"
+            }
+          ]
+        },
+        {
+          "description": "Occurrence conflict rollback of debit, stock and coupon in the same transaction needs direct evidence.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "ADD-23",
+      "requirement": "`payout-allocation.conc` :: duplicate batches/mark-paid retries never pay the same earning twice; negative net dues carry forward explicitly.",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/payouts/payouts.spec.ts",
+          "test": "rejects a stale approval, posts one offset and never treats it as a deposit"
+        },
+        {
+          "file": "test/concurrency/p13/payout-wallet.spec.ts",
+          "test": "concurrent payout drafting and mark-paid replay claim one earning and create one payment audit"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "rejects a stale approval, posts one offset and never treats it as a deposit",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/payouts/payouts.spec.ts",
+              "test": "rejects a stale approval, posts one offset and never treats it as a deposit"
+            }
+          ]
+        },
+        {
+          "description": "Focused test passed against real isolated PostgreSQL and Redis.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/p13/payout-wallet.spec.ts",
+              "test": "concurrent payout drafting and mark-paid replay claim one earning and create one payment audit"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ADD-24",
+      "requirement": "`admin-repair.int` :: approved force-state repair preserves stock, financial and custody invariants; raw arbitrary status writes are unavailable.",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/compliance/admin-operations.spec.ts",
+          "test": "fraud and reconciliation review is audited, role protected and has no money side effects"
+        }
+      ],
+      "missingCriteria": "A guarded force-state request endpoint and separate super-admin approval path exist; no reviewed end-to-end test yet demonstrates approved repair with stock, financial and custody invariants.",
+      "criteria": [
+        {
+          "description": "fraud and reconciliation review is audited, role protected and has no money side effects",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/compliance/admin-operations.spec.ts",
+              "test": "fraud and reconciliation review is audited, role protected and has no money side effects"
+            }
+          ]
+        },
+        {
+          "description": "A guarded force-state request endpoint and separate super-admin approval path exist; no reviewed end-to-end test yet demonstrates approved repair with stock, financial and custody invariants.",
+          "status": "missing",
+          "tests": []
+        },
+        {
+          "description": "Prepared repair approval, replay, stock/refund/custody and prohibited transition test; execution pending.",
+          "status": "pending",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "approved order repair restricts states and compensates stock without duplicate financial effects"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SYS-01",
+      "requirement": "No overselling; `0 ≤ reserved ≤ on_hand`",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/concurrency/inventory/reservation.spec.ts",
+          "test": "100 simultaneous attempts against ten units have exactly ten successes and reconcile"
+        },
+        {
+          "file": "test/integration/payments/checkout-customer-race.spec.ts",
+          "test": "two customer checkouts contend for the last unit and only one commits"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "100 simultaneous attempts against ten units have exactly ten successes and reconcile",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/inventory/reservation.spec.ts",
+              "test": "100 simultaneous attempts against ten units have exactly ten successes and reconcile"
+            }
+          ]
+        },
+        {
+          "description": "Customer checkout contention leaves one order and one unit reserved",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/payments/checkout-customer-race.spec.ts",
+              "test": "two customer checkouts contend for the last unit and only one commits"
+            }
+          ]
+        }
+      ],
+      "scopeNote": "Real customer checkout contention on the final unit, plus 100 parallel reservations and stock/ledger reconciliation, verify the stated invariant under contention."
+    },
+    {
+      "id": "SYS-02",
+      "requirement": "Inventory and wallet ledgers match balances",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "mixed wallet funding reverses its own buckets once and cannot also be refunded after cancellation"
+        },
+        {
+          "file": "test/concurrency/inventory/reservation.spec.ts",
+          "test": "100 simultaneous attempts against ten units have exactly ten successes and reconcile"
+        }
+      ],
+      "missingCriteria": "Cross-domain ledger-to-balance reconciliation across every lifecycle path is not established.",
+      "criteria": [
+        {
+          "description": "mixed wallet funding reverses its own buckets once and cannot also be refunded after cancellation",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "mixed wallet funding reverses its own buckets once and cannot also be refunded after cancellation"
+            }
+          ]
+        },
+        {
+          "description": "100 simultaneous attempts against ten units have exactly ten successes and reconcile",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/inventory/reservation.spec.ts",
+              "test": "100 simultaneous attempts against ten units have exactly ten successes and reconcile"
+            }
+          ]
+        },
+        {
+          "description": "Cross-domain ledger-to-balance reconciliation across every lifecycle path is not established.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "SYS-03",
+      "requirement": "Order totals reconcile to the paisa",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/unit/pricing/pricing.spec.ts",
+          "test": "totals reconcile exactly, allocations sum, and no amount is negative or created"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "totals reconcile exactly, allocations sum, and no amount is negative or created",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/unit/pricing/pricing.spec.ts",
+              "test": "totals reconcile exactly, allocations sum, and no amount is negative or created"
+            }
+          ]
+        }
+      ],
+      "scopeNote": "The randomized integer pricing property verifies item/fee totals, tax and discount allocation reconcile to a paisa."
+    },
+    {
+      "id": "SYS-04",
+      "requirement": "Applied funding is unique and refunds do not exceed captured funds",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "additional distinct captures are refundable once and cannot refund a different order"
+        },
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "approved manual refunds enforce separate identities, stable effects, and the paid source cap"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "additional distinct captures are refundable once and cannot refund a different order",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "additional distinct captures are refundable once and cannot refund a different order"
+            }
+          ]
+        },
+        {
+          "description": "approved manual refunds enforce separate identities, stable effects, and the paid source cap",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "approved manual refunds enforce separate identities, stable effects, and the paid source cap"
+            }
+          ]
+        }
+      ],
+      "scopeNote": "Distinct capture replay and cross-order refund denial, combined with approved refund cap and retry, verify unique applied funding and paid-source cap."
+    },
+    {
+      "id": "SYS-05",
+      "requirement": "One active rider per task and bounded tasks per rider",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/dispatch/dispatch.spec.ts",
+          "test": "COD capacity uses the adjusted expected amount of existing assignments"
+        },
+        {
+          "file": "test/concurrency/p13/rider-accept.spec.ts",
+          "test": "serializes two riders accepting offers for one task with a single assignment and one capacity charge"
+        }
+      ],
+      "missingCriteria": "The separate race of one rider accepting two distinct tasks against configured capacity remains untested.",
+      "criteria": [
+        {
+          "description": "COD capacity uses the adjusted expected amount of existing assignments",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/dispatch.spec.ts",
+              "test": "COD capacity uses the adjusted expected amount of existing assignments"
+            }
+          ]
+        },
+        {
+          "description": "Two contending offers yield one task assignment and one capacity charge.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/p13/rider-accept.spec.ts",
+              "test": "serializes two riders accepting offers for one task with a single assignment and one capacity charge"
+            }
+          ]
+        },
+        {
+          "description": "The separate race of one rider accepting two distinct tasks against configured capacity remains untested.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "SYS-06",
+      "requirement": "At most one active delivery and pick task per order",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/picking/picking.spec.ts",
+          "test": "the confirmation consumer creates exactly one task per order with walk-ordered items"
+        },
+        {
+          "file": "test/integration/dispatch/dispatch.spec.ts",
+          "test": "the confirmation consumer creates exactly one task per order with a delivery code (SYS-06)"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "the confirmation consumer creates exactly one task per order with walk-ordered items",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/picking/picking.spec.ts",
+              "test": "the confirmation consumer creates exactly one task per order with walk-ordered items"
+            }
+          ]
+        },
+        {
+          "description": "the confirmation consumer creates exactly one task per order with a delivery code (SYS-06)",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/dispatch/dispatch.spec.ts",
+              "test": "the confirmation consumer creates exactly one task per order with a delivery code (SYS-06)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SYS-07",
+      "requirement": "Coupon limits never exceeded",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/concurrency/coupons/redemption.spec.ts",
+          "test": "50 parallel attempts for a 10-use coupon reserve exactly ten across users and devices"
+        },
+        {
+          "file": "test/concurrency/coupons/redemption.spec.ts",
+          "test": "per-user limits hold under a same-user device storm"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "50 parallel attempts for a 10-use coupon reserve exactly ten across users and devices",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/coupons/redemption.spec.ts",
+              "test": "50 parallel attempts for a 10-use coupon reserve exactly ten across users and devices"
+            }
+          ]
+        },
+        {
+          "description": "per-user limits hold under a same-user device storm",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/concurrency/coupons/redemption.spec.ts",
+              "test": "per-user limits hold under a same-user device storm"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SYS-08",
+      "requirement": "State/history/event persist together",
+      "status": "partial",
+      "tests": [
+        {
+          "file": "test/integration/platform/outbox-recovery.spec.ts",
+          "test": "rolls back an event and aggregate mutation together"
+        }
+      ],
+      "missingCriteria": "Rollback of every aggregate transition/history/event family is not established by one outbox test.",
+      "criteria": [
+        {
+          "description": "rolls back an event and aggregate mutation together",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/platform/outbox-recovery.spec.ts",
+              "test": "rolls back an event and aggregate mutation together"
+            }
+          ]
+        },
+        {
+          "description": "Rollback of every aggregate transition/history/event family is not established by one outbox test.",
+          "status": "missing",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "SYS-09",
+      "requirement": "Gapless unique issued invoice numbers, immutable documents",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/commerce/journeys.spec.ts",
+          "test": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note"
+        },
+        {
+          "file": "test/integration/invoicing/financial-year-recovery.spec.ts",
+          "test": "separates IST fiscal-year invoice sequences and retries rendering without changing issued data"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/commerce/journeys.spec.ts",
+              "test": "invoice rollback and concurrent issuance consume one number, and a later refund creates one immutable credit note"
+            }
+          ]
+        },
+        {
+          "description": "Invoice rendering retries with the issued number and immutable payload.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/invoicing/financial-year-recovery.spec.ts",
+              "test": "separates IST fiscal-year invoice sequences and retries rendering without changing issued data"
+            }
+          ]
+        },
+        {
+          "description": "Invoice rendering retries with the issued number and immutable payload.",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/invoicing/financial-year-recovery.spec.ts",
+              "test": "separates IST fiscal-year invoice sequences and retries rendering without changing issued data"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SYS-10",
+      "requirement": "One subscription order per delivery date",
+      "status": "covered",
+      "tests": [
+        {
+          "file": "test/integration/subscriptions/scheduled-checkout.spec.ts",
+          "test": "serializes simultaneous generation and records one occurrence, order and debit"
+        }
+      ],
+      "criteria": [
+        {
+          "description": "serializes simultaneous generation and records one occurrence, order and debit",
+          "status": "covered",
+          "tests": [
+            {
+              "file": "test/integration/subscriptions/scheduled-checkout.spec.ts",
+              "test": "serializes simultaneous generation and records one occurrence, order and debit"
+            }
+          ]
+        }
+      ],
+      "scopeNote": "Simultaneous generation and replay assert one occurrence, one order, one debit and one reserved unit per date."
+    }
+  ]
+}

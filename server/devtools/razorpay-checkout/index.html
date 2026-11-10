@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Razorpay test checkout</title>
+    <style>
+      body {
+        font: 16px system-ui;
+        max-width: 38rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+      }
+      label {
+        display: block;
+        margin: 1rem 0;
+      }
+      input,
+      textarea,
+      button {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 0.6rem;
+      }
+      textarea {
+        height: 6rem;
+      }
+      button {
+        cursor: pointer;
+      }
+      pre {
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Razorpay test checkout</h1>
+    <p>
+      Use a test customer access token, an existing nonempty cart, and a serviceable address ID. The
+      amount is calculated by the backend.
+    </p>
+    <label>Customer access token<textarea id="token" autocomplete="off"></textarea></label>
+    <label>Address ID<input id="address" autocomplete="off" /></label>
+    <button id="pay">Pay with Razorpay</button>
+    <button id="check" disabled>Check order status</button>
+    <pre id="status" role="status" aria-live="polite"></pre>
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <script src="/checkout.js"></script>
+  </body>
+</html>

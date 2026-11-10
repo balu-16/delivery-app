@@ -9,6 +9,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: server
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -18,6 +21,7 @@ jobs:
         with:
           node-version: 26.13.0
           cache: pnpm
+          cache-dependency-path: server/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Lint and boundaries
@@ -51,17 +55,20 @@ jobs:
         if: always()
         with:
           name: verification-logs
-          path: artifacts/
+          path: server/artifacts/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: success()
         with:
           name: openapi
-          path: openapi/
+          path: server/openapi/
           if-no-files-found: error
   container:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: server
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -71,6 +78,7 @@ jobs:
         with:
           node-version: 26.13.0
           cache: pnpm
+          cache-dependency-path: server/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - name: Build and rehearse immutable application image
         run: |
@@ -91,11 +99,14 @@ jobs:
         if: always()
         with:
           name: container-logs
-          path: artifacts/
+          path: server/artifacts/
           if-no-files-found: error
   load-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: server
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -105,6 +116,7 @@ jobs:
         with:
           node-version: 26.13.0
           cache: pnpm
+          cache-dependency-path: server/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm load:install
@@ -117,11 +129,11 @@ jobs:
         with:
           name: load-smoke-reports
           path: |
-            artifacts/p13-load/**/report.json
-            artifacts/p13-load/**/summary.json
-            artifacts/p13-load/**/console.log
-            artifacts/p13-load/orchestrator-*.json
-            artifacts/p13-load/run.json
-            artifacts/p13-load/sockets-*.json
-            artifacts/p13-load/outbox-*.json
+            server/artifacts/p13-load/**/report.json
+            server/artifacts/p13-load/**/summary.json
+            server/artifacts/p13-load/**/console.log
+            server/artifacts/p13-load/orchestrator-*.json
+            server/artifacts/p13-load/run.json
+            server/artifacts/p13-load/sockets-*.json
+            server/artifacts/p13-load/outbox-*.json
           if-no-files-found: error
