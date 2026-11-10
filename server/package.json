@@ -46,7 +46,7 @@
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "3.1162.0",
     "@aws-sdk/client-s3": "3.1162.0",
-    "@aws-sdk/client-sesv2": "^3.1163.0",
+    "@aws-sdk/client-sesv2": "^3.1164.0",
     "@aws-sdk/client-sqs": "3.1162.0",
     "@aws-sdk/credential-provider-ini": "3.973.26",
     "@aws-sdk/credential-provider-node": "3.972.93",
