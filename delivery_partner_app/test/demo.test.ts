@@ -38,6 +38,25 @@ test("old saved state migrates without losing events", () => {
   expect(() => migrateDemo(null, 0)).toThrow();
 });
 
+test("migration changes the old Telugu default without losing route data", () => {
+  const old = {
+    events: [{ id: "one", kind: "hub", at: 1 }],
+    drafts: { "stop-1": { bottles: "1", cash: "" } },
+    language: "te",
+  };
+  expect(migrateDemo(old, 2)).toEqual({ ...old, language: "en" });
+  expect(migrateDemo({ ...old, language: "hi" }, 2).language).toBe("hi");
+  expect(migrateDemo({ ...old, language: "kn" }, 2).language).toBe("kn");
+});
+
+test("a Telugu selection after migration survives hydration", async () => {
+  useDemo.getState().setLanguage("te");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await useDemo.persist.rehydrate();
+  expect(useDemo.getState().language).toBe("te");
+  useDemo.getState().setLanguage("en");
+});
+
 test("cash handovers cannot overdraw and duplicate collections do not add cash", () => {
   const store = useDemo.getState();
   store.record({
@@ -56,6 +75,30 @@ test("cash handovers cannot overdraw and duplicate collections do not add cash",
   store.record({ id: "receipt-1", kind: "cash-handover", amount: 4000 });
   store.record({ id: "receipt-1", kind: "cash-handover", amount: 4000 });
   expect(cashBalance(useDemo.getState().events)).toBe(7000);
+});
+
+test("invalid cash amounts cannot enter the simulated ledger", () => {
+  const store = useDemo.getState();
+  store.record({
+    id: "negative",
+    kind: "cash-collected",
+    stopId: "one",
+    amount: -1,
+  });
+  store.record({
+    id: "fraction",
+    kind: "cash-collected",
+    stopId: "two",
+    amount: 1.5,
+  });
+  store.record({
+    id: "non-finite",
+    kind: "cash-collected",
+    stopId: "three",
+    amount: Infinity,
+  });
+  expect(useDemo.getState().events).toHaveLength(0);
+  expect(cashBalance(useDemo.getState().events)).toBe(0);
 });
 test("demo sync retains pending events across a simulated conflict until retried", () => {
   useDemo.getState().setSignal(false);

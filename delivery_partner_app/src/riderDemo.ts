@@ -1,5 +1,11 @@
 import type { components } from "./rider-api.generated";
-import { canAcceptCash, lastActiveOffer, pendingCash } from "./domain";
+import {
+  canAcceptCash,
+  canOfferDuringRoute,
+  hasOpenIssue,
+  lastActiveOffer,
+  pendingCash,
+} from "./domain";
 import { has, stops, useDemo } from "./store";
 
 type Schemas = components["schemas"];
@@ -90,8 +96,8 @@ export const riderDemo: RiderTransport = {
     return active?.stopId ? taskView(active.stopId) : null;
   },
   async accept(offerId, actionId) {
-    const state = useDemo.getState();
-    const previous = state.events.find((e) => e.id === actionId);
+    const initial = useDemo.getState();
+    const previous = initial.events.find((e) => e.id === actionId);
     if (previous) {
       if (previous.kind !== "offer-accepted" || previous.stopId !== offerId)
         throw new Error("IDEMPOTENCY_CONFLICT");
@@ -100,7 +106,30 @@ export const riderDemo: RiderTransport = {
     const offer = (await this.offers()).items.find(
       (item) => item.offerId === offerId,
     );
-    if (!offer || !state.signal || lastActiveOffer(state.events))
+    // Re-read after the asynchronous offer lookup so another accept cannot
+    // consume the same offer between the lookup and the state update.
+    const state = useDemo.getState();
+    const replay = state.events.find((event) => event.id === actionId);
+    if (replay) {
+      if (replay.kind !== "offer-accepted" || replay.stopId !== offerId)
+        throw new Error("IDEMPOTENCY_CONFLICT");
+      return taskView(offerId);
+    }
+    const now = Date.now() + state.clockOffset;
+    const availability = state.events
+      .filter((event) => event.kind === "availability")
+      .at(-1)?.data;
+    if (
+      !offer ||
+      state.offerId !== offerId ||
+      !state.offerExpiresAt ||
+      state.offerExpiresAt <= now ||
+      !state.signal ||
+      availability !== "online" ||
+      hasOpenIssue(state.events) ||
+      lastActiveOffer(state.events) ||
+      !canOfferDuringRoute(state.events, stops, now, state.offersDuringRoute)
+    )
       throw new Error("OFFER_UNAVAILABLE");
     const held = state.events.reduce(
       (n, e) =>
@@ -163,6 +192,14 @@ export const riderDemo: RiderTransport = {
       FAILED: "ARRIVED",
     };
     if (current !== expected[status]) throw new Error("TASK_STATE_INVALID");
+    if (
+      status === "FAILED" &&
+      (!proof ||
+        !("reason" in proof) ||
+        !proof.reason.trim() ||
+        proof.reason.length > 300)
+    )
+      throw new Error("INVALID_FAILURE_REASON");
     if (
       status === "DELIVERED" &&
       (!proof || !("deliveryCode" in proof) || proof.deliveryCode !== "1234")

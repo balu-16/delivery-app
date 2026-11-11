@@ -24,6 +24,26 @@ it('publishes safe current domain codes and the actual problem media type', asyn
       },
     });
     expect(doc.paths['/v1/customer/webhooks/payments/{gateway}']?.post?.security).toEqual([]);
+    const createAddress = doc.paths['/v1/customer/addresses']?.post?.requestBody;
+    expect(
+      createAddress &&
+        !('$ref' in createAddress) &&
+        createAddress.content?.['application/json']?.schema,
+    ).toEqual({
+      $ref: '#/components/schemas/CustomerAddressDto',
+    });
+    const addressSchema = doc.components?.schemas?.['CustomerAddressDto'];
+    expect(addressSchema && !('$ref' in addressSchema) && addressSchema.required).toEqual(
+      expect.arrayContaining(['line1', 'pincode', 'contactName', 'contactPhone', 'lat', 'lng']),
+    );
+    const changeAddress = doc.paths['/v1/customer/orders/{orderId}/address']?.patch?.requestBody;
+    expect(
+      changeAddress &&
+        !('$ref' in changeAddress) &&
+        changeAddress.content?.['application/json']?.schema,
+    ).toEqual({
+      $ref: '#/components/schemas/ChangeOrderAddressDto',
+    });
   } finally {
     await app.close();
   }

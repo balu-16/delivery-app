@@ -118,6 +118,21 @@ describe('largest-remainder allocation', () => {
 });
 
 describe('fees', () => {
+  it('combines a referral delivery waiver with a merchandise coupon', () => {
+    const totals = computeQuote({
+      lines: [line()],
+      coupon: { kind: 'FLAT', value: 2000n, maxCapPaise: null },
+      referralFreeDelivery: true,
+      tipPaise: 0n,
+      fees: baseFees(),
+      wallet: null,
+      minOrderPaise: 0n,
+      maxOrderPaise: 100000000n,
+    });
+    expect(totals.discountPaise).toBe(2000n);
+    expect(totals.deliveryFeeWaived).toBe(true);
+    expect(totals.fees.find((fee) => fee.kind === 'DELIVERY')).toBeUndefined();
+  });
   it('delivery fee follows the slab on post-discount merchandise value', () => {
     expect(deliveryFee(20000n, baseFees())).toBe(4000n);
     expect(deliveryFee(20001n, baseFees())).toBe(2000n);

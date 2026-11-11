@@ -27,7 +27,7 @@ pnpm install --frozen-lockfile
 pnpm exec expo start --go
 ```
 
-Open the displayed QR code with an Expo Go installation compatible with the app's Expo SDK. The mobile app currently uses local demo data.
+Open the displayed QR code with an Expo Go installation compatible with the app's Expo SDK. The shopping screens currently use local demo data. A read-only connected preview is available from Profile; see the [customer app setup](milk_app/README.md).
 
 ## Run the delivery-partner demo
 

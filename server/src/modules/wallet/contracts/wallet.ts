@@ -56,8 +56,8 @@ export interface WalletSpender {
   /**
    * Restores the original buckets of one spend exactly once, preserving
    * provenance; promo returns to its original lot while unexpired, otherwise
-   * to a fresh lot that does not expire (documented in ADR 0008 and the
-   * infrastructure implementation).
+   * to a fresh lot that does not expire. Referral grants retain their
+   * original expiry and are immediately expired if restored after it.
    */
   reverseSpend(
     reference: string,
@@ -71,7 +71,7 @@ export interface WalletSpender {
     reason: WalletReason;
     refType: string;
     refId: string;
-    /** Promo grants may carry an expiry; reversal lots never expire. */
+    /** Promo grants may carry an expiry. */
     expiresAt?: string;
     tx?: TransactionContext;
   }): Promise<boolean>;

@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Crypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
 import Animated, {
@@ -33,14 +34,20 @@ import { TabView } from "react-native-tab-view";
 import {
   attemptCount,
   canAcceptCash,
+  canOfferDuringRoute,
   distancePassed,
   DEMO_CASH_LIMIT,
   hasOpenIssue,
+  hubReturnUnits,
   isResolved,
+  isValidCount,
   lastActiveOffer,
   MIN_CONTACT_ATTEMPTS,
   OFFER_DURATION_MS,
+  openPickupIssue,
   pendingCash,
+  pendingAttemptReviews,
+  pickupAffectedStops,
   waitRemaining,
 } from "../src/domain";
 import {
@@ -190,7 +197,16 @@ function Progress({ value }: { value: number }) {
   );
 }
 function Card({ children }: { children: React.ReactNode }) {
-  return <View style={s.card}>{children}</View>;
+  return (
+    <View style={s.card}>
+      <LinearGradient
+        pointerEvents="none"
+        colors={["#FFFCF6", "#FBF4E8"]}
+        style={StyleSheet.absoluteFill}
+      />
+      {children}
+    </View>
+  );
 }
 function Heading({ title, sub }: { title: string; sub?: string }) {
   return (
@@ -201,7 +217,7 @@ function Heading({ title, sub }: { title: string; sub?: string }) {
   );
 }
 function Onboarding() {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const list = useRef<FlatList>(null);
   const [index, setIndex] = useState(0);
   const done = useDemo((x) => x.setOnboarded);
@@ -243,7 +259,11 @@ function Onboarding() {
                     ? images.cart
                     : images.crate
               }
-              style={{ width: "100%", height: 330, borderRadius: 28 }}
+              style={{
+                width: "100%",
+                height: Math.max(150, Math.min(330, height * 0.38)),
+                borderRadius: 28,
+              }}
               contentFit="cover"
             />
             <Text style={s.heroTitle}>{item[0]}</Text>
@@ -294,18 +314,26 @@ export default function Home() {
     title: string;
     items: { label: string; action: () => void }[];
   } | null>(null);
+  const needsSecondUpdates =
+    state.offerExpiresAt !== null ||
+    state.events.some(
+      (event) =>
+        event.kind === "arrived" &&
+        event.stopId &&
+        !isResolved(state.events, event.stopId),
+    );
   useEffect(() => {
     if (!state.hydrated) return;
     const initial = setTimeout(() => setNow(Date.now() + state.clockOffset), 0);
     const timer = setInterval(
       () => setNow(Date.now() + state.clockOffset),
-      1000,
+      needsSecondUpdates ? 1000 : 60000,
     );
     return () => {
       clearTimeout(initial);
       clearInterval(timer);
     };
-  }, [state.hydrated, state.clockOffset]);
+  }, [state.hydrated, state.clockOffset, needsSecondUpdates]);
   if (!state.hydrated)
     return (
       <View style={s.loading}>
@@ -343,11 +371,7 @@ export default function Home() {
     failed = ev.filter((e) =>
       ["failed", "transferred"].includes(e.kind),
     ).length,
-    failedUnits = stops
-      .filter(
-        (item) => has(ev, "failed", item.id) || has(ev, "transferred", item.id),
-      )
-      .reduce((total, item) => total + item.units, 0);
+    failedUnits = hubReturnUnits(ev, stops);
   const balance = cashBalance(ev),
     completed = has(ev, "route-completed"),
     availability =
@@ -357,6 +381,7 @@ export default function Home() {
   const jobId = activeOffer?.stopId;
   const jobHas = (kind: string) => !!jobId && has(ev, kind, jobId);
   const issueOpen = hasOpenIssue(ev);
+  const pickupIssue = openPickupIssue(ev);
   const pickupItems = [
     { id: "hub-milk", label: "Milk bottles · 7" },
     { id: "hub-chilled", label: "Chilled dairy · 2 packs" },
@@ -370,20 +395,23 @@ export default function Home() {
       .at(-1)?.kind === "hub-check";
   const offerLive =
     now > 0 && state.offerExpiresAt !== null && state.offerExpiresAt > now;
-  const deadline =
-    (ev.find((e) => e.kind === "route-start")?.at ?? now) +
-    (next?.windowMinutes ?? 120) * 60000;
-  const offerFits = !picked || !next || now + 360000 <= deadline;
+  const offerFits = canOfferDuringRoute(
+    ev,
+    stops,
+    now,
+    state.offersDuringRoute,
+  );
   const cashFits = canAcceptCash(
     balance,
     pendingCash(ev, stops),
     state.offerCash,
   );
-  const offerVisible = (!picked || state.offersDuringRoute) && offerFits;
+  const offerVisible = offerFits;
   const offerAllowed =
     state.signal &&
     availability === "online" &&
     !detour &&
+    !issueOpen &&
     offerVisible &&
     cashFits;
   const pending = ev.filter((e) => e.pending).length;
@@ -466,6 +494,10 @@ export default function Home() {
       showAlert("Demo proof required", "Confirm the demo code first.");
       return;
     }
+    if (!isValidCount(state.drafts[item.id]?.bottles ?? "", true)) {
+      showAlert("Check bottle count", "Enter a whole number from 0 to 999.");
+      return;
+    }
     record(
       "delivered",
       item.id,
@@ -485,6 +517,10 @@ export default function Home() {
         "Arrival required",
         "Finish any detour and mark arrival first.",
       );
+      return;
+    }
+    if (!isValidCount(state.drafts[item.id]?.bottles ?? "", true)) {
+      showAlert("Check bottle count", "Enter a whole number from 0 to 999.");
       return;
     }
     const options =
@@ -576,7 +612,9 @@ export default function Home() {
           </Pressable>
           <Pressable
             onPress={() => setPanel("notifications")}
+            accessibilityRole="button"
             accessibilityLabel="Open demo notifications"
+            hitSlop={10}
           >
             <Ionicons name="notifications-outline" size={24} color={dark} />
           </Pressable>
@@ -625,6 +663,16 @@ export default function Home() {
                     style={StyleSheet.absoluteFill}
                     contentFit="cover"
                   />
+                  <LinearGradient
+                    colors={[
+                      "rgba(255,249,239,0.98)",
+                      "rgba(255,249,239,0.84)",
+                      "rgba(255,249,239,0)",
+                    ]}
+                    start={{ x: 0, y: 0.5 }}
+                    end={{ x: 1, y: 0.5 }}
+                    style={StyleSheet.absoluteFill}
+                  />
                   <View style={s.heroPanel}>
                     <Text style={s.eyebrow}>VIJAYAWADA · DEMO</Text>
                     <Text style={s.heroText}>Good morning, partner</Text>
@@ -645,16 +693,17 @@ export default function Home() {
                   <View style={s.row}>
                     <Button
                       title={t.online}
+                      secondary={availability !== "online"}
                       onPress={() => setAvailability("online")}
                     />
                     <Button
                       title={t.break}
-                      secondary
+                      secondary={availability !== "break"}
                       onPress={() => setAvailability("break")}
                     />
                     <Button
                       title={t.offline}
-                      secondary
+                      secondary={availability !== "offline"}
                       onPress={() => setAvailability("offline")}
                     />
                   </View>
@@ -987,7 +1036,7 @@ export default function Home() {
                 <>
                   <Heading
                     title="Your morning route"
-                    sub="A calm start to every doorstep"
+                    sub="Your stops and pickup"
                   />
                   <Card>
                     <View style={s.map}>
@@ -1102,8 +1151,7 @@ export default function Home() {
                           title="Confirm pickup"
                           disabled={
                             pickupItems.some((item) => !itemChecked(item.id)) ||
-                            (has(ev, "pickup-issue") &&
-                              !has(ev, "pickup-resolved"))
+                            !!pickupIssue
                           }
                           onPress={() =>
                             record("pickup", undefined, undefined, true)
@@ -1122,35 +1170,47 @@ export default function Home() {
                               ].map((r) => ({
                                 label: r,
                                 action: () =>
-                                  record("pickup-issue", undefined, {
-                                    reason: r,
+                                  setChoices({
+                                    title: "Which item is affected?",
+                                    items: [
+                                      { label: "Milk bottles", item: "milk" },
+                                      { label: "Curd", item: "curd" },
+                                      { label: "Paneer", item: "paneer" },
+                                      {
+                                        label: "Delivery crates",
+                                        item: "crates",
+                                      },
+                                    ].map(({ label, item }) => ({
+                                      label,
+                                      action: () =>
+                                        record("pickup-issue", undefined, {
+                                          reason: r,
+                                          data: item,
+                                        }),
+                                    })),
                                   }),
                               })),
                             })
                           }
                         />
-                        {has(ev, "pickup-issue") &&
-                          !has(ev, "pickup-resolved") && (
-                            <>
-                              <Text style={s.body}>
-                                Affected stops:{" "}
-                                {remaining.map((x) => x.name).join(", ")}.
-                                Pickup is paused pending demo operations.
-                              </Text>
-                              <Button
-                                title="Simulate operations resolution"
-                                secondary
-                                onPress={() =>
-                                  record(
-                                    "pickup-resolved",
-                                    undefined,
-                                    undefined,
-                                    true,
-                                  )
-                                }
-                              />
-                            </>
-                          )}
+                        {pickupIssue && (
+                          <>
+                            <Text style={s.body}>
+                              Affected stops:{" "}
+                              {pickupAffectedStops(pickupIssue, remaining)
+                                .map((x) => x.name)
+                                .join(", ")}
+                              . Pickup is paused pending demo operations.
+                            </Text>
+                            <Button
+                              title="Simulate operations resolution"
+                              secondary
+                              onPress={() =>
+                                record("pickup-resolved", undefined, undefined)
+                              }
+                            />
+                          </>
+                        )}
                       </>
                     ) : (
                       <Text style={s.success}>✓ Pickup confirmed</Text>
@@ -1509,6 +1569,18 @@ export default function Home() {
                             secondary
                             onPress={() => {
                               if (
+                                !isValidCount(
+                                  state.drafts[stop.id]?.bottles ?? "",
+                                  true,
+                                )
+                              ) {
+                                showAlert(
+                                  "Check bottle count",
+                                  "Enter a whole number from 0 to 999.",
+                                );
+                                return;
+                              }
+                              if (
                                 stop.type !== "silent" &&
                                 (waitRemaining(ev, stop.id, now) > 0 ||
                                   attemptCount(ev, stop.id) <
@@ -1552,7 +1624,7 @@ export default function Home() {
                         value={crateCount}
                         onChangeText={setCrateCount}
                       />
-                      {(returned > 0 || failed > 0) &&
+                      {(returned > 0 || failedUnits > 0) &&
                         !has(ev, "reconciled") && (
                           <>
                             <TextInput
@@ -1573,13 +1645,13 @@ export default function Home() {
                               title="Confirm demo reconciliation"
                               onPress={() => {
                                 if (
-                                  bottleCount === "" ||
-                                  returnCount === "" ||
-                                  crateCount === ""
+                                  !isValidCount(bottleCount) ||
+                                  !isValidCount(returnCount) ||
+                                  !isValidCount(crateCount)
                                 ) {
                                   showAlert(
                                     "Counts required",
-                                    "Enter all counts before reconciling.",
+                                    "Enter whole-number counts from 0 to 999.",
                                   );
                                   return;
                                 }
@@ -1635,8 +1707,8 @@ export default function Home() {
                       <Button
                         title="Complete route"
                         disabled={
-                          crateCount === "" ||
-                          ((returned > 0 || failed > 0) &&
+                          !isValidCount(crateCount) ||
+                          ((returned > 0 || failedUnits > 0) &&
                             !has(ev, "reconciled")) ||
                           (balance > 0 && !has(ev, "cash-shortfall"))
                         }
@@ -1736,6 +1808,11 @@ export default function Home() {
                   <Text style={s.muted}>
                     Includes demo delivery and attempt fees
                   </Text>
+                  {pendingAttemptReviews(ev) > 0 && (
+                    <Text style={s.muted}>
+                      Attempt fees pending review: {pendingAttemptReviews(ev)}
+                    </Text>
+                  )}
                 </Card>
                 <Card>
                   <Heading title="Cash in hand" sub="Separate from earnings" />
@@ -1759,7 +1836,11 @@ export default function Home() {
                     disabled={balance <= 0}
                     onPress={() => {
                       const amount = Math.round(Number(cashInput) * 100);
-                      if (amount <= 0 || amount > balance) {
+                      if (
+                        !Number.isSafeInteger(amount) ||
+                        amount <= 0 ||
+                        amount > balance
+                      ) {
                         showAlert(
                           "Check amount",
                           "Enter an amount up to the cash held.",
@@ -1883,8 +1964,8 @@ export default function Home() {
                   />
                   <View style={s.row}>
                     {[
-                      ["te", "తెలుగు"],
                       ["en", "English"],
+                      ["te", "తెలుగు"],
                       ["hi", "हिन्दी"],
                       ["kn", "ಕನ್ನಡ"],
                     ].map(([id, label]) => (
@@ -2039,7 +2120,15 @@ export default function Home() {
         animationType="slide"
         onRequestClose={() => setPanel(null)}
       >
-        <View style={s.backdrop}>
+        <View style={panel === "notifications" ? s.clearBackdrop : s.backdrop}>
+          {panel === "notifications" && (
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => setPanel(null)}
+              accessibilityRole="button"
+              accessibilityLabel="Close notifications"
+            />
+          )}
           <View style={s.choiceSheet}>
             <Text style={s.title}>
               {panel === "support"
@@ -2244,9 +2333,31 @@ export default function Home() {
                 <Text style={s.muted}>
                   These updates are generated on this device.
                 </Text>
+                {!ev.some((e) =>
+                  [
+                    "pickup-issue",
+                    "issue",
+                    "offer-accepted",
+                    "reconciliation-issue",
+                    "route-completed",
+                  ].includes(e.kind),
+                ) && <Text style={s.body}>No updates yet.</Text>}
                 <Button
                   title="Mark all demo notifications read"
                   secondary
+                  disabled={
+                    !ev.some(
+                      (e) =>
+                        [
+                          "pickup-issue",
+                          "issue",
+                          "offer-accepted",
+                          "reconciliation-issue",
+                          "route-completed",
+                        ].includes(e.kind) &&
+                        !has(ev, "notification-read", e.id),
+                    )
+                  }
                   onPress={() =>
                     ev
                       .filter((e) =>
@@ -2346,7 +2457,12 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  brand: { fontSize: 21, fontWeight: "800", color: dark },
+  brand: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 21,
+    fontWeight: "700",
+    color: dark,
+  },
   muted: { fontSize: 12, color: muted, lineHeight: 19 },
   notice: {
     backgroundColor: "#FCE8C2",
@@ -2362,10 +2478,10 @@ const s = StyleSheet.create({
     bottom: 0,
     width: "64%",
     padding: 18,
-    backgroundColor: "rgba(255,249,239,0.87)",
     justifyContent: "center",
   },
   heroText: {
+    fontFamily: "Poppins_700Bold",
     fontSize: 25,
     fontWeight: "800",
     color: dark,
@@ -2388,10 +2504,21 @@ const s = StyleSheet.create({
     gap: 10,
     borderWidth: 1,
     borderColor: "#EFE1CD",
+    overflow: "hidden",
   },
   heading: { marginTop: 10, marginBottom: 4 },
-  headingText: { fontSize: 20, fontWeight: "800", color: dark },
-  title: { fontSize: 20, fontWeight: "700", color: dark },
+  headingText: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 20,
+    fontWeight: "700",
+    color: dark,
+  },
+  title: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 20,
+    fontWeight: "600",
+    color: dark,
+  },
   body: { fontSize: 14, color: dark, lineHeight: 21 },
   label: { fontSize: 10, color: muted, fontWeight: "700", letterSpacing: 0.8 },
   button: {
@@ -2404,7 +2531,12 @@ const s = StyleSheet.create({
     backgroundColor: green,
   },
   secondary: { backgroundColor: "#EAF2DD" },
-  buttonText: { fontSize: 13, fontWeight: "700", color: "white" },
+  buttonText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+    fontWeight: "600",
+    color: "white",
+  },
   row: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
   stats: { flexDirection: "row", gap: 10 },
   map: { backgroundColor: "#EEF4E5", borderRadius: 16, overflow: "hidden" },
@@ -2504,6 +2636,11 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(34,25,13,0.45)",
     justifyContent: "flex-end",
   },
+  clearBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "transparent",
+  },
   choiceSheet: {
     backgroundColor: "#FFFCF6",
     borderTopLeftRadius: 26,
@@ -2511,6 +2648,10 @@ const s = StyleSheet.create({
     padding: 22,
     gap: 12,
     paddingBottom: 35,
+    borderWidth: 1,
+    borderColor: "#EFE1CD",
+    elevation: 8,
+    maxHeight: "90%",
   },
   choice: {
     minHeight: 50,

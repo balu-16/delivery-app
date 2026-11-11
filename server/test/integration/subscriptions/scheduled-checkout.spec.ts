@@ -1434,3 +1434,33 @@ it('skips a locked due row and later reclaims it without duplicate occurrences',
   );
   expect(results.rows).toEqual(ids.map((id) => ({ id, n: '1' })));
 });
+
+it('returns subscription options only for the customer-owned serviceable address', async () => {
+  const variant = await world.variant();
+  const slot = uuidV7();
+  await sql`INSERT INTO subscription_plans(id,variant_id,active) VALUES(${uuidV7()}::uuid,${variant.id}::uuid,true)`.execute(
+    world.db.db,
+  );
+  await sql`INSERT INTO subscription_slots(id,store_id,name,start_time,end_time,active) VALUES(${slot}::uuid,${world.store}::uuid,'Late slot','23:00','23:30',true)`.execute(
+    world.db.db,
+  );
+  const { SUBSCRIPTIONS } =
+    await import('../../../src/modules/subscriptions/contracts/subscriptions.js');
+  const service =
+    app.get<
+      import('../../../src/modules/subscriptions/contracts/subscriptions.js').SubscriptionOperations
+    >(SUBSCRIPTIONS);
+  const options = await service.options(world.customer, world.address, variant.id);
+  expect(options.enabled).toBe(true);
+  expect(options.eligible).toBe(true);
+  expect(options.firstStartDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(options.slots).toContainEqual({
+    id: slot,
+    name: 'Late slot',
+    startTime: '23:00',
+    endTime: '23:30',
+  });
+  await expect(service.options(world.otherCustomer, world.address, variant.id)).rejects.toThrow(
+    'ADDRESS_NOT_SERVICEABLE',
+  );
+});

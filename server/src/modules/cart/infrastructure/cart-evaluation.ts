@@ -17,6 +17,9 @@ export interface CartRow {
 export interface EvaluatedLine {
   variantId: string;
   productId: string;
+  productName: string;
+  variantName: string;
+  imageId: string | null;
   categoryId: string | null;
   quantity: bigint;
   storedUnitPricePaise: bigint;
@@ -44,6 +47,9 @@ interface LineRow {
   unit_price_paise: string;
   mrp_paise: string;
   product_id: string;
+  product_name: string;
+  variant_name: string;
+  image_id: string | null;
   category_id: string | null;
   gst_rate_bps: number | null;
   published: boolean;
@@ -85,6 +91,9 @@ export function mapLine(row: LineRow): EvaluatedLine {
   return {
     variantId: row.variant_id,
     productId: row.product_id,
+    productName: row.product_name,
+    variantName: row.variant_name,
+    imageId: row.image_id,
     categoryId: row.category_id,
     quantity: BigInt(row.quantity),
     storedUnitPricePaise: BigInt(row.unit_price_paise),
@@ -98,6 +107,10 @@ export function mapLine(row: LineRow): EvaluatedLine {
 const lineQuery = (cartId: string, storeId: string) =>
   sql<LineRow>`SELECT ci.variant_id::text AS variant_id,ci.quantity::text AS quantity,
   ci.unit_price_paise::text AS unit_price_paise,ci.mrp_paise::text AS mrp_paise,p.id::text AS product_id,
+  p.name AS product_name,v.name AS variant_name,
+  (SELECT m.id::text FROM catalog_product_images im JOIN catalog_media m ON m.id=im.media_id
+    WHERE im.product_id=p.id AND m.state='REGISTERED' AND m.purpose='PRODUCT_IMAGE'
+    ORDER BY im.position,m.id LIMIT 1) AS image_id,
   p.category_id::text AS category_id,p.gst_rate_bps,p.published,p.deleted_at AS product_deleted,
   v.deleted_at AS variant_deleted,price.id::text AS price_id,price.selling_paise::text AS fresh_price,price.mrp_paise::text AS fresh_mrp,COALESCE(a.available,0)::text AS available
   FROM cart_items ci

@@ -77,6 +77,10 @@ export class OrderCompensationService {
     if (!input.returnedToStore) await this.releaseStock(tx, orderId);
     await this.capacity?.release(orderId, tx);
     await this.releaseCoupon(tx, row);
+    if (!input.returnedToStore)
+      await sql`UPDATE referral_claims SET redeemed_order_id=NULL WHERE redeemed_order_id=${orderId}::uuid`.execute(
+        tx,
+      );
     const staged = input.refundCaptured ? await this.reserveRefunds(tx, row, input.reason) : [];
     for (const entry of staged)
       await sql`INSERT INTO order_adjustments(id,order_id,kind,amount_paise,reason,adjustment_reference,created_by)

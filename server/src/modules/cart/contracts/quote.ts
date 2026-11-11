@@ -39,6 +39,7 @@ export interface QuoteSnapshot {
   userId: string;
   storeId: string;
   addressId: string;
+  referralClaimId: string | null;
   status: 'ACTIVE' | 'CONSUMED' | 'EXPIRED' | 'SUPERSEDED';
   lines: QuoteLine[];
   fees: QuoteFeeLine[];
@@ -85,6 +86,7 @@ export interface QuotePreview {
   cartVersion: number;
   storeId: string;
   addressId: string;
+  referralClaimId: string | null;
   lines: QuoteLine[];
   fees: QuoteFeeLine[];
   couponCode: string | null;

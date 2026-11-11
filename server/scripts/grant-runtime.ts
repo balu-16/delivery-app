@@ -64,6 +64,7 @@ async function main(): Promise<void> {
     const deletable = [
       'cart_items',
       'carts',
+      'customer_favorites',
       'catalog_import_rows',
       'catalog_media',
       'catalog_synonyms',
@@ -81,6 +82,7 @@ async function main(): Promise<void> {
       'pick_item_batches',
       'privacy_media_cleanup_objects',
       'private_media',
+      'referral_codes',
       'rider_location_history',
       'store_capacity_claims',
       'store_holiday_hours',

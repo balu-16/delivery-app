@@ -69,7 +69,7 @@ export interface IdentityAuthorizer {
     audience: Audience,
     allowPendingRider?: boolean,
   ): Promise<Principal>;
-  bootstrap(identity: VerifiedIdentity): Promise<Principal>;
+  bootstrap(identity: VerifiedIdentity, referralCode?: string): Promise<Principal>;
   acceptConsent(
     userId: string,
     type: 'terms' | 'privacy',

@@ -14,7 +14,13 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
 import { IsObject, IsOptional, IsString, IsUUID, Matches } from 'class-validator';
 import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
@@ -48,6 +54,22 @@ class DateDto {
 class PauseDto {
   @ApiProperty() @Matches(/^\d{4}-\d{2}-\d{2}$/) from!: string;
   @ApiProperty() @Matches(/^\d{4}-\d{2}-\d{2}$/) to!: string;
+}
+class SubscriptionOptionsQuery {
+  @ApiProperty({ format: 'uuid' }) @IsUUID() addressId!: string;
+  @ApiProperty({ format: 'uuid' }) @IsUUID() variantId!: string;
+}
+class CustomerSubscriptionSlotView {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() startTime!: string;
+  @ApiProperty() endTime!: string;
+}
+class CustomerSubscriptionOptionsView {
+  @ApiProperty() enabled!: boolean;
+  @ApiProperty() eligible!: boolean;
+  @ApiProperty({ format: 'date' }) firstStartDate!: string;
+  @ApiProperty({ type: [CustomerSubscriptionSlotView] }) slots!: CustomerSubscriptionSlotView[];
 }
 @Controller('v1/customer/subscriptions')
 @ApiBearerAuth()
@@ -115,6 +137,12 @@ export class CustomerSubscriptionsController {
       limit === undefined ? undefined : Number(limit),
       cursor,
     );
+  }
+  @Get('options')
+  @ApiOperation({ operationId: 'customerSubscriptionOptions' })
+  @ApiOkResponse({ type: CustomerSubscriptionOptionsView })
+  options(@CurrentPrincipal() p: Principal, @Query() q: SubscriptionOptionsQuery) {
+    return this.subscriptions.options(p.userId, q.addressId, q.variantId);
   }
   @Get(':id/upcoming')
   @ApiOperation({ operationId: 'customerSubscriptionUpcoming' })

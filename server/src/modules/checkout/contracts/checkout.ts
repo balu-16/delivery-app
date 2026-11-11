@@ -23,6 +23,8 @@ export interface CheckoutQuoteResult {
   readonly intentId: string;
   /** The intent expires with the quote snapshot (payment window). */
   readonly intentExpiresAt: string;
+  /** Advisory only; placement rechecks the same policy inside its transaction. */
+  readonly codAvailable: boolean;
 }
 
 export type PreferredMethod = 'GATEWAY' | 'COD';

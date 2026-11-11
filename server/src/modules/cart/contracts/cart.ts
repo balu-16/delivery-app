@@ -2,6 +2,10 @@ import type { TransactionContext } from '../../../platform/database/database.js'
 import type { QuoteIssue } from './quote.js';
 export interface CartLineView {
   variantId: string;
+  productId: string;
+  productName: string;
+  variantName: string;
+  image: string | null;
   quantity: string;
   unitPricePaise: string;
   mrpPaise: string;

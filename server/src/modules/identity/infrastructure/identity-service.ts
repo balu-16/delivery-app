@@ -8,12 +8,14 @@ import type {
   VerifiedIdentity,
 } from '../contracts/identity.js';
 import { authorizeIdentity } from '../domain/identity-policy.js';
+import type { Referrals } from '../../referrals/contracts/referrals.js';
 export class IdentityService {
   constructor(
     private readonly db: Database,
     private readonly access: IdentityAccess,
+    private readonly referrals?: Referrals,
   ) {}
-  async bootstrap(identity: VerifiedIdentity): Promise<Principal> {
+  async bootstrap(identity: VerifiedIdentity, referralCode?: string): Promise<Principal> {
     if (identity.pool !== 'CUSTOMER' || identity.tokenUse !== 'id' || !identity.email)
       throw new Error('INVALID_BOOTSTRAP_IDENTITY');
     const email = identity.email.trim().toLowerCase();
@@ -37,7 +39,7 @@ export class IdentityService {
         id: string;
         status: string;
       }>`INSERT INTO users(id,pool,cognito_sub,normalized_email,name,email_verified) VALUES (${id}::uuid,'CUSTOMER',${identity.sub},${email},${identity.name?.trim().slice(0, 100) || email},${identity.emailVerified === true})
-        ON CONFLICT(pool,cognito_sub) DO UPDATE SET normalized_email=EXCLUDED.normalized_email,name=EXCLUDED.name,email_verified=EXCLUDED.email_verified,updated_at=clock_timestamp() WHERE users.status='ACTIVE' RETURNING id,status`.execute(
+        ON CONFLICT(pool,cognito_sub) DO UPDATE SET normalized_email=EXCLUDED.normalized_email,email_verified=EXCLUDED.email_verified,updated_at=clock_timestamp() WHERE users.status='ACTIVE' RETURNING id,status`.execute(
         tx,
       );
       const actualId = upserted.rows[0]?.id;
@@ -48,6 +50,18 @@ export class IdentityService {
       await sql`INSERT INTO user_roles(user_id,role) VALUES (${actualId}::uuid,'CUSTOMER') ON CONFLICT DO NOTHING`.execute(
         tx,
       );
+      if (referralCode) {
+        if (!identity.emailVerified) throw new Error('EMAIL_NOT_VERIFIED');
+        if (!this.referrals) throw new Error('REFERRAL_UNAVAILABLE');
+        if (!found) await this.referrals.claimForNewCustomer(referralCode, actualId, tx);
+        else {
+          const replay = await sql`SELECT 1 FROM referral_claims c
+            WHERE c.friend_id=${actualId}::uuid AND c.code=${referralCode.trim().toUpperCase()}`.execute(
+            tx,
+          );
+          if (!replay.rows.length) throw new Error('REFERRAL_SIGNUP_ONLY');
+        }
+      }
     });
     const principal = await this.access.getPrincipal('CUSTOMER', identity.sub);
     if (!principal || principal.status !== 'ACTIVE') throw new Error('PROFILE_NOT_INITIALIZED');

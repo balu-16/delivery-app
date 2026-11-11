@@ -23,6 +23,7 @@ import type {
   CheckoutQuoteRequest,
   CheckoutQuoteResult,
 } from '../contracts/checkout.js';
+import { evaluateCod } from '../contracts/checkout.js';
 import { PlaceOrderSaga } from './place-order.js';
 import { ScheduledOrderService } from './scheduled-order.js';
 import type { ScheduledOrderInput } from '../contracts/checkout.js';
@@ -76,7 +77,38 @@ export class CheckoutService implements CheckoutOperations {
       wallet,
     });
     const intent = await this.deps.intents.issue(quote.cartId, quote.cartVersion, quote.quoteId);
-    return { quote, intentId: intent.intentId, intentExpiresAt: intent.expiresAt };
+    const codAvailable =
+      BigInt(quote.amountDuePaise) === 0n ||
+      (await this.canPayCash(userId, quote.storeId, quote.amountDuePaise));
+    return { quote, intentId: intent.intentId, intentExpiresAt: intent.expiresAt, codAvailable };
+  }
+  private async canPayCash(
+    userId: string,
+    storeId: string,
+    amountDuePaise: string,
+  ): Promise<boolean> {
+    const [flag, store, completed, maxCodPaise, eligibility] = await Promise.all([
+      sql<{ enabled: boolean }>`SELECT enabled FROM feature_flags WHERE key='cod_enabled'`.execute(
+        this.db,
+      ),
+      sql<{
+        accepts_cod: boolean;
+      }>`SELECT accepts_cod FROM stores WHERE id=${storeId}::uuid`.execute(this.db),
+      sql<{ n: string }>`SELECT count(*)::text AS n FROM orders WHERE user_id=${userId}::uuid
+        AND status='DELIVERED' AND payment_status='PAID' AND payment_method IN ('GATEWAY','WALLET','ZERO_DUE')`.execute(
+        this.db,
+      ),
+      this.deps.config.get('maxCodPaise'),
+      this.deps.config.get('codEligibility'),
+    ]);
+    return evaluateCod({
+      codEnabled: flag.rows[0]?.enabled === true,
+      storeAcceptsCod: store.rows[0]?.accepts_cod === true,
+      amountDuePaise,
+      maxCodPaise,
+      completedPrepaidOrders: Number(completed.rows[0]?.n ?? '0'),
+      minCompletedPrepaidOrders: eligibility.minCompletedPrepaidOrders,
+    }).allowed;
   }
   async place(userId: string, input: CheckoutPlaceRequest): Promise<CheckoutPlaceResult> {
     const resumable = await this.saga.findResumable(input.idempotencyOperationId);
@@ -152,8 +184,11 @@ export class CheckoutService implements CheckoutOperations {
       WHERE key='wallet_enabled'`.execute(this.db);
     if (flag.rows[0]?.enabled !== true) return undefined;
     const rows = await sql<{ cash: string; promo: string }>`SELECT
-      COALESCE(cash_balance_paise,0)::text AS cash, COALESCE(promo_balance_paise,0)::text AS promo
-      FROM wallet_accounts WHERE user_id=${userId}::uuid`.execute(this.db);
+      a.cash_balance_paise::text AS cash,
+      COALESCE((SELECT sum(l.remaining_paise) FROM wallet_promo_lots l
+        WHERE l.account_id=a.id AND l.state='ACTIVE' AND l.remaining_paise>0
+          AND (l.expires_at IS NULL OR l.expires_at>statement_timestamp())),0)::text AS promo
+      FROM wallet_accounts a WHERE a.user_id=${userId}::uuid`.execute(this.db);
     const balances = rows.rows[0];
     return {
       promoAvailablePaise: balances?.promo ?? '0',

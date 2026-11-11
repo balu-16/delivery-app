@@ -469,6 +469,11 @@ describe('P2 serviceability against PostGIS', () => {
                 lastOrderBufferMinutes: 0,
               },
             },
+            {
+              method: 'PATCH',
+              url: `/v1/admin/stores/${store}/cod`,
+              payload: { enabled: true, version: '1' },
+            },
             { method: 'DELETE', url: `/v1/admin/stores/${store}` },
             { method: 'PUT', url: `/v1/admin/stores/${store}/hours`, payload: { entries: [] } },
             {
@@ -510,6 +515,46 @@ describe('P2 serviceability against PostGIS', () => {
               403,
             ]);
           }
+          const currentStore = await sql<{
+            version: string;
+          }>`SELECT version::text FROM stores WHERE id=${store}`.execute(db.db);
+          const version = currentStore.rows[0]!.version;
+          const invalidCod = await server.inject({
+            method: 'PATCH',
+            url: `/v1/admin/stores/${store}/cod`,
+            headers: { authorization: `Bearer ${adminToken}` },
+            payload: { enabled: 'true', version },
+          });
+          expect(invalidCod.statusCode).toBe(400);
+          const enabledCod = await server.inject({
+            method: 'PATCH',
+            url: `/v1/admin/stores/${store}/cod`,
+            headers: { authorization: `Bearer ${adminToken}` },
+            payload: { enabled: true, version },
+          });
+          expect(enabledCod.statusCode).toBe(200);
+          const updatedCod = enabledCod.json() as { enabled: boolean; version: string };
+          expect(updatedCod.enabled).toBe(true);
+          const staleCod = await server.inject({
+            method: 'PATCH',
+            url: `/v1/admin/stores/${store}/cod`,
+            headers: { authorization: `Bearer ${adminToken}` },
+            payload: { enabled: false, version },
+          });
+          expect(staleCod.statusCode).toBe(409);
+          const auditCod = await sql<{
+            details: { before: boolean; after: boolean };
+          }>`SELECT details FROM audit_log WHERE action='STORE_COD_CHANGED' AND subject_id=${store}`.execute(
+            db.db,
+          );
+          expect(auditCod.rows[0]?.details).toEqual({ before: false, after: true });
+          const disabledCod = await server.inject({
+            method: 'PATCH',
+            url: `/v1/admin/stores/${store}/cod`,
+            headers: { authorization: `Bearer ${adminToken}` },
+            payload: { enabled: false, version: updatedCod.version },
+          });
+          expect(disabledCod.statusCode).toBe(200);
           // Deny by role before parsing even a malformed body or path.
           expect(
             (

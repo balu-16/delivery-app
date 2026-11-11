@@ -571,3 +571,33 @@ describe('catalog using PostGIS and temporal prices', () => {
     expect(after.etag).not.toBe(before.etag);
   });
 });
+
+it('lists only categories with an active priced item for the owned delivery address', async () => {
+  expect(await query.categories(user, address)).toEqual([{ id: category, name: 'Dairy' }]);
+  await expect(query.categories(otherUser, address)).rejects.toThrow('ADDRESS_NOT_SERVICEABLE');
+  await sql`UPDATE catalog_prices SET valid_to=statement_timestamp() WHERE store_id=${store}::uuid AND variant_id=${variant}::uuid`.execute(
+    db.db,
+  );
+  try {
+    expect(await query.categories(user, address)).toEqual([]);
+  } finally {
+    await sql`UPDATE catalog_prices SET valid_to=NULL WHERE store_id=${store}::uuid AND variant_id=${variant}::uuid`.execute(
+      db.db,
+    );
+  }
+});
+
+it('persists favorites per customer and safely repeats add and remove', async () => {
+  await query.setFavorite(user, product, true);
+  await query.setFavorite(user, product, true);
+  expect(await query.favorites(user)).toEqual({ items: [product], nextCursor: null });
+  expect((await query.list(user, address, { favorites: true })).items).toHaveLength(1);
+  expect(await query.favorites(otherUser)).toEqual({ items: [], nextCursor: null });
+  await query.setFavorite(otherUser, product, false);
+  expect((await query.favorites(user)).items).toEqual([product]);
+  await query.setFavorite(user, product, false);
+  await query.setFavorite(user, product, false);
+  expect((await query.favorites(user)).items).toEqual([]);
+  await query.setFavorite(user, product, true);
+  expect((await query.favorites(user)).items).toEqual([product]);
+});

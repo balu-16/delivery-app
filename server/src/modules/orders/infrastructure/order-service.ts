@@ -248,6 +248,15 @@ export class OrderService implements OrderOperations {
     if (flags.rows[0]?.enabled !== true) throw new Error('ILLEGAL_STATE_TRANSITION');
     if (!reinstatable(row.status, row.cancel_reason !== null))
       throw new Error('ILLEGAL_STATE_TRANSITION');
+    const referralClaimId =
+      typeof row.metadata['referralClaimId'] === 'string' ? row.metadata['referralClaimId'] : null;
+    if (referralClaimId) {
+      const claimed = await sql`UPDATE referral_claims SET redeemed_order_id=${orderId}::uuid
+        WHERE id=${referralClaimId}::uuid AND friend_id=${row.user_id}::uuid AND redeemed_order_id IS NULL RETURNING id`.execute(
+        tx,
+      );
+      if (!claimed.rows.length) throw new Error('RESOURCE_CONFLICT');
+    }
     const items = await sql<{
       variant_id: string;
       ordered_qty: string;

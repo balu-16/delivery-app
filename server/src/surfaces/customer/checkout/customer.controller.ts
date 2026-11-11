@@ -47,7 +47,7 @@ class PlaceDto {
 class CancelDto {
   @ApiProperty() @IsString() @MinLength(1) @MaxLength(200) reason!: string;
 }
-class AddressDto {
+class ChangeOrderAddressDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() addressId!: string;
 }
 @Controller('v1/customer')
@@ -61,7 +61,7 @@ export class CustomerCheckoutController {
   changeAddress(
     @CurrentPrincipal() p: Principal,
     @Param('orderId', ParseUUIDPipe) id: string,
-    @Body() body: AddressDto,
+    @Body() body: ChangeOrderAddressDto,
   ) {
     return this.orders.changeAddress(id, p.userId, {
       addressId: body.addressId,

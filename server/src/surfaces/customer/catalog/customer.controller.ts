@@ -1,11 +1,14 @@
 import {
   Controller,
+  Delete,
   Get,
   Headers,
+  HttpCode,
   Inject,
   Param,
   ParseUUIDPipe,
   Query,
+  Put,
   Res,
   UseGuards,
   UseInterceptors,
@@ -72,6 +75,20 @@ class CatalogPageView {
   @ApiProperty({ type: ItemView, isArray: true }) items!: ItemView[];
   @ApiProperty({ type: String, nullable: true }) nextCursor!: string | null;
 }
+class CategoryView {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() name!: string;
+}
+class CategoryListView {
+  @ApiProperty({ type: CategoryView, isArray: true }) items!: CategoryView[];
+}
+class FavoritesQuery {
+  @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() cursor?: string;
+}
+class FavoritesPageView {
+  @ApiProperty({ type: String, isArray: true, format: 'uuid' }) items!: string[];
+  @ApiProperty({ type: String, nullable: true, format: 'uuid' }) nextCursor!: string | null;
+}
 @Controller('v1/customer')
 @ApiBearerAuth()
 @AuthPolicy({ audience: 'customer' })
@@ -90,6 +107,7 @@ export class CustomerCatalogController {
       product?: string;
       q?: string;
       suggest?: boolean;
+      favorites?: boolean;
     },
     tag: string | undefined,
     reply: FastifyReply,
@@ -121,6 +139,41 @@ export class CustomerCatalogController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     return this.read(p, q.addressId, { ...page(q) }, tag, reply);
+  }
+  @Get('catalog/categories')
+  @ApiOperation({ operationId: 'customerCatalogCategories' })
+  @ApiOkResponse({ type: CategoryListView })
+  async categories(@CurrentPrincipal() p: Principal, @Query() q: BrowseQuery) {
+    return { items: await this.catalog.categories(p.userId, q.addressId) };
+  }
+  @Get('favorites')
+  @ApiOperation({ operationId: 'customerFavoritesList' })
+  @ApiOkResponse({ type: FavoritesPageView })
+  favorites(@CurrentPrincipal() p: Principal, @Query() q: FavoritesQuery) {
+    return this.catalog.favorites(p.userId, q.cursor);
+  }
+  @Get('favorites/products')
+  @ApiOperation({ operationId: 'customerFavoritesProducts' })
+  @ApiOkResponse({ type: CatalogPageView })
+  favoriteProducts(
+    @CurrentPrincipal() p: Principal,
+    @Query() q: BrowseQuery,
+    @Headers('if-none-match') tag: string | undefined,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    return this.read(p, q.addressId, { favorites: true, ...page(q) }, tag, reply);
+  }
+  @Put('favorites/:id')
+  @HttpCode(204)
+  @ApiOperation({ operationId: 'customerFavoriteAdd' })
+  addFavorite(@CurrentPrincipal() p: Principal, @Param('id', new ParseUUIDPipe()) id: string) {
+    return this.catalog.setFavorite(p.userId, id, true);
+  }
+  @Delete('favorites/:id')
+  @HttpCode(204)
+  @ApiOperation({ operationId: 'customerFavoriteRemove' })
+  removeFavorite(@CurrentPrincipal() p: Principal, @Param('id', new ParseUUIDPipe()) id: string) {
+    return this.catalog.setFavorite(p.userId, id, false);
   }
   @Get('catalog/categories/:id/products')
   @ApiOperation({ operationId: 'customerCatalogCategory' })

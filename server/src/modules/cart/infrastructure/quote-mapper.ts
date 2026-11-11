@@ -26,6 +26,7 @@ export function computeCartQuote(
     cashAvailablePaise: bigint;
     promoSpendCapBps: number;
   } | null,
+  referralFreeDelivery = false,
 ): PricingTotals {
   return computeQuote({
     lines: evaluation.lines
@@ -43,6 +44,7 @@ export function computeCartQuote(
           (coupon.productId == null || coupon.productId === line.productId),
       })),
     coupon: coupon === null ? null : pricingCoupon(coupon),
+    referralFreeDelivery,
     tipPaise,
     fees: evaluation.fees,
     wallet,
@@ -91,12 +93,14 @@ export function toPreview(
   totals: PricingTotals,
   coupon: CouponPublic | null,
   couponIssue: QuoteIssue | null,
+  referralClaimId: string | null = null,
 ): QuotePreview {
   return {
     cartId: evaluation.cart.id,
     cartVersion: Number(evaluation.cart.version),
     storeId: evaluation.cart.store_id,
     addressId: evaluation.cart.address_id,
+    referralClaimId,
     lines: toQuoteLines(totals, evaluation.cart.store_id),
     fees: toQuoteFees(totals),
     couponCode: coupon?.code ?? null,

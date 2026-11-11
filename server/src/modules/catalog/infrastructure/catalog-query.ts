@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
+import { uuidV7 } from '../../../common/ids/ids.js';
+import { lockActiveCustomer } from '../../identity/contracts/account-lock.js';
 import type { Redis } from 'ioredis';
 import type { Database } from '../../../platform/database/database.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
@@ -36,6 +38,62 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
     private readonly cdnBase?: string,
     private readonly redis?: Redis,
   ) {}
+  async favorites(user: string, cursor?: string) {
+    if (cursor && !/^[0-9a-f-]{36}$/i.test(cursor)) throw new Error('INVALID_PAGE');
+    const rows = await sql<{
+      product_id: string;
+    }>`SELECT f.product_id::text FROM customer_favorites f
+      JOIN catalog_products p ON p.id=f.product_id AND p.published AND p.deleted_at IS NULL
+      WHERE f.user_id=${user}::uuid AND f.active AND (${cursor ?? null}::uuid IS NULL OR f.product_id>${cursor ?? null}::uuid)
+      ORDER BY f.product_id LIMIT 101`.execute(this.db);
+    const items = rows.rows.slice(0, 100).map((row) => row.product_id);
+    return { items, nextCursor: rows.rows.length > 100 ? (items.at(-1) ?? null) : null };
+  }
+  async setFavorite(user: string, product: string, active: boolean): Promise<void> {
+    await this.db.transaction().execute(async (tx) => {
+      await lockActiveCustomer(user, tx);
+      if (!active) {
+        await sql`UPDATE customer_favorites SET active=false,updated_at=clock_timestamp() WHERE user_id=${user}::uuid AND product_id=${product}::uuid AND active`.execute(
+          tx,
+        );
+        return;
+      }
+      const result = await sql<{ id: string }>`INSERT INTO customer_favorites(id,user_id,product_id)
+        SELECT ${uuidV7()}::uuid,${user}::uuid,p.id FROM catalog_products p WHERE p.id=${product}::uuid AND p.published AND p.deleted_at IS NULL
+        ON CONFLICT(user_id,product_id) DO UPDATE SET active=true,updated_at=clock_timestamp() RETURNING id::text`.execute(
+        tx,
+      );
+      if (!result.rows.length) throw new Error('RESOURCE_NOT_FOUND');
+    });
+  }
+  private async storeForAddress(user: string, address: string | undefined): Promise<string> {
+    const selected = await sql<{
+      store_id: string;
+    }>`SELECT z.store_id FROM addresses a JOIN LATERAL (
+      SELECT z.store_id FROM zones z JOIN stores s ON s.id=z.store_id WHERE z.active AND ST_Covers(z.polygon,a.point::geometry)
+      ORDER BY z.priority DESC,ST_Distance(s.location,a.point),s.id,z.id LIMIT 1
+    ) z ON true WHERE a.user_id=${user}::uuid AND (${address ?? null}::uuid IS NOT NULL AND a.id=${address ?? null}::uuid OR ${address ?? null}::uuid IS NULL AND a.is_default) AND a.deleted_at IS NULL`.execute(
+      this.db,
+    );
+    if (!selected.rows[0]) throw new Error('ADDRESS_NOT_SERVICEABLE');
+    return selected.rows[0].store_id;
+  }
+  async categories(
+    user: string,
+    address: string | undefined,
+  ): Promise<Array<{ id: string; name: string }>> {
+    const store = await this.storeForAddress(user, address);
+    const rows = await sql<{ id: string; name: string }>`SELECT DISTINCT c.id::text AS id,c.name
+      FROM catalog_categories c JOIN catalog_products p ON p.category_id=c.id
+      LEFT JOIN catalog_brands b ON b.id=p.brand_id
+      JOIN catalog_variants v ON v.product_id=p.id AND v.deleted_at IS NULL
+      JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${store}::uuid
+      JOIN catalog_prices cp ON cp.store_id=i.store_id AND cp.variant_id=i.variant_id
+        AND cp.valid_from<=statement_timestamp() AND (cp.valid_to IS NULL OR cp.valid_to>statement_timestamp())
+      WHERE c.deleted_at IS NULL AND p.published AND p.deleted_at IS NULL AND (p.brand_id IS NULL OR b.deleted_at IS NULL)
+      ORDER BY c.name,id`.execute(this.db);
+    return rows.rows;
+  }
   async indexProduct(productId: string): Promise<void> {
     await this.db.transaction().execute(async (tx) => {
       const result = await sql<{
@@ -70,19 +128,11 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
       product?: string;
       q?: string;
       suggest?: boolean;
+      favorites?: boolean;
     },
   ): Promise<CatalogReadResult> {
     const q = options.q === undefined ? null : normalizeSearch(options.q);
-    const selected = await sql<{
-      store_id: string;
-    }>`SELECT z.store_id FROM addresses a JOIN LATERAL (
-      SELECT z.store_id FROM zones z JOIN stores s ON s.id=z.store_id WHERE z.active AND ST_Covers(z.polygon,a.point::geometry)
-      ORDER BY z.priority DESC,ST_Distance(s.location,a.point),s.id,z.id LIMIT 1
-    ) z ON true WHERE a.user_id=${user}::uuid AND (${address ?? null}::uuid IS NOT NULL AND a.id=${address ?? null}::uuid OR ${address ?? null}::uuid IS NULL AND a.is_default) AND a.deleted_at IS NULL`.execute(
-      this.db,
-    );
-    if (!selected.rows[0]) throw new Error('ADDRESS_NOT_SERVICEABLE');
-    const store = selected.rows[0].store_id;
+    const store = await this.storeForAddress(user, address);
     const limit = options.limit ?? (options.suggest ? 10 : 50);
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INVALID_PAGE');
     const scope = cursorScope([
@@ -91,6 +141,7 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
       options.category ?? null,
       options.product ?? null,
       options.suggest ?? false,
+      ...(options.favorites ? ['favorites', user] : []),
     ]);
     const cursor = decodeCursor(options.cursor, scope);
     if (q === '')
@@ -184,6 +235,7 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
       WHERE p.published AND p.deleted_at IS NULL AND (p.brand_id IS NULL OR b.deleted_at IS NULL)
       AND (${options.category ?? null}::uuid IS NULL OR p.category_id=${options.category ?? null}::uuid)
       AND (${options.product ?? null}::uuid IS NULL OR p.id=${options.product ?? null}::uuid)
+      AND (${options.favorites !== true} OR EXISTS(SELECT 1 FROM customer_favorites f WHERE f.user_id=${user}::uuid AND f.product_id=p.id AND f.active))
       AND (${q}::text IS NULL OR ${q}='' OR p.normalized_name=${q} OR p.normalized_name=${expanded}
         OR left(p.normalized_name,length(${q}))=${q} OR left(p.normalized_name,length(${expanded}))=${expanded}
         OR (length(${q})>=3 AND (to_tsvector('simple',p.normalized_name) @@ plainto_tsquery('simple',${expanded}) OR similarity(p.normalized_name,${expanded})>=0.3)))

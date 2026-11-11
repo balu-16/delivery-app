@@ -169,6 +169,9 @@ export class ExportWorker {
       UNION ALL SELECT 'order',id,jsonb_build_object('status',status,'currency',currency,'totalPaise',total_paise::text,'placedAt',placed_at,'address',address_snapshot) FROM orders WHERE user_id=${userId}::uuid
       UNION ALL SELECT 'order_item',i.id,jsonb_build_object('orderId',i.order_id,'name',i.name_snapshot,'quantity',i.ordered_qty::text,'unitPricePaise',i.unit_price_paise::text) FROM order_items i JOIN orders o ON o.id=i.order_id WHERE o.user_id=${userId}::uuid
       UNION ALL SELECT 'subscription',id,jsonb_build_object('status',status,'startDate',start_date,'endDate',end_date,'addressId',address_id) FROM subscriptions WHERE user_id=${userId}::uuid
+      UNION ALL SELECT 'favorite',id,jsonb_build_object('productId',product_id,'createdAt',created_at) FROM customer_favorites WHERE user_id=${userId}::uuid AND active
+      UNION ALL SELECT 'referral_code',user_id,jsonb_build_object('code',code,'createdAt',created_at) FROM referral_codes WHERE user_id=${userId}::uuid
+      UNION ALL SELECT 'referral_claim',id,jsonb_build_object('role',CASE WHEN referrer_id=${userId}::uuid THEN 'referrer' ELSE 'friend' END,'createdAt',created_at,'creditExpiresAt',credit_expires_at,'freeDeliveryRedeemed',redeemed_order_id IS NOT NULL) FROM referral_claims WHERE referrer_id=${userId}::uuid OR friend_id=${userId}::uuid
       UNION ALL SELECT 'ticket',id,jsonb_build_object('category',category,'status',status,'orderId',order_id) FROM support_tickets WHERE owner_id=${userId}::uuid
       UNION ALL SELECT 'ticket_message',m.id,jsonb_build_object('ticketId',m.ticket_id,'body',m.body,'createdAt',m.created_at) FROM support_ticket_messages m JOIN support_tickets t ON t.id=m.ticket_id WHERE t.owner_id=${userId}::uuid AND NOT m.internal
       UNION ALL SELECT 'rating',id,jsonb_build_object('targetType',target_type,'targetId',target_id,'stars',stars,'comment',comment) FROM ratings WHERE rater_id=${userId}::uuid

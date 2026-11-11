@@ -80,7 +80,7 @@ class AddressFieldsDto {
   @IsLongitude()
   lng!: number;
 }
-class AddressDto extends AddressFieldsDto {
+class CustomerAddressDto extends AddressFieldsDto {
   @ApiPropertyOptional({ type: Boolean }) @IsOptional() @IsBoolean() makeDefault?: boolean;
 }
 class UpdateAddressDto extends AddressFieldsDto {
@@ -201,7 +201,7 @@ export class CustomerServiceabilityController {
   @Post('addresses')
   @ApiCreatedResponse({ type: AddressWriteView })
   @ApiOperation({ operationId: 'customerCreateAddress' })
-  create(@CurrentPrincipal() principal: Principal, @Body() dto: AddressDto) {
+  create(@CurrentPrincipal() principal: Principal, @Body() dto: CustomerAddressDto) {
     return result(() => this.addresses.create(principal.userId, address(dto), dto.makeDefault));
   }
   @Patch('addresses/:id')

@@ -18,9 +18,8 @@ interface DebitRow {
  * Exact-once spend reversal (ADR 0008, ADD-13). The reversal ledger row's
  * uniqueness makes `reverseSpend` idempotent; each original debit restores its
  * own bucket. Promo returns to the original lot while it is still unexpired;
- * the expired share moves to one fresh lot that does not expire, so a customer
- * never loses earned promo through a platform-side reversal. Reversal lot
- * policy: no expiry (the grant expiry belonged to the consumed promotion).
+ * the expired share normally moves to a fresh non-expiring lot. Referral
+ * grants retain their original expiry, including when an order is reversed.
  */
 export class WalletReversalService {
   constructor(private readonly primitives: WalletPrimitives) {}
@@ -105,7 +104,7 @@ export class WalletReversalService {
                 { ...debit, lot_allocations: originalTakes, ref_id: reversalRef },
                 now,
               )
-            : [];
+            : { allocations: [], expiredReferral: 0n };
         const applied = await this.primitives.insertLedgerRow(ctx, {
           accountId: locked.id,
           bucket: debit.bucket,
@@ -117,11 +116,24 @@ export class WalletReversalService {
             debit.bucket === 'cash'
               ? BigInt(locked.cash_balance_paise) + cashDelta + take
               : BigInt(locked.promo_balance_paise) + promoDelta + take,
-          lotAllocations: restored,
+          lotAllocations: restored.allocations,
         });
         if (!applied) throw new Error('RESOURCE_CONFLICT');
+        if (restored.expiredReferral > 0n) {
+          const expired = await this.primitives.insertLedgerRow(ctx, {
+            accountId: locked.id,
+            bucket: 'promo',
+            deltaPaise: `-${restored.expiredReferral}`,
+            reason: 'PROMO_EXPIRY',
+            refType: 'REFERRAL_REVERSAL',
+            refId: reversalRef,
+            balanceAfter:
+              BigInt(locked.promo_balance_paise) + promoDelta + take - restored.expiredReferral,
+          });
+          if (!expired) throw new Error('RESOURCE_CONFLICT');
+        }
         if (debit.bucket === 'cash') cashDelta += take;
-        else promoDelta += take;
+        else promoDelta += take - restored.expiredReferral;
         remaining -= take;
       }
       await this.primitives.applyBalance(
@@ -139,9 +151,10 @@ export class WalletReversalService {
     ctx: TransactionContext,
     debit: DebitRow,
     now: Date,
-  ): Promise<LotTake[]> {
+  ): Promise<{ allocations: LotTake[]; expiredReferral: bigint }> {
     const allocations: LotTake[] = [];
     let expired = 0n;
+    let expiredReferral = 0n;
     for (const take of debit.lot_allocations ?? []) {
       const amount = parseMoney(take.amountPaise);
       const restored = await sql<{ id: string }>`UPDATE wallet_promo_lots SET
@@ -152,7 +165,25 @@ export class WalletReversalService {
         RETURNING id`.execute(ctx);
       if (restored.rows.length)
         allocations.push({ lotId: take.lotId, amountPaise: amount.toString() });
-      else expired += amount;
+      else {
+        const original = await sql<{
+          grant_reason: string;
+          source_reference: string;
+          expires_at: Date | null;
+          state: string;
+        }>`SELECT grant_reason,source_reference,expires_at,state FROM wallet_promo_lots WHERE id=${take.lotId}::uuid AND account_id=${debit.account_id}::uuid FOR UPDATE`.execute(
+          ctx,
+        );
+        const lot = original.rows[0];
+        if (
+          lot?.grant_reason === 'PROMO_GRANT' &&
+          /^referral:[0-9a-f-]{36}$/i.test(lot.source_reference) &&
+          lot.expires_at &&
+          (lot.state === 'EXPIRED' || new Date(lot.expires_at) <= now)
+        )
+          expiredReferral += amount;
+        else expired += amount;
+      }
     }
     if (expired > 0n) {
       const inserted = await sql<{ id: string }>`INSERT INTO wallet_promo_lots
@@ -172,6 +203,6 @@ export class WalletReversalService {
         ).rows[0]!.id;
       allocations.push({ lotId, amountPaise: expired.toString() });
     }
-    return allocations;
+    return { allocations, expiredReferral };
   }
 }

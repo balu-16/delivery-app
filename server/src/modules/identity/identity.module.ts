@@ -39,9 +39,11 @@ import { DatabaseUserProfiles } from './infrastructure/user-profiles.js';
 import { RiderProfileService } from './infrastructure/rider-profile.js';
 import { WorkforceProvisioning } from './infrastructure/workforce-provisioning.js';
 import { SharedWorkforceProvisioning } from './infrastructure/shared-workforce-provisioning.js';
+import { ReferralsModule } from '../referrals/referrals.module.js';
+import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
 
 @Module({
-  imports: [AppConfigModule, ComplianceModule],
+  imports: [AppConfigModule, ComplianceModule, ReferralsModule],
   providers: [
     {
       provide: IDENTITY_ACCESS,
@@ -50,9 +52,9 @@ import { SharedWorkforceProvisioning } from './infrastructure/shared-workforce-p
     },
     {
       provide: IDENTITY_AUTHORIZER,
-      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS],
-      useFactory: (handle: DatabaseHandle, access: IdentityAccess) =>
-        new IdentityService(handle.db, access),
+      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS, REFERRALS],
+      useFactory: (handle: DatabaseHandle, access: IdentityAccess, referrals: Referrals) =>
+        new IdentityService(handle.db, access, referrals),
     },
     {
       provide: USER_PROFILES,
@@ -163,6 +165,7 @@ import { SharedWorkforceProvisioning } from './infrastructure/shared-workforce-p
     RIDER_PROFILE_ONBOARDING,
     PRIVATE_UPLOADS,
     RIDER_DOCUMENTS,
+    ReferralsModule,
     IdentityGuard,
   ],
 })

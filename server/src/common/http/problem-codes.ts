@@ -12,6 +12,8 @@ export const PROBLEM_CODES: Readonly<Record<number, readonly string[]>> = {
     'INVALID_TARGET_TIME',
     'MATRIX_BUDGET_EXCEEDED',
     'INVALID_BOOTSTRAP_IDENTITY',
+    'INVALID_REFERRAL_CODE',
+    'REFERRAL_SIGNUP_ONLY',
     'INVALID_EMAIL',
     'INVALID_CONSENT_VERSION',
     'INVALID_CONFIG_VALUE',
@@ -119,6 +121,7 @@ export const PROBLEM_CODES: Readonly<Record<number, readonly string[]>> = {
     'FULFILLMENT_DEPENDENCY_UNAVAILABLE',
     'DISPATCH_DEPENDENCY_UNAVAILABLE',
     'FEATURE_DISABLED',
+    'REFERRALS_UNAVAILABLE',
   ],
 };
 

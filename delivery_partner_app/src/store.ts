@@ -1,7 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { ATTEMPT_FEE, OFFER_FEE, ROUTE_FEE } from "./domain";
+import {
+  ATTEMPT_FEE,
+  OFFER_FEE,
+  ROUTE_FEE,
+  isAttemptFeeEligible,
+} from "./domain";
 
 let storageWarningShown = false;
 const safeStorage = {
@@ -146,19 +151,24 @@ type State = {
   hydrateDone: (notice?: string) => void;
 };
 export function migrateDemo(data: unknown, version: number): Partial<State> {
-  if (![0, 1].includes(version) || !data || typeof data !== "object")
+  if (![0, 1, 2].includes(version) || !data || typeof data !== "object")
     throw new Error("Invalid demo data");
   const old = data as Partial<State>;
   if (old.events && !Array.isArray(old.events))
     throw new Error("Invalid events");
-  return { ...old, events: old.events ?? [], drafts: old.drafts ?? {} };
+  return {
+    ...old,
+    language: old.language === "te" ? "en" : old.language,
+    events: old.events ?? [],
+    drafts: old.drafts ?? {},
+  };
 }
 export const useDemo = create<State>()(
   persist(
     (set) => ({
       events: [],
       drafts: {},
-      language: "te",
+      language: "en",
       onboarded: false,
       signal: true,
       offerExpiresAt: null,
@@ -175,10 +185,13 @@ export const useDemo = create<State>()(
         set((state) => {
           if (state.events.some((e) => e.id === event.id)) return state;
           if (
+            ["cash-handover", "cash-collected"].includes(event.kind) &&
+            (!Number.isSafeInteger(event.amount) || (event.amount ?? 0) < 1)
+          )
+            return state;
+          if (
             event.kind === "cash-handover" &&
-            (!event.amount ||
-              event.amount < 1 ||
-              event.amount > cashBalance(state.events))
+            (event.amount ?? 0) > cashBalance(state.events)
           )
             return state;
           if (
@@ -276,7 +289,7 @@ export const useDemo = create<State>()(
     }),
     {
       name: "@dairydirect/partner-demo",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => safeStorage),
       partialize: (s) =>
         ({
@@ -411,7 +424,7 @@ export const earnings = (events: Event[]) =>
         : e.kind === "offer-completed"
           ? OFFER_FEE
           : ["failed", "offer-failed"].includes(e.kind) &&
-              e.reason !== "Partner at fault"
+              isAttemptFeeEligible(e.reason)
             ? ATTEMPT_FEE
             : 0),
     0,

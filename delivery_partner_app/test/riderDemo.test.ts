@@ -7,6 +7,9 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 beforeEach(() => {
   useDemo.getState().reset();
   useDemo.getState().hydrateDone();
+  useDemo
+    .getState()
+    .record({ id: "online", kind: "availability", data: "online" });
 });
 test("mock rider offer follows generated task statuses and replays actions safely", async () => {
   useDemo.getState().offer(Date.now() + 25000);
@@ -48,4 +51,32 @@ test("mock rider offer follows generated task statuses and replays actions safel
   expect(
     useDemo.getState().events.filter((e) => e.kind === "offer-completed"),
   ).toHaveLength(1);
+});
+
+test("simultaneous accepts of the same offer create only one assignment", async () => {
+  useDemo.getState().offer(Date.now() + 25_000);
+  const offer = (await riderDemo.offers()).items[0];
+  const results = await Promise.allSettled([
+    riderDemo.accept(offer.offerId, "first"),
+    riderDemo.accept(offer.offerId, "second"),
+  ]);
+  expect(
+    results.filter((result) => result.status === "fulfilled"),
+  ).toHaveLength(1);
+  expect(
+    useDemo
+      .getState()
+      .events.filter((event) => event.kind === "offer-accepted"),
+  ).toHaveLength(1);
+});
+
+test("an offer cannot be accepted after the rider goes offline", async () => {
+  useDemo.getState().offer(Date.now() + 25_000);
+  const offer = (await riderDemo.offers()).items[0];
+  useDemo
+    .getState()
+    .record({ id: "offline", kind: "availability", data: "offline" });
+  await expect(
+    riderDemo.accept(offer.offerId, "accept-offline"),
+  ).rejects.toThrow("OFFER_UNAVAILABLE");
 });

@@ -32,6 +32,7 @@ import {
   EntityPageView,
   ResourceIdView,
   StoreOperationsView,
+  StoreCodView,
   StorePageView,
   ZonePageView,
 } from './administration.views.js';
@@ -44,6 +45,7 @@ import {
   PageQuery,
   StaffDto,
   StoreDto,
+  StoreCodDto,
 } from './administration.dto.js';
 async function response<T>(work: () => Promise<T>): Promise<T> {
   try {
@@ -57,7 +59,8 @@ async function response<T>(work: () => Promise<T>): Promise<T> {
         ? 403
         : ['STORE_NOT_FOUND', 'RESOURCE_NOT_FOUND'].includes(code)
           ? 404
-          : ['STORE_CITY_IMMUTABLE'].includes(code) || ['23503', '23505'].includes(pg)
+          : ['STORE_CITY_IMMUTABLE', 'CONCURRENT_MODIFICATION'].includes(code) ||
+              ['23503', '23505'].includes(pg)
             ? 409
             : [
                   'INVALID_HOURS',
@@ -167,6 +170,16 @@ export class StoreAdministrationController {
     @Body() b: StoreDto,
   ) {
     return response(async () => ({ id: await this.admin.saveStore(p.userId, b, id) }));
+  }
+  @Patch('stores/:id/cod')
+  @ApiOkResponse({ type: StoreCodView })
+  @ApiOperation({ operationId: 'adminSetStoreCod' })
+  setCod(
+    @CurrentPrincipal() p: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() b: StoreCodDto,
+  ) {
+    return response(() => this.admin.setCod(p.userId, id, b.enabled, b.version));
   }
   @Delete('stores/:id') @ApiOperation({ operationId: 'adminDeleteStore' }) deleteStore(
     @CurrentPrincipal() p: Principal,

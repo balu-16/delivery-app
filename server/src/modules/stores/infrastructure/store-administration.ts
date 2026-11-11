@@ -71,7 +71,7 @@ export class PostgresStoreAdministration implements StoreAdministration {
           : kind === 'stores'
             ? await sql<{
                 id: string;
-              }>`SELECT id,legal_entity_id,city_id,name,status,pause_reason,hourly_capacity,last_order_buffer_minutes,ST_Y(location::geometry) AS lat,ST_X(location::geometry) AS lng,version::text FROM stores WHERE (${after}::uuid IS NULL OR id>${after}::uuid) ORDER BY id LIMIT ${limit + 1}`.execute(
+              }>`SELECT id,legal_entity_id,city_id,name,status,pause_reason,hourly_capacity,last_order_buffer_minutes,accepts_cod,ST_Y(location::geometry) AS lat,ST_X(location::geometry) AS lng,version::text FROM stores WHERE (${after}::uuid IS NULL OR id>${after}::uuid) ORDER BY id LIMIT ${limit + 1}`.execute(
                 this.db,
               )
             : await sql<{
@@ -192,6 +192,39 @@ export class PostgresStoreAdministration implements StoreAdministration {
       );
       await sql`UPDATE cities SET zone_version=zone_version+1 WHERE id=${draft.cityId}`.execute(tx);
       return id;
+    });
+  }
+  async setCod(
+    actor: string,
+    storeId: string,
+    enabled: boolean,
+    version: string,
+  ): Promise<{ enabled: boolean; version: string }> {
+    if (typeof enabled !== 'boolean' || !/^[1-9]\d{0,18}$/.test(version))
+      throw new Error('INVALID_INPUT');
+    return this.db.transaction().execute(async (tx) => {
+      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
+        throw new Error('FORBIDDEN');
+      const found = await sql<{
+        accepts_cod: boolean;
+        version: string;
+      }>`SELECT accepts_cod,version::text FROM stores WHERE id=${storeId}::uuid FOR UPDATE`.execute(
+        tx,
+      );
+      const store = found.rows[0];
+      if (!store) throw new Error('STORE_NOT_FOUND');
+      if (store.version !== version) throw new Error('CONCURRENT_MODIFICATION');
+      if (store.accepts_cod === enabled) return { enabled, version };
+      const updated = await sql<{
+        version: string;
+      }>`UPDATE stores SET accepts_cod=${enabled},version=version+1,updated_at=clock_timestamp() WHERE id=${storeId}::uuid RETURNING version::text`.execute(
+        tx,
+      );
+      const details = JSON.stringify({ before: store.accepts_cod, after: enabled });
+      await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()},${actor},'STORE_COD_CHANGED','store',${storeId},${details}::jsonb)`.execute(
+        tx,
+      );
+      return { enabled, version: updated.rows[0]!.version };
     });
   }
   async delete(

@@ -135,6 +135,8 @@ export class ErasureProcessor {
       );
       await sql`UPDATE consents SET ip=NULL WHERE user_id=${request.user_id}::uuid`.execute(tx);
       await sql`DELETE FROM carts WHERE user_id=${request.user_id}::uuid`.execute(tx);
+      await sql`DELETE FROM customer_favorites WHERE user_id=${request.user_id}::uuid`.execute(tx);
+      await sql`DELETE FROM referral_codes WHERE user_id=${request.user_id}::uuid`.execute(tx);
       await sql`UPDATE addresses SET line1='[erased]',line2=NULL,landmark=NULL,pincode='000000',contact_name='[erased]',contact_phone='+10000000000',point=ST_SetSRID(ST_MakePoint(0,0),4326)::geography,is_default=false,deleted_at=COALESCE(deleted_at,clock_timestamp()),updated_at=clock_timestamp() WHERE user_id=${request.user_id}::uuid`.execute(
         tx,
       );

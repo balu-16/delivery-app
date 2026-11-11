@@ -81,6 +81,12 @@ export async function buildQuote(
   await sql`SELECT pg_advisory_xact_lock_shared(701001)`.execute(tx);
   const cart = await getOrCreateCartRow(tx, request.userId, request.addressId);
   const evaluation = await evaluateCart(tx, config, cart);
+  const entitlement = await sql<{
+    id: string;
+  }>`SELECT id::text FROM referral_claims WHERE friend_id=${request.userId}::uuid AND redeemed_order_id IS NULL`.execute(
+    tx,
+  );
+  const referralClaimId = entitlement.rows[0]?.id ?? null;
   const requested = request.couponCode === undefined ? cart.coupon_code : request.couponCode;
   const { coupon, issue } = await resolveCoupon(coupons, evaluation, request.userId, requested, tx);
   const totals = computeCartQuote(
@@ -88,6 +94,11 @@ export async function buildQuote(
     coupon,
     parseTip(request.tipPaise),
     parseWallet(request.wallet),
+    referralClaimId !== null,
   );
-  return { evaluation, preview: toPreview(evaluation, totals, coupon, issue), coupon };
+  return {
+    evaluation,
+    preview: toPreview(evaluation, totals, coupon, issue, referralClaimId),
+    coupon,
+  };
 }

@@ -17,8 +17,13 @@ export class StoreView extends EntityView {
   @ApiProperty({ type: String, nullable: true }) pause_reason!: string | null;
   @ApiProperty() hourly_capacity!: number;
   @ApiProperty() last_order_buffer_minutes!: number;
+  @ApiProperty() accepts_cod!: boolean;
   @ApiProperty() lat!: number;
   @ApiProperty() lng!: number;
+  @ApiProperty() version!: string;
+}
+export class StoreCodView {
+  @ApiProperty() enabled!: boolean;
   @ApiProperty() version!: string;
 }
 export class AdminZoneView extends EntityView {

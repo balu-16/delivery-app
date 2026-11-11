@@ -17,6 +17,7 @@ interface SnapshotRow {
   user_id: string;
   store_id: string;
   address_id: string;
+  referral_claim_id: string | null;
   status: 'ACTIVE' | 'CONSUMED' | 'EXPIRED' | 'SUPERSEDED';
   lines: QuoteSnapshot['lines'];
   fees: QuoteSnapshot['fees'];
@@ -39,7 +40,7 @@ interface SnapshotRow {
   issues: QuoteIssue[];
 }
 const snapshotColumns = sql`id::text AS id,cart_id::text AS cart_id,cart_version::text AS cart_version,user_id::text AS user_id,
-  store_id::text AS store_id,address_id::text AS address_id,status,lines,fees,wallet,coupon_code,
+  store_id::text AS store_id,address_id::text AS address_id,referral_claim_id::text AS referral_claim_id,status,lines,fees,wallet,coupon_code,
   coupon_discount_paise::text AS coupon_discount_paise,subtotal_paise::text AS subtotal_paise,discount_paise::text AS discount_paise,
   fee_total_paise::text AS fee_total_paise,tax_total_paise::text AS tax_total_paise,tip_paise::text AS tip_paise,
   total_paise::text AS total_paise,amount_due_paise::text AS amount_due_paise,price_version::text AS price_version,
@@ -52,6 +53,7 @@ function toSnapshot(row: SnapshotRow): QuoteSnapshot {
     userId: row.user_id,
     storeId: row.store_id,
     addressId: row.address_id,
+    referralClaimId: row.referral_claim_id,
     status: row.status,
     lines: row.lines,
     fees: row.fees,
@@ -97,7 +99,7 @@ export class PostgresQuotes implements CartQuotes {
       const quoteId = uuidV7();
       await sql`INSERT INTO quote_snapshots(id,cart_id,cart_version,user_id,store_id,address_id,status,lines,fees,issues,wallet,
         coupon_code,coupon_discount_paise,subtotal_paise,discount_paise,fee_total_paise,tax_total_paise,tip_paise,total_paise,
-        amount_due_paise,price_version,price_fingerprint,config_version,coupon_fingerprint,expires_at)
+        amount_due_paise,price_version,price_fingerprint,config_version,coupon_fingerprint,expires_at,referral_claim_id)
         VALUES(${quoteId}::uuid,${evaluation.cart.id}::uuid,${evaluation.cart.version}::bigint,${evaluation.cart.user_id}::uuid,
         ${evaluation.cart.store_id}::uuid,${evaluation.cart.address_id}::uuid,'ACTIVE',
         ${JSON.stringify(preview.lines)}::jsonb,${JSON.stringify(preview.fees)}::jsonb,${JSON.stringify(preview.issues)}::jsonb,
@@ -105,7 +107,7 @@ export class PostgresQuotes implements CartQuotes {
         ${preview.couponCode},${preview.couponDiscountPaise}::bigint,${preview.subtotalPaise}::bigint,${preview.discountPaise}::bigint,
         ${preview.feeTotalPaise}::bigint,${preview.taxTotalPaise}::bigint,${preview.tipPaise}::bigint,${preview.totalPaise}::bigint,
         ${preview.amountDuePaise}::bigint,${preview.priceVersion}::bigint,${evaluation.priceFingerprint},${preview.configVersion}::bigint,
-        ${preview.couponFingerprint},${expiresAt})`.execute(tx);
+        ${preview.couponFingerprint},${expiresAt},${preview.referralClaimId}::uuid)`.execute(tx);
       return {
         ...preview,
         quoteId,
@@ -184,6 +186,7 @@ export class PostgresQuotes implements CartQuotes {
     if (
       preview.configVersion !== quote.configVersion ||
       preview.couponFingerprint !== quote.couponFingerprint ||
+      preview.referralClaimId !== quote.referralClaimId ||
       !isDeepStrictEqual(preview.lines, quote.lines) ||
       !isDeepStrictEqual(preview.fees, quote.fees) ||
       preview.totalPaise !== quote.totalPaise

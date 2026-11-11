@@ -1,0 +1,72 @@
+{
+  "expo": {
+    "name": "DairyDirect",
+    "slug": "dairydirect",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "dairydirect",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#FBF3E7",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dairydirect.app",
+      "infoPlist": {
+        "UIViewControllerBasedStatusBarAppearance": true
+      }
+    },
+    "android": {
+      "package": "com.dairydirect.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#FBF3E7",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/favicon.png",
+      "name": "DairyDirect",
+      "shortName": "DairyDirect",
+      "themeColor": "#FBF3E7"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#FBF3E7",
+          "dark": {
+            "backgroundColor": "#FBF3E7"
+          }
+        }
+      ],
+      "expo-image",
+      "expo-font",
+      "expo-secure-store",
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "DairyDirect uses your location to set your delivery address."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7829fe1d-fca1-4931-9896-80637e837176"
+      }
+    },
+    "owner": "balu16"
+  }
+}

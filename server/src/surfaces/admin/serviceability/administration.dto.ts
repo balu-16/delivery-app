@@ -55,6 +55,13 @@ export class StoreDto extends EntityDto {
   @Max(1440)
   lastOrderBufferMinutes!: number;
 }
+export class StoreCodDto {
+  @ApiProperty({ type: Boolean }) @IsBoolean() enabled!: boolean;
+  @ApiProperty({ type: String, pattern: '^[1-9][0-9]{0,18}$' })
+  @IsString()
+  @Matches(/^[1-9]\d{0,18}$/)
+  version!: string;
+}
 class WindowDto {
   @ApiProperty({ type: 'integer', minimum: 0, maximum: 1439 })
   @IsInt()

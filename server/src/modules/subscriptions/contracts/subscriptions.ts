@@ -36,7 +36,18 @@ export interface SubscriptionChanges {
   slotId?: string;
   addressId?: string;
 }
+export interface CustomerSubscriptionOptions {
+  enabled: boolean;
+  eligible: boolean;
+  firstStartDate: string;
+  slots: Array<{ id: string; name: string; startTime: string; endTime: string }>;
+}
 export interface SubscriptionOperations {
+  options(
+    userId: string,
+    addressId: string,
+    variantId: string,
+  ): Promise<CustomerSubscriptionOptions>;
   change(
     userId: string,
     id: string,

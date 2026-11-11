@@ -155,6 +155,7 @@ export function deliveryFee(merchandise: bigint, config: PricingFeeConfig): bigi
 export function computeQuote(input: {
   lines: PricingLineInput[];
   coupon: PricingCouponInput | null;
+  referralFreeDelivery?: boolean;
   tipPaise: bigint;
   fees: PricingFeeConfig;
   wallet: {
@@ -222,7 +223,10 @@ export function computeQuote(input: {
   const merchandise = subtotal - discount;
   const freeDeliveryCoupon = input.coupon?.kind === 'FREE_DELIVERY';
   const thresholdWaived = merchandise >= money(input.fees.freeDeliveryThresholdPaise, 'threshold');
-  const deliveryFeeWaived = freeDeliveryCoupon || (thresholdWaived && merchandise > 0n);
+  const deliveryFeeWaived =
+    input.referralFreeDelivery === true ||
+    freeDeliveryCoupon ||
+    (thresholdWaived && merchandise > 0n);
   const deliveryAmount = deliveryFeeWaived ? 0n : deliveryFee(merchandise, input.fees);
   const handlingAmount = money(input.fees.handlingFeePaise, 'handling');
   const smallCartAmount =

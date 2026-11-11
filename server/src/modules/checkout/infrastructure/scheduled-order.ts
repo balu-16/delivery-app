@@ -6,6 +6,7 @@ import type { TransactionContext } from '../../../platform/database/database.js'
 import type { CheckoutDependencies } from './checkout-service.js';
 
 import type { ScheduledOrderInput } from '../contracts/checkout.js';
+import { lockActiveCustomer } from '../../identity/contracts/account-lock.js';
 
 /** Real scheduled checkout uses the same pricing, capacity, wallet, stock and order contracts as customer checkout. */
 export class ScheduledOrderService {
@@ -97,6 +98,12 @@ export class ScheduledOrderService {
     const surgeFlag = await sql<{
       enabled: boolean;
     }>`SELECT enabled FROM feature_flags WHERE key='surge_enabled'`.execute(tx);
+    const entitlement = await sql<{
+      id: string;
+    }>`SELECT id::text FROM referral_claims WHERE friend_id=${input.userId}::uuid AND redeemed_order_id IS NULL`.execute(
+      tx,
+    );
+    const referralClaimId = entitlement.rows[0]?.id ?? null;
     const quote = computeQuote({
       lines: [
         {
@@ -109,6 +116,7 @@ export class ScheduledOrderService {
         },
       ],
       coupon: null,
+      referralFreeDelivery: referralClaimId !== null,
       tipPaise: 0n,
       wallet: null,
       minOrderPaise: BigInt(min),
@@ -129,13 +137,14 @@ export class ScheduledOrderService {
     });
     if (quote.minOrderNotMet) throw new Error('MIN_ORDER_NOT_MET');
     if (quote.maxOrderExceeded) throw new Error('MAX_ORDER_EXCEEDED');
-    return { quote, product: p, address: a, service, start, config: c };
+    return { quote, product: p, address: a, service, start, config: c, referralClaimId };
   }
   async price(input: ScheduledOrderInput, tx: TransactionContext) {
     const { quote, product } = await this.prepare(input, tx);
     return { unitPricePaise: product.selling, totalPaise: quote.totalPaise.toString() };
   }
   async place(input: ScheduledOrderInput, tx: TransactionContext) {
+    await lockActiveCustomer(input.userId, tx);
     const {
       quote,
       product: p,
@@ -143,6 +152,7 @@ export class ScheduledOrderService {
       service,
       start,
       config: c,
+      referralClaimId,
     } = await this.prepare(input, tx);
     if (!service.zone) throw new Error('ADDRESS_NOT_SERVICEABLE');
     const id = uuidV7();
@@ -208,10 +218,21 @@ export class ScheduledOrderService {
       walletCashPaise: split.cashPaise,
       amountDuePaise: '0',
       deliverySlot: { slotStart: input.slotStart, slotEnd: input.slotEnd },
-      metadata: { subscriptionId: input.subscriptionId, deliveryDate: input.deliveryDate },
+      metadata: {
+        subscriptionId: input.subscriptionId,
+        deliveryDate: input.deliveryDate,
+        referralClaimId,
+      },
       expiresAt: null,
       tx,
     });
+    if (referralClaimId) {
+      const redeemed = await sql`UPDATE referral_claims SET redeemed_order_id=${id}::uuid
+        WHERE id=${referralClaimId}::uuid AND friend_id=${input.userId}::uuid AND redeemed_order_id IS NULL RETURNING id`.execute(
+        tx,
+      );
+      if (!redeemed.rows.length) throw new Error('PRICE_CHANGED');
+    }
     if (quote.totalPaise > 0n)
       await this.deps.funding.record({
         orderId: id,

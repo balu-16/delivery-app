@@ -164,6 +164,12 @@ it('a cart needs an address on first write; reads before that 404', async () => 
   expect(created.json<PutResult>().cart.version).toBeGreaterThanOrEqual(1);
   expect(created.json<PutResult>().cart.lines).toHaveLength(1);
   expect(created.json<PutResult>().cart.lines[0]!.unitPricePaise).toBe('10000');
+  expect(created.json<PutResult>().cart.lines[0]).toMatchObject({
+    productId: world.product,
+    productName: 'Milk',
+    variantName: 'Unit',
+    image: null,
+  });
   // The response version is authoritative for the next write.
   const reread = (await getCart(token))!;
   expect(reread.version).toBe(created.json<PutResult>().cart.version);

@@ -46,13 +46,22 @@ function entry(row: {
   };
 }
 
-/** Customer-visible wallet reads; balances come from the locked account row. */
+/** Customer-visible balances exclude promotional lots that are no longer spendable. */
 export class PostgresWalletViews implements WalletViews {
   constructor(private readonly db: Database) {}
   async balances(userId: string): Promise<WalletBalances> {
-    const rows = await sql<{ id: string; cash: string; promo: string; version: string }>`SELECT id,
-      cash_balance_paise::text AS cash, promo_balance_paise::text AS promo, version::text AS version
-      FROM wallet_accounts WHERE user_id=${userId}::uuid`.execute(this.db);
+    const rows = await sql<{
+      id: string;
+      cash: string;
+      promo: string;
+      version: string;
+    }>`SELECT a.id,
+      a.cash_balance_paise::text AS cash,
+      COALESCE((SELECT sum(l.remaining_paise) FROM wallet_promo_lots l
+        WHERE l.account_id=a.id AND l.state='ACTIVE' AND l.remaining_paise>0
+          AND (l.expires_at IS NULL OR l.expires_at>statement_timestamp())),0)::text AS promo,
+      a.version::text AS version
+      FROM wallet_accounts a WHERE a.user_id=${userId}::uuid`.execute(this.db);
     const row = rows.rows[0];
     if (!row) return { userId, cashPaise: '0', promoPaise: '0', version: '0' };
     return { userId, cashPaise: row.cash, promoPaise: row.promo, version: row.version };

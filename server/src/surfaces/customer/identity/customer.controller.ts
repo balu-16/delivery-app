@@ -9,16 +9,24 @@ import {
   Patch,
   Post,
   Req,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiProperty, ApiPropertyOptional, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiProperty,
+  ApiPropertyOptional,
+  ApiResponse,
+} from '@nestjs/swagger';
 import {
   PrincipalResponseDto,
   ProblemDto,
   ProfileResponseDto,
   RequestIdResponseDto,
 } from '../../../modules/identity/contracts/swagger.js';
-import { IsIn, IsOptional, IsString, Length } from 'class-validator';
+import { IsIn, IsOptional, IsString, Length, Matches } from 'class-validator';
+import { REFERRALS, type Referrals } from '../../../modules/referrals/contracts/referrals.js';
 import {
   AuthPolicy,
   CurrentPrincipal,
@@ -44,6 +52,20 @@ class ConsentDto {
     'terms' | 'privacy';
   @ApiProperty({ minLength: 1, maxLength: 40 }) @IsString() @Length(1, 40) version!: string;
 }
+class BootstrapDto {
+  @ApiPropertyOptional({ pattern: '^[A-Fa-f0-9]{16}$' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Fa-f0-9]{16}$/)
+  referralCode?: string;
+}
+class ReferralViewDto {
+  @ApiProperty() enabled!: boolean;
+  @ApiProperty({ type: String, nullable: true }) code!: string | null;
+  @ApiProperty() successfulReferrals!: number;
+  @ApiProperty() rewardPaise!: string;
+  @ApiProperty() freeDeliveryAvailable!: boolean;
+}
 async function customerCommand<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
@@ -55,10 +77,14 @@ async function customerCommand<T>(work: () => Promise<T>): Promise<T> {
         'INVALID_EMAIL',
         'INVALID_PROFILE',
         'INVALID_CONSENT_VERSION',
+        'INVALID_REFERRAL_CODE',
+        'REFERRAL_SIGNUP_ONLY',
       ].includes(code)
     )
       throw new BadRequestException({ code });
-    if (code === 'ACCOUNT_DISABLED') throw new ForbiddenException({ code });
+    if (code === 'ACCOUNT_DISABLED' || code === 'EMAIL_NOT_VERIFIED')
+      throw new ForbiddenException({ code });
+    if (code === 'REFERRALS_UNAVAILABLE') throw new ServiceUnavailableException({ code });
     throw error;
   }
 }
@@ -73,12 +99,22 @@ export class CustomerIdentityController {
   constructor(
     @Inject(IDENTITY_AUTHORIZER) private readonly identity: IdentityAuthorizer,
     @Inject(USER_PROFILES) private readonly profiles: UserProfiles,
+    @Inject(REFERRALS) private readonly referrals: Referrals,
   ) {}
   @Post('auth/bootstrap')
   @ApiResponse({ status: 201, type: PrincipalResponseDto })
   @AuthPolicy({ audience: 'customer', tokenUse: 'id', bootstrap: true })
-  async bootstrap(@Req() request: AuthenticatedRequest): Promise<Principal> {
-    return customerCommand(() => this.identity.bootstrap(request.identity!));
+  async bootstrap(
+    @Req() request: AuthenticatedRequest,
+    @Body() body?: BootstrapDto,
+  ): Promise<Principal> {
+    return customerCommand(() => this.identity.bootstrap(request.identity!, body?.referralCode));
+  }
+  @Get('referrals')
+  @ApiOperation({ operationId: 'customerReferrals' })
+  @ApiResponse({ status: 200, type: ReferralViewDto })
+  async referral(@CurrentPrincipal() principal: Principal) {
+    return customerCommand(() => this.referrals.view(principal.userId));
   }
   @Get('me') @ApiResponse({ status: 200, type: ProfileResponseDto }) async me(
     @CurrentPrincipal() principal: Principal,

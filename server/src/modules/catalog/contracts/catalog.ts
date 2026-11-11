@@ -71,6 +71,12 @@ export interface CatalogReadResult {
   nextCursor: string | null;
 }
 export interface CatalogQuery {
+  categories(
+    user: string,
+    address: string | undefined,
+  ): Promise<Array<{ id: string; name: string }>>;
+  favorites(user: string, cursor?: string): Promise<{ items: string[]; nextCursor: string | null }>;
+  setFavorite(user: string, product: string, active: boolean): Promise<void>;
   list(
     user: string,
     address: string | undefined,
@@ -79,6 +85,7 @@ export interface CatalogQuery {
       product?: string;
       q?: string;
       suggest?: boolean;
+      favorites?: boolean;
     },
   ): Promise<CatalogReadResult>;
 }

@@ -187,6 +187,7 @@ export class PlaceOrderSaga {
         couponReservationId,
         couponCode: quote.couponCode,
         couponFingerprint: quote.couponFingerprint,
+        referralClaimId: quote.referralClaimId,
         priceVersion: quote.priceVersion,
         configVersion: quote.configVersion,
       },
@@ -194,6 +195,13 @@ export class PlaceOrderSaga {
       tx,
     };
     await this.deps.orders.create(create);
+    if (quote.referralClaimId) {
+      const redeemed = await sql`UPDATE referral_claims SET redeemed_order_id=${orderId}::uuid
+        WHERE id=${quote.referralClaimId}::uuid AND friend_id=${userId}::uuid AND redeemed_order_id IS NULL RETURNING id`.execute(
+        tx,
+      );
+      if (!redeemed.rows.length) throw new Error('PRICE_CHANGED');
+    }
     // 6. Refundable-capacity record for the wallet share (FK needs the order).
     if (parseMoney(walletSplit.promoPaise) + parseMoney(walletSplit.cashPaise) > 0n)
       await this.deps.funding.record({

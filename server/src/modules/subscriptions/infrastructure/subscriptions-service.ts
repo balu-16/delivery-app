@@ -70,6 +70,66 @@ export class SubscriptionsService {
     const now = await databaseTimeAfterLock(tx);
     return firstEditableDate(now, await this.config.get('subscriptionCutoffTime', tx));
   }
+  async options(userId: string, addressId: string, variantId: string) {
+    const selected = await sql<{
+      store_id: string;
+    }>`SELECT z.store_id::text FROM addresses a JOIN LATERAL (
+      SELECT z.store_id FROM zones z JOIN stores s ON s.id=z.store_id
+      WHERE z.active AND ST_Covers(z.polygon,a.point::geometry)
+      ORDER BY z.priority DESC,ST_Distance(s.location,a.point),s.id,z.id LIMIT 1
+    ) z ON true WHERE a.id=${addressId}::uuid AND a.user_id=${userId}::uuid AND a.deleted_at IS NULL`.execute(
+      this.db,
+    );
+    if (!selected.rows[0]) throw new Error('ADDRESS_NOT_SERVICEABLE');
+    const storeId = selected.rows[0].store_id;
+    const [flags, plan, slots, clock, cutoff, deadline, lead] = await Promise.all([
+      sql<{
+        key: string;
+        enabled: boolean;
+      }>`SELECT key,enabled FROM feature_flags WHERE key IN ('wallet_enabled','subscriptions_enabled')`.execute(
+        this.db,
+      ),
+      sql<{
+        eligible: boolean;
+      }>`SELECT EXISTS(SELECT 1 FROM subscription_plans p JOIN catalog_variants v ON v.id=p.variant_id AND v.deleted_at IS NULL
+        JOIN catalog_products product ON product.id=v.product_id AND product.published AND product.deleted_at IS NULL
+        JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${storeId}::uuid
+        WHERE p.variant_id=${variantId}::uuid AND p.active AND EXISTS(SELECT 1 FROM catalog_prices price WHERE price.store_id=i.store_id AND price.variant_id=i.variant_id AND price.valid_from<=statement_timestamp() AND (price.valid_to IS NULL OR price.valid_to>statement_timestamp()))) AS eligible`.execute(
+        this.db,
+      ),
+      sql<{
+        id: string;
+        name: string;
+        start_time: string;
+        end_time: string;
+      }>`SELECT id::text,name,start_time::text,end_time::text FROM subscription_slots WHERE store_id=${storeId}::uuid AND active ORDER BY start_time,id`.execute(
+        this.db,
+      ),
+      sql<{ now: Date }>`SELECT clock_timestamp() AS now`.execute(this.db),
+      this.config.get('subscriptionCutoffTime'),
+      this.config.get('subscriptionGraceDeadlineTime'),
+      this.config.get('subscriptionDispatchLeadMinutes'),
+    ]);
+    const [dh, dm] = deadline.split(':').map(Number);
+    return {
+      enabled: ['wallet_enabled', 'subscriptions_enabled'].every((key) =>
+        flags.rows.some((row) => row.key === key && row.enabled),
+      ),
+      eligible: plan.rows[0]?.eligible === true,
+      firstStartDate: firstEditableDate(clock.rows[0]!.now, cutoff),
+      slots: slots.rows
+        .filter((slot) => {
+          const [h, m] = slot.start_time.split(':').map(Number);
+          return h! * 60 + m! - lead > dh! * 60 + dm!;
+        })
+        .map((slot) => ({
+          id: slot.id,
+          name: slot.name,
+          startTime: slot.start_time.slice(0, 5),
+          endTime: slot.end_time.slice(0, 5),
+        })),
+    };
+  }
   async create(userId: string, input: CreateSubscription, outer?: TransactionContext) {
     validateFrequency(input.frequencyRule);
     addDays(input.startDate, 0);
@@ -130,14 +190,14 @@ export class SubscriptionsService {
     if (page.after && !/^[0-9a-f-]{36}$/i.test(page.after)) throw new Error('INVALID_PAGE');
     const rows = await sql<{
       id: string;
-    }>`SELECT s.*,p.variant_id FROM subscriptions s JOIN subscription_plans p ON p.id=s.plan_id WHERE s.user_id=${userId}::uuid AND (${page.after}::uuid IS NULL OR s.id>${page.after}::uuid) ORDER BY s.id LIMIT ${page.limit + 1}`.execute(
+    }>`SELECT s.*,p.variant_id,s.start_date::text AS start_date,s.end_date::text AS end_date,s.next_delivery_date::text AS next_delivery_date FROM subscriptions s JOIN subscription_plans p ON p.id=s.plan_id WHERE s.user_id=${userId}::uuid AND (${page.after}::uuid IS NULL OR s.id>${page.after}::uuid) ORDER BY s.id LIMIT ${page.limit + 1}`.execute(
       this.db,
     );
     return pageResult(rows.rows, page.limit, scope, (r) => r.id);
   }
   async get(userId: string, id: string) {
     const result =
-      await sql`SELECT s.*,p.variant_id FROM subscriptions s JOIN subscription_plans p ON p.id=s.plan_id WHERE s.user_id=${userId}::uuid AND s.id=${id}::uuid`.execute(
+      await sql`SELECT s.*,p.variant_id,s.start_date::text AS start_date,s.end_date::text AS end_date,s.next_delivery_date::text AS next_delivery_date FROM subscriptions s JOIN subscription_plans p ON p.id=s.plan_id WHERE s.user_id=${userId}::uuid AND s.id=${id}::uuid`.execute(
         this.db,
       );
     if (!result.rows[0]) throw new Error('RESOURCE_NOT_FOUND');

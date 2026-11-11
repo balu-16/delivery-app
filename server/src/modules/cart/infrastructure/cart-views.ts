@@ -11,6 +11,10 @@ export function toCartView(cart: CartRow, lines: EvaluatedLine[], issues: QuoteI
     couponCode: cart.coupon_code,
     lines: lines.map((line) => ({
       variantId: line.variantId,
+      productId: line.productId,
+      productName: line.productName,
+      variantName: line.variantName,
+      image: line.imageId ? `/media/${line.imageId}` : null,
       quantity: line.quantity.toString(),
       unitPricePaise: line.storedUnitPricePaise.toString(),
       mrpPaise: line.mrpPaise.toString(),
