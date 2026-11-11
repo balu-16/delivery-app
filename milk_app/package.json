@@ -57,6 +57,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "phone:check": "node scripts/phone-check.mjs",
     "lint": "expo lint",
     "test": "jest --runInBand",
     "api:generate": "openapi-typescript ../server/openapi/customer.json -o src/api/customer.generated.ts"

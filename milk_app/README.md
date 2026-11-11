@@ -4,13 +4,12 @@ An Expo/React Native customer app. The customer API runs on your computer and us
 
 ## Start the API
 
-1. Use pnpm **12.18.0**. The command below runs the server with Node.js **26.13.0** through pnpm. Configure AWS credentials locally (for example, an AWS CLI profile) and the existing server's `.env` with its database, cache, Cognito and other AWS settings. Verify the intended identity with `aws sts get-caller-identity`. Never put AWS credentials in this app's `EXPO_PUBLIC_*` variables.
+1. Use pnpm **12.18.0**. The command below runs the existing compiled server with Node.js **26.13.0** through pnpm. Configure AWS credentials locally (for example, an AWS CLI profile) and the existing server's `.env` with its database, cache, Cognito and other AWS settings. Verify the intended identity with `aws sts get-caller-identity`. Never put AWS credentials in this app's `EXPO_PUBLIC_*` variables.
 2. From the project root, run:
 
    ```sh
    cd server
    pnpm install --frozen-lockfile
-   pnpm build
    # Replace this with your computer's Wi-Fi address.
    LAN_IP=192.168.1.100
    APP_ROLE=customer PORT=13080 APP_BASE_URL="http://${LAN_IP}:13080" \
@@ -18,7 +17,7 @@ An Expo/React Native customer app. The customer API runs on your computer and us
      pnpm dlx node@26.13.0 --env-file=.env dist/main.js
    ```
 
-   Keep this terminal open. Check `http://localhost:13080/healthz` and `http://localhost:13080/readyz`. The first checks the process; the second checks its configured dependencies. This customer role does not run background workers or consume shared queues. Fulfilment, dispatch, scheduled subscriptions and notifications require the appropriate backend worker processes to be running separately.
+   Keep this terminal open. If `dist/main.js` is absent or older than the server source, obtain permission before compiling it; the existing artifact can be used for the initial sign-in test when it contains the current bootstrap implementation. Check `http://localhost:13080/healthz` and `http://localhost:13080/readyz`. The first checks the process; the second checks its configured dependencies. This customer role does not run background workers or consume shared queues. Fulfilment, dispatch, scheduled subscriptions and notifications require the appropriate backend worker processes to be running separately.
 
 ## Start on a phone
 
@@ -34,6 +33,9 @@ An Expo/React Native customer app. The customer API runs on your computer and us
    ```
 
 4. Open the QR code with Expo Go on Android, or with the iPhone camera. If it cannot connect, check the LAN IP, firewall access to the Metro and API ports, VPN routing, and that both terminals are running. The phone location permission is used when you choose **Use current location** for an address.
+5. Run `pnpm phone:check` in `milk_app` to check the configured LAN address, API health and readiness, and Metro. A 503 readiness result means at least one configured dependency did not respond within the server's deadline; retry and investigate the AWS connection if it persists.
+
+Creating an account contacts Cognito directly. Signing in additionally requires the customer API above; an Expo Go screen can load even when that API is stopped. Cognito accounts appear under **Users** even before they belong to a group. The backend creates a customer profile on the first successful sign-in. For an account with a temporary password, enter that password at sign-in and then choose a new one when prompted.
 
 ## Current integration and checks
 
@@ -41,11 +43,10 @@ The app uses Cognito sign-in and the customer API for address selection, catalog
 
 Online payment and maps are marked as in progress. To add a delivery address, use the phone-location button while at the address and enter the remaining details. Availability depends on the configured service zones and stores. There is no wallet top-up flow.
 
-In the configured AWS development database, the wallet and cash-on-delivery flags are disabled and the three stores have COD disabled. An active workforce **SUPER_ADMIN** can enable the wallet, enable COD at each store, then enable the global COD flag with the audited admin API. After the latest server has been built, the following helper performs those changes through the authenticated admin API. It prompts for the workforce email, password and, if requested, a verification code; do not share those credentials in chat:
+In the configured AWS development database, the wallet and cash-on-delivery flags are disabled and the three stores have COD disabled. An active workforce **SUPER_ADMIN** can enable the wallet, enable COD at each store, then enable the global COD flag with the audited admin API. With an up-to-date compiled server, the following helper performs those changes through the authenticated admin API. It prompts for the workforce email, password and, if requested, a verification code; do not share those credentials in chat:
 
 ```sh
 cd server
-pnpm build
 pnpm dlx node@26.13.0 --env-file=.env scripts/enable-customer-features.mjs
 ```
 
@@ -57,7 +58,7 @@ The inbox works in Expo Go. Android push registration, permission prompts, foreg
 
 After installing a development build, start Metro with `REACT_NATIVE_PACKAGER_HOSTNAME=<your-LAN-IP> pnpm start --dev-client --lan`, sign in, and enable delivery alerts under Notifications. A backend worker with the notifications consumer must be running against the intended queues and FCM project for delivery. The customer-only API does not process those queues. Android remote push requires a real device and a development build; Expo Go does not support it. iOS currently has the in-app inbox but is not registered for remote push, because the backend expects FCM registration tokens. See the [Expo notifications documentation](https://docs.expo.dev/versions/v58.0.0/sdk/notifications/).
 
-The Expo project lives inside a larger repository. To submit a development build with only the customer app, create an isolated build directory from the project root. This uses the project's remote `development` environment and does not upload the server, the rider app, local environment files or the local Firebase configuration:
+The Expo project lives inside a larger repository. **Do not run a development build until the Expo Go test has been completed and the account owner explicitly approves it.** Once approved, submit only the customer app by creating an isolated build directory from the project root. This uses the project's remote `development` environment and does not upload the server, the rider app, local environment files or the local Firebase configuration:
 
 ```sh
 TASK_BUILD_DIR=$(mktemp -d)

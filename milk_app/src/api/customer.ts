@@ -29,7 +29,7 @@ export interface PlaceResult { order: { orderId: string; status: string; payment
 export interface WalletBalances { userId: string; cashPaise: string; promoPaise: string; version: string }
 
 export const customerApi = {
-  bootstrap: (idToken: string, referralCode?:string) => customerRequest<CustomerPrincipal>('/v1/customer/auth/bootstrap', { method: 'POST', token: idToken, ...(referralCode ? {body:{referralCode}} : {}) }),
+  bootstrap: (idToken: string, referralCode?:string, signal?: AbortSignal) => customerRequest<CustomerPrincipal>('/v1/customer/auth/bootstrap', { method: 'POST', token: idToken, ...(referralCode ? {body:{referralCode}} : {}), ...(signal ? {signal} : {}) }),
   profile: (token: string) => customerRequest<CustomerProfile>('/v1/customer/me', { token }),
   addresses: (token: string) => customerRequest<CustomerAddress[]>('/v1/customer/addresses', { token }),
   createAddress: (token: string, body: NewCustomerAddress) => customerRequest<AddressResult>('/v1/customer/addresses', { method: 'POST', token, body }),
