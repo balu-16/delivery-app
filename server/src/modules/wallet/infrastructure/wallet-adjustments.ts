@@ -59,7 +59,7 @@ export class WalletAdjustmentService implements WalletAdjustments {
     this.executor = approvalFactory({
       [ADJUSTMENT_ACTION]: {
         version: 1,
-        makerRole: 'ADMIN',
+        makerRole: 'SUPER_ADMIN',
         checkerRole: 'SUPER_ADMIN',
         ttlSeconds: WALLET_ADJUSTMENT_TTL_SECONDS,
         validate: (payload) => validRequest(payload),

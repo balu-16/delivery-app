@@ -47,10 +47,7 @@ let services: TestServices,
 const fulfillmentCalls: string[] = [];
 const adjustmentLines: ShortAdjustmentLine[] = [];
 
-it('blocks picker start and item actions while held and resumes without losing progress', async () => {
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${world.manager}::uuid,'ADMIN') ON CONFLICT DO NOTHING`.execute(
-    db.db,
-  );
+it('blocks picking start and item actions while held and resumes without losing progress', async () => {
   const variant = await world.makeVariant({ barcode: `hold-${uuidV7()}` });
   const order = await confirmedOrder([{ variantId: variant, quantity: '1' }]);
   const holds = new OrderHoldService(db.db);
@@ -58,13 +55,13 @@ it('blocks picker start and item actions while held and resumes without losing p
   await expect(holds.set(order.orderId, world.picker1, true, 'review')).rejects.toThrow(
     'FORBIDDEN',
   );
-  await holds.set(order.orderId, world.manager, true, 'review');
+  await holds.set(order.orderId, world.admin, true, 'review');
   await expect(picking.start(world.picker1, order.taskId, uuidV7())).rejects.toThrow(
     'ORDER_ON_HOLD',
   );
-  await holds.set(order.orderId, world.manager, false, 'cleared');
+  await holds.set(order.orderId, world.admin, false, 'cleared');
   await picking.start(world.picker1, order.taskId, uuidV7());
-  await holds.set(order.orderId, world.manager, true, 'review again');
+  await holds.set(order.orderId, world.admin, true, 'review again');
   await expect(
     picking.shortItem(
       world.picker1,
@@ -74,7 +71,7 @@ it('blocks picker start and item actions while held and resumes without losing p
       uuidV7(),
     ),
   ).rejects.toThrow('ORDER_ON_HOLD');
-  await holds.set(order.orderId, world.manager, false, 'cleared again');
+  await holds.set(order.orderId, world.admin, false, 'cleared again');
   const audit = await sql<{
     action: string;
   }>`SELECT action FROM audit_log WHERE subject_id=${order.orderId} AND action IN ('ORDER_HELD','ORDER_RESUMED') ORDER BY created_at`.execute(
@@ -253,7 +250,7 @@ test('the confirmation consumer creates exactly one task per order with walk-ord
   expect(
     task.items.find((task) => task.id === order.taskId)!.items.map((item) => item.name),
   ).toEqual([`item-${v1}`, `item-${v2}`]);
-  await expect(inventory.setBinLocation(world.picker1, world.store, v2, 'A0')).rejects.toThrow(
+  await expect(inventory.setBinLocation(world.admin, world.store, v2, 'A0')).rejects.toThrow(
     'STORE_NOT_FOUND',
   );
   await inventory.setBinLocation(world.manager, world.store, v2, 'A0');

@@ -6,6 +6,7 @@ import {
   type Database,
   type TransactionContext,
   transactionWithRetry,
+  databaseTimeAfterLock,
 } from '../../../platform/database/database.js';
 import { type PaymentGatewayPort } from '../contracts/gateway.js';
 import type {
@@ -307,7 +308,7 @@ export class PaymentWebhookService implements PaymentWebhookIngest, WebhookInbox
               aggregateType: 'payment_capture',
               aggregateId: receiptId,
               aggregateVersion: '1',
-              occurredAt: new Date().toISOString(),
+              occurredAt: (await databaseTimeAfterLock(tx)).toISOString(),
               correlationId: locked.operation_reference,
               causationId: null,
               payload: {
@@ -342,7 +343,7 @@ export class PaymentWebhookService implements PaymentWebhookIngest, WebhookInbox
           aggregateType: 'wallet_topup',
           aggregateId: locked.aggregate_id,
           aggregateVersion: '1',
-          occurredAt: new Date().toISOString(),
+          occurredAt: (await databaseTimeAfterLock(tx)).toISOString(),
           correlationId: locked.operation_reference,
           causationId: null,
           payload: {
@@ -381,7 +382,7 @@ export class PaymentWebhookService implements PaymentWebhookIngest, WebhookInbox
         aggregateType: 'payment_attempt',
         aggregateId: attempt.id,
         aggregateVersion: '1',
-        occurredAt: new Date().toISOString(),
+        occurredAt: (await databaseTimeAfterLock(tx)).toISOString(),
         correlationId: attempt.operation_reference,
         causationId: null,
         payload: {

@@ -30,7 +30,11 @@ import {
   type SubscriptionOperations,
 } from '../../../modules/subscriptions/contracts/subscriptions.js';
 import type { FrequencyRule } from '../../../modules/subscriptions/contracts/subscriptions.js';
-import { IdempotencyStore, hashRequest } from '../../../common/idempotency/idempotency.js';
+import {
+  IdempotencyStore,
+  hashCanonical,
+  hashRequest,
+} from '../../../common/idempotency/idempotency.js';
 import type { Json, TransactionContext } from '../../../platform/database/database.js';
 import { DomainErrorInterceptor } from '../../domain-errors.js';
 class CreateDto {
@@ -93,6 +97,8 @@ export class CustomerSubscriptionsController {
     const claim = await this.idem.claim(
       { actor: p.userId, audience: 'customer', method, resource, key },
       hashRequest(JSON.stringify(body)),
+      30,
+      hashCanonical(body),
     );
     if (claim.kind === 'replay') return claim.body;
     if (claim.kind === 'in_progress') throw new HttpException({ code: 'REQUEST_IN_PROGRESS' }, 409);

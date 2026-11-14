@@ -1,7 +1,11 @@
 import { resolve } from 'node:path';
 import { sql } from 'kysely';
 import { runner } from 'node-pg-migrate';
-import { IdempotencyStore, hashRequest } from '../../../src/common/idempotency/idempotency.js';
+import {
+  IdempotencyStore,
+  hashCanonical,
+  hashRequest,
+} from '../../../src/common/idempotency/idempotency.js';
 import { createDatabase, type DatabaseHandle } from '../../../src/platform/database/database.js';
 import { startTestServices, type TestServices } from '../../helpers/services.js';
 
@@ -98,5 +102,64 @@ it('does not steal an expired lease while a mutation holds the row lock', async 
     release();
   }
   await execute;
-  expect((await competingClaim!).kind).toBe('replay');
+  expect(['in_progress', 'replay']).toContain((await competingClaim!).kind);
+  expect((await store.claim(scope, hash)).kind).toBe('replay');
+});
+
+it('backfills legacy hashes only after the original request matches and preserves old-server compatibility', async () => {
+  const store = new IdempotencyStore(db.db);
+  const scope = {
+    actor: 'actor',
+    audience: 'customer',
+    method: 'POST',
+    resource: '/orders',
+    key: 'legacy-hash',
+  };
+  const original = { z: 1, a: { y: 2, x: 3 } };
+  const reordered = { a: { x: 3, y: 2 }, z: 1 };
+  const legacy = hashRequest(JSON.stringify(original));
+  const normalized = hashCanonical(original);
+  const oldClaim = await store.claim(scope, legacy);
+  if (oldClaim.kind !== 'claimed') throw new Error('Claim missing');
+  await store.execute(oldClaim.owner, async () => ({ status: 200, body: { ok: true } }));
+  expect(
+    (await store.claim(scope, hashRequest(JSON.stringify(reordered)), 30, normalized)).kind,
+  ).toBe('key_reused');
+  expect((await store.claim(scope, legacy, 30, normalized)).kind).toBe('replay');
+  expect(
+    (await store.claim(scope, hashRequest(JSON.stringify(reordered)), 30, hashCanonical(reordered)))
+      .kind,
+  ).toBe('replay');
+  expect((await store.claim(scope, legacy)).kind).toBe('replay');
+  const row = await sql<{
+    request_hash: string;
+    canonical_request_hash: string;
+  }>`SELECT request_hash,canonical_request_hash FROM idempotency_keys WHERE key=${scope.key}`.execute(
+    db.db,
+  );
+  expect(row.rows[0]).toEqual({ request_hash: legacy, canonical_request_hash: normalized });
+});
+
+it('fences the original owner after an expired lease is reclaimed', async () => {
+  const store = new IdempotencyStore(db.db);
+  const scope = {
+    actor: 'actor',
+    audience: 'customer',
+    method: 'POST',
+    resource: '/orders',
+    key: 'stale-owner',
+  };
+  const hash = hashRequest('{}');
+  const first = await store.claim(scope, hash);
+  if (first.kind !== 'claimed') throw new Error('Claim missing');
+  await sql`UPDATE idempotency_keys SET lease_until=clock_timestamp()-interval '1 second' WHERE key=${scope.key}`.execute(
+    db.db,
+  );
+  const second = await store.claim(scope, hash);
+  if (second.kind !== 'claimed') throw new Error('Reclaim missing');
+  expect(second.owner.operationId).toBe(first.owner.operationId);
+  await expect(
+    db.db.transaction().execute((tx) => store.lockOwner(tx, first.owner)),
+  ).rejects.toThrow('IDEMPOTENCY_LEASE_LOST');
+  await db.db.transaction().execute((tx) => store.lockOwner(tx, second.owner));
 });

@@ -37,7 +37,11 @@ import {
 } from 'class-validator';
 import type { Json, TransactionContext } from '../../../platform/database/database.js';
 import { DomainErrorInterceptor } from '../../domain-errors.js';
-import { IdempotencyStore, hashRequest } from '../../../common/idempotency/idempotency.js';
+import {
+  canonical,
+  IdempotencyStore,
+  hashRequest,
+} from '../../../common/idempotency/idempotency.js';
 import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
 import type { Principal } from '../../../modules/identity/contracts/identity.js';
@@ -136,18 +140,6 @@ class CouponListQuery {
   @Matches(/^[A-Z0-9][A-Z0-9_-]{2,39}$/)
   cursor?: string;
 }
-/** Canonical JSON so the same logical request always hashes identically. */
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === 'object')
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([, v]) => v !== undefined)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([k, v]) => [k, canonical(v)]),
-    );
-  return value;
-}
 function draftOf(d: CouponDraftDto): CouponDraft {
   return {
     code: d.code,
@@ -183,7 +175,7 @@ function patchOf(d: CouponPatchDto): CouponPatch {
 }
 @Controller('v1/admin/coupons')
 @ApiBearerAuth()
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 @UseInterceptors(DomainErrorInterceptor)
 export class AdminCouponsController {

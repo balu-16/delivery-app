@@ -36,7 +36,8 @@ export class StoreCashController {
     @Body() body: DepositDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    if (!key || key.length > 150) throw new HttpException('IDEMPOTENCY_KEY_REQUIRED', 400);
+    if (!key || key.length > 150)
+      throw new HttpException({ code: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
     const reference = `cash-${createHash('sha256')
       .update(JSON.stringify([p.userId, body.storeId, body.riderId, key]))
       .digest('hex')

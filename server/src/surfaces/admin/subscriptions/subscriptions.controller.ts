@@ -23,7 +23,11 @@ import {
   SUBSCRIPTION_ADMIN,
   type SubscriptionAdmin,
 } from '../../../modules/subscriptions/contracts/subscriptions.js';
-import { IdempotencyStore, hashRequest } from '../../../common/idempotency/idempotency.js';
+import {
+  IdempotencyStore,
+  hashCanonical,
+  hashRequest,
+} from '../../../common/idempotency/idempotency.js';
 import type { Json, TransactionContext } from '../../../platform/database/database.js';
 import { DomainErrorInterceptor } from '../../domain-errors.js';
 class PlanDto {
@@ -45,7 +49,7 @@ class HolidayDto {
 }
 @Controller('v1/admin/subscriptions')
 @ApiBearerAuth()
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 @UseInterceptors(DomainErrorInterceptor)
 export class AdminSubscriptionsController {
@@ -65,6 +69,8 @@ export class AdminSubscriptionsController {
     const claim = await this.idem.claim(
       { actor: p.userId, audience: 'admin', method, resource, key },
       hashRequest(JSON.stringify(body)),
+      30,
+      hashCanonical(body),
     );
     if (claim.kind === 'replay') return claim.body;
     if (claim.kind === 'in_progress') throw new HttpException({ code: 'REQUEST_IN_PROGRESS' }, 409);

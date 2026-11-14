@@ -20,8 +20,7 @@ export class CatalogWrite {
     work: (tx: TransactionContext) => Promise<T>,
   ): Promise<T> {
     return this.db.transaction().execute(async (tx) => {
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const result = await work(tx);
       await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id) VALUES (${uuidV7()},${actor}::uuid,${action},'catalog',${subject})`.execute(
         tx,
@@ -35,11 +34,13 @@ export class CatalogWrite {
     limit: number,
     cursor?: string,
     id?: string,
+    productId?: string,
   ): Promise<{ items: unknown[]; nextCursor: string | null }> {
-    if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INVALID_PAGE');
     const after = cursor ?? null;
+    const parentFilter =
+      kind === 'variants' && productId ? sql` AND product_id=${productId}::uuid` : sql``;
     const result =
       kind === 'categories'
         ? await sql<{
@@ -61,7 +62,7 @@ export class CatalogWrite {
               )
             : await sql<{
                 id: string;
-              }>`SELECT id,product_id AS "productId",name,sku,barcode,base_unit AS "baseUnit" FROM catalog_variants WHERE deleted_at IS NULL AND (${id ?? null}::uuid IS NULL OR id=${id ?? null}::uuid) AND (${after}::uuid IS NULL OR id>${after}::uuid) ORDER BY id LIMIT ${limit + 1}`.execute(
+              }>`SELECT id,product_id AS "productId",name,sku,barcode,base_unit AS "baseUnit" FROM catalog_variants WHERE deleted_at IS NULL AND (${id ?? null}::uuid IS NULL OR id=${id ?? null}::uuid) AND (${after}::uuid IS NULL OR id>${after}::uuid)${parentFilter} ORDER BY id LIMIT ${limit + 1}`.execute(
                 this.db,
               );
     const items = result.rows.slice(0, limit);
@@ -77,8 +78,7 @@ export class CatalogWrite {
     limit: number,
     cursor?: string,
   ): Promise<{ items: Array<{ term: string; expansion: string }>; nextCursor: string | null }> {
-    if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INVALID_PAGE');
     const rows = await sql<{
       term: string;

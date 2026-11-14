@@ -52,7 +52,7 @@ export class OrderAdministrationService implements OrderAdministration {
   ) {
     const action: ApprovalAction = {
       version: 1,
-      makerRole: 'ADMIN',
+      makerRole: 'SUPER_ADMIN',
       checkerRole: 'SUPER_ADMIN',
       ttlSeconds: 86400,
       validate: valid,
@@ -123,7 +123,7 @@ export class OrderAdministrationService implements OrderAdministration {
     this.executor = factory.create({
       orderAdministration: action,
       orderRepair: { ...action, makerRole: 'SUPER_ADMIN' },
-      supportRefund: { ...action, makerRole: 'SUPPORT_AGENT', checkerRole: 'ADMIN' },
+      supportRefund: { ...action, makerRole: 'SUPPORT_AGENT', checkerRole: 'SUPER_ADMIN' },
       ticketAdminRefund: action,
     });
   }
@@ -159,7 +159,7 @@ export class OrderAdministrationService implements OrderAdministration {
     action: string,
     p: Request,
   ): Promise<string | null> {
-    const role = action === 'supportRefund' ? 'SUPPORT_AGENT' : 'ADMIN';
+    const role = action === 'supportRefund' ? 'SUPPORT_AGENT' : 'SUPER_ADMIN';
     const actor =
       await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${makerId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role=${role}`.execute(
         this.db,

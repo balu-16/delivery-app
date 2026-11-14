@@ -35,7 +35,9 @@ export async function seedNotificationsWorld(db: DatabaseHandle): Promise<Notifi
     db.db,
   );
   await user(admin, 'WORKFORCE', 'notify-admin');
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'ADMIN')`.execute(db.db);
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
   // Distinct names: uuidV7 shares a time prefix within one millisecond.
   const names = ['notify-cust', 'notify-cust-te', 'notify-other'];
   for (const [index, id] of [customer, customerTe, other].entries())

@@ -20,6 +20,7 @@ function readable(error: unknown) {
   if (error instanceof ApiError) {
     switch (error.code) {
       case 'CONCURRENT_MODIFICATION': return 'Your cart changed on another device. We refreshed it; please review it.';
+      case 'IDEMPOTENCY_LEASE_LOST': case 'REQUEST_IN_PROGRESS': return 'Your request is still being checked. Retry the same request shortly.';
       case 'CART_NOT_FOUND': return 'Your cart is empty.';
       case 'INVENTORY_INSUFFICIENT': case 'ITEM_UNAVAILABLE': return 'This item is no longer available in the requested quantity.';
       case 'PRICE_CHANGED': return 'Prices changed. Review a new quote before ordering.';
@@ -136,7 +137,13 @@ export const useCustomer = create<CustomerState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const token = await accessToken();
-      const service = await customerApi.serviceability(token, value.lat, value.lng);
+      const service = await customerApi.serviceability(token, value.lat, value.lng).catch(error => {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403))
+          throw new Error('Could not check delivery coverage. Sign in again and try again.');
+        if (error instanceof TypeError)
+          throw new Error('Could not check delivery coverage. Check your connection and try again.');
+        throw new Error('Could not check delivery coverage. Please try again shortly.');
+      });
       if (!service.zone || service.reasons.includes('OUTSIDE_ZONE')) throw new Error('This address is outside the current delivery area.');
       const result = await customerApi.createAddress(token, { ...value, makeDefault: true });
       if (generation !== epoch) throw new Error('Session changed.');
@@ -144,7 +151,7 @@ export const useCustomer = create<CustomerState>((set, get) => ({
       set({ addresses, selectedAddress: result.address.id, quote: null, products: [] });
       await get().loadCatalog();
       return {needsConfirmation:result.needsConfirmation, degraded:result.degraded, temporarilyUnavailable:!service.serviceable};
-    } catch (error) { if (generation === epoch) set({ error: readable(error) }); throw error; } finally { if (generation === epoch) set({ busy: false }); }
+    } finally { if (generation === epoch) set({ busy: false }); }
   },
   loadCatalog: async cursor => {
     const addressId = get().selectedAddress; const generation = epoch;

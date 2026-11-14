@@ -1,7 +1,11 @@
 import { sql } from 'kysely';
 import { appendEvent } from '../../../platform/outbox/outbox.js';
 import { uuidV7 } from '../../../common/ids/ids.js';
-import { transactionWithRetry, type Database } from '../../../platform/database/database.js';
+import {
+  databaseTimeAfterLock,
+  transactionWithRetry,
+  type Database,
+} from '../../../platform/database/database.js';
 import type { PaymentGatewayPort } from '../contracts/gateway.js';
 import { MAX_REFUND_RECOVERY_ATTEMPTS } from '../domain/states.js';
 import { recordFinding } from './findings.js';
@@ -95,7 +99,7 @@ export class PaymentPollerService {
             aggregateType: 'payment_attempt',
             aggregateId: locked.id,
             aggregateVersion: '1',
-            occurredAt: new Date().toISOString(),
+            occurredAt: (await databaseTimeAfterLock(tx)).toISOString(),
             correlationId: locked.operation_reference,
             causationId: null,
             payload: {
@@ -126,7 +130,7 @@ export class PaymentPollerService {
             aggregateType: 'payment_attempt',
             aggregateId: locked.id,
             aggregateVersion: '1',
-            occurredAt: new Date().toISOString(),
+            occurredAt: (await databaseTimeAfterLock(tx)).toISOString(),
             correlationId: locked.operation_reference,
             causationId: null,
             payload: {

@@ -66,9 +66,6 @@ it('validates related phase policies atomically before writing history or config
 it('rejects runtime timing edits that invalidate an existing active delivery slot', async () => {
   const world = await createP5World();
   try {
-    await sql`INSERT INTO user_roles(user_id,role) VALUES(${world.admin}::uuid,'SUPER_ADMIN')`.execute(
-      world.db.db,
-    );
     await sql`INSERT INTO subscription_slots(id,store_id,name,start_time,end_time) VALUES(${uuidV7()}::uuid,${world.store}::uuid,'Morning','06:00','09:00')`.execute(
       world.db.db,
     );

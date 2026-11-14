@@ -34,6 +34,33 @@ test('SQS requires the explicit development account and a valid region', () => {
   ).toThrow('AWS_ACCOUNT_ID');
 });
 
+test('customer group retry queue must be an AWS SQS URL in the configured account and region', () => {
+  const cognito = {
+    ...valid,
+    AUTH_PROVIDER: 'cognito',
+    AWS_ACCOUNT_ID: '123456789012',
+    COGNITO_CUSTOMER_POOL_ID: 'pool',
+    COGNITO_CUSTOMER_CLIENT_ID: 'customer',
+    COGNITO_WORKFORCE_POOL_ID: 'pool',
+    COGNITO_RIDER_CLIENT_ID: 'rider',
+    COGNITO_STORE_CLIENT_ID: 'store',
+    COGNITO_ADMIN_CLIENT_ID: 'admin',
+  };
+  const url = 'https://sqs.ap-southeast-2.amazonaws.com/123456789012/customer-group';
+  expect(
+    readEnv({ ...cognito, CUSTOMER_GROUP_SYNC_QUEUE_URL: url }).CUSTOMER_GROUP_SYNC_QUEUE_URL,
+  ).toBe(url);
+  for (const invalid of [
+    'https://sqs.ap-southeast-2.amazonaws.com.evil.test/123456789012/customer-group',
+    'https://sqs.ap-southeast-2.amazonaws.com/999999999999/customer-group',
+    'http://sqs.ap-southeast-2.amazonaws.com/123456789012/customer-group',
+    `${url}?secret=1`,
+  ])
+    expect(() => readEnv({ ...cognito, CUSTOMER_GROUP_SYNC_QUEUE_URL: invalid })).toThrow(
+      'CUSTOMER_GROUP_SYNC_QUEUE_URL',
+    );
+});
+
 test('SQS requires safe queue prefixes and rejects development names in production', () => {
   const sqs = { ...valid, QUEUE_TRANSPORT: 'sqs', AWS_ACCOUNT_ID: '123456789012' };
   expect(readEnv(sqs).SQS_QUEUE_PREFIX).toBe('');

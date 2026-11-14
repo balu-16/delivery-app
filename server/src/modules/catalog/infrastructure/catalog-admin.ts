@@ -25,7 +25,7 @@ export class PostgresCatalogAdmin extends CatalogWrite implements CatalogAdmin {
   readonly approvals: ApprovalExecutor;
   constructor(db: Database, identity: IdentityAccess, config: AppConfig, factory: ApprovalFactory) {
     super(db, identity, config);
-    const action = (makerRole: 'ADMIN' | 'SUPER_ADMIN') => ({
+    const action = (makerRole: 'SUPER_ADMIN') => ({
       version: 1,
       makerRole,
       checkerRole: 'SUPER_ADMIN',
@@ -37,7 +37,7 @@ export class PostgresCatalogAdmin extends CatalogWrite implements CatalogAdmin {
       },
     });
     this.approvals = factory.create({
-      CATALOG_PRICE_CHANGE: action('ADMIN'),
+      CATALOG_PRICE_CHANGE: action('SUPER_ADMIN'),
       CATALOG_PRICE_CHANGE_SUPER: action('SUPER_ADMIN'),
     });
   }
@@ -187,8 +187,7 @@ export class PostgresCatalogAdmin extends CatalogWrite implements CatalogAdmin {
   }
   async setPrice(actor: string, data: PriceDraft): Promise<{ approvalId?: string }> {
     assertMoney(data.sellingPaise, data.mrpPaise);
-    if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     const previous = await sql<{
       selling_paise: string;
     }>`SELECT selling_paise::text FROM catalog_prices WHERE store_id=${data.storeId}::uuid AND variant_id=${data.variantId}::uuid AND valid_from<=clock_timestamp() AND (valid_to IS NULL OR valid_to>clock_timestamp())`.execute(
@@ -207,7 +206,7 @@ export class PostgresCatalogAdmin extends CatalogWrite implements CatalogAdmin {
           BigInt(old) * BigInt(threshold))
     ) {
       const payload = { ...data, validFrom: data.validFrom ?? null, validTo: data.validTo ?? null };
-      const action = (await this.identity.hasRole(actor, ['ADMIN']))
+      const action = (await this.identity.hasRole(actor, ['SUPER_ADMIN']))
         ? 'CATALOG_PRICE_CHANGE'
         : 'CATALOG_PRICE_CHANGE_SUPER';
       return { approvalId: await this.approvals.request(actor, action, payload) };

@@ -96,7 +96,7 @@ class AdminLedgerQuery {
  */
 @Controller('v1/admin/wallet')
 @ApiBearerAuth()
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 @UseInterceptors(DomainErrorInterceptor)
 export class AdminWalletController {

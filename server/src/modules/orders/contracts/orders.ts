@@ -119,7 +119,7 @@ export interface OrderView {
   version: string;
 }
 
-export type ActorType = 'CUSTOMER' | 'ADMIN' | 'SYSTEM' | 'RIDER' | 'PICKER';
+export type ActorType = 'CUSTOMER' | 'ADMIN' | 'SYSTEM' | 'RIDER' | 'PICKER' | 'STORE_MANAGER';
 export interface Actor {
   readonly type: ActorType;
   readonly id: string | null;
@@ -201,7 +201,11 @@ export interface OrderOperations {
     input: { addressId: string; addressSnapshot: JsonRecord },
   ): Promise<OrderView>;
   /** Builds a NEW cart from previous items at current prices; never places an order. */
-  reorder(orderId: string, userId: string): Promise<ReorderResult>;
+  reorder(
+    orderId: string,
+    userId: string,
+    opts?: { tx?: TransactionContext },
+  ): Promise<ReorderResult>;
   /** Forces a guarded repair transition (SUPER_ADMIN maker-checker, D25). */
   forceState(
     orderId: string,

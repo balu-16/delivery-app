@@ -47,8 +47,7 @@ export class PostgresCouponAdministration implements CouponAdministration {
     private readonly identity: IdentityAccess,
   ) {}
   private async requireAdmin(actorId: string): Promise<void> {
-    if (!(await this.identity.hasRole(actorId, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(actorId, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
   }
   private run<T>(
     tx: TransactionContext | undefined,

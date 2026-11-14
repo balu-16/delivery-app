@@ -90,6 +90,11 @@ export class PageDto {
   limit?: number;
   @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() cursor?: string;
 }
+
+/** Variant listing filtered to one product (portal product-detail view). */
+export class VariantsPageDto extends PageDto {
+  @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() productId?: string;
+}
 export class NameView {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() name!: string;

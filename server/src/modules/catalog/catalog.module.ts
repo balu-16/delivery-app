@@ -59,6 +59,7 @@ import { PostgresCatalogLookup } from './infrastructure/lookup.js';
           config,
           runtime.get('STORAGE_PROVIDER') === 's3' ? runtime.get('CDN_BASE_URL') : undefined,
           redis,
+          runtime.get('CATALOG_PREVIEW_STORE_ID'),
         ),
     },
     { provide: SEARCH_PORT, useExisting: CATALOG_QUERY },

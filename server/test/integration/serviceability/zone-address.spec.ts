@@ -307,7 +307,7 @@ describe('P2 serviceability against PostGIS', () => {
     await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES (${admin},'WORKFORCE','admin','admin@example.com','admin'),(${ordinary},'WORKFORCE','ordinary','ordinary@example.com','ordinary')`.execute(
       db.db,
     );
-    await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin},'ADMIN'),(${ordinary},'PICKER')`.execute(
+    await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin},'SUPER_ADMIN'),(${ordinary},'SUPPORT_AGENT')`.execute(
       db.db,
     );
     const service = new PostgresStoreAdministration(db.db, new DatabaseIdentityAccess(db.db));
@@ -370,10 +370,10 @@ describe('P2 serviceability against PostGIS', () => {
       await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES (${other},'CUSTOMER','other','other@example.com','other'),(${support},'WORKFORCE','support','support@example.com','support'),(${picker},'WORKFORCE','picker','picker@example.com','picker'),(${manager},'WORKFORCE','manager','manager@example.com','manager')`.execute(
         db.db,
       );
-      await sql`INSERT INTO user_roles(user_id,role) VALUES (${user},'CUSTOMER'),(${other},'CUSTOMER'),(${support},'SUPPORT_AGENT'),(${picker},'PICKER'),(${manager},'STORE_MANAGER')`.execute(
+      await sql`INSERT INTO user_roles(user_id,role) VALUES (${user},'CUSTOMER'),(${other},'CUSTOMER'),(${support},'SUPPORT_AGENT'),(${picker},'STORE_MANAGER'),(${manager},'STORE_MANAGER')`.execute(
         db.db,
       );
-      await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${picker},${store},'PICKER'),(${manager},${store},'STORE_MANAGER')`.execute(
+      await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${picker},${store},'STORE_MANAGER'),(${manager},${store},'STORE_MANAGER')`.execute(
         db.db,
       );
       const testQueues =
@@ -403,7 +403,7 @@ describe('P2 serviceability against PostGIS', () => {
         const another = await tokens.issue('CUSTOMER', 'other', 'customer', 'access');
         const limited = await tokens.issue('WORKFORCE', 'support', 'admin', 'access');
         const adminToken = await tokens.issue('WORKFORCE', 'admin', 'admin', 'access');
-        const pickerToken = await tokens.issue('WORKFORCE', 'picker', 'store', 'access');
+        const pickerToken = await tokens.issue('WORKFORCE', 'support', 'store', 'access');
         const managerToken = await tokens.issue('WORKFORCE', 'manager', 'store', 'access');
         const app = await createApplication(env);
         const redis = app.get<Redis>(PLATFORM_REDIS);
@@ -485,7 +485,7 @@ describe('P2 serviceability against PostGIS', () => {
             {
               method: 'PUT',
               url: `/v1/admin/stores/${store}/staff`,
-              payload: { userId: support, role: 'PICKER', active: true },
+              payload: { userId: support, role: 'STORE_MANAGER', active: true },
             },
             {
               method: 'POST',

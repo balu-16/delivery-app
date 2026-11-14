@@ -16,8 +16,13 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
-import type { Json } from '../../../platform/database/database.js';
-import { IdempotencyStore, hashRequest } from '../../../common/idempotency/idempotency.js';
+import type { Json, TransactionContext } from '../../../platform/database/database.js';
+import {
+  IdempotencyStore,
+  hashCanonical,
+  hashRequest,
+  type IdempotencyOwner,
+} from '../../../common/idempotency/idempotency.js';
 import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
 import type { Principal } from '../../../modules/identity/contracts/identity.js';
@@ -75,8 +80,8 @@ export class CustomerCheckoutController {
     @Param('orderId', ParseUUIDPipe) id: string,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, `/v1/customer/orders/${id}/reorder`, {}, () =>
-      this.orders.reorder(id, p.userId),
+    return this.keyed(p, key, `/v1/customer/orders/${id}/reorder`, {}, (_operationId, tx) =>
+      this.orders.reorder(id, p.userId, { tx }),
     );
   }
   constructor(
@@ -99,8 +104,14 @@ export class CustomerCheckoutController {
     @Body() body: PlaceDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, '/v1/customer/checkout/place', body, async (operationId) =>
-      this.checkout.place(p.userId, { ...body, idempotencyOperationId: operationId }),
+    return this.keyed(
+      p,
+      key,
+      '/v1/customer/checkout/place',
+      body,
+      async (operationId, _tx, owner) =>
+        this.checkout.place(p.userId, { ...body, idempotencyOperationId: operationId }, owner),
+      true,
     );
   }
   @Get('orders')
@@ -135,8 +146,8 @@ export class CustomerCheckoutController {
     @Headers('idempotency-key') key?: string,
   ) {
     if (!(await this.orders.byId(id, { userId: p.userId }))) throw new Error('ORDER_NOT_FOUND');
-    return this.keyed(p, key, `/v1/customer/orders/${id}/cancel`, body, async () =>
-      this.orders.cancel(id, { type: 'CUSTOMER', id: p.userId }, body.reason),
+    return this.keyed(p, key, `/v1/customer/orders/${id}/cancel`, body, async (_operationId, tx) =>
+      this.orders.cancel(id, { type: 'CUSTOMER', id: p.userId }, body.reason, { tx }),
     );
   }
   private async keyed<T>(
@@ -144,18 +155,30 @@ export class CustomerCheckoutController {
     key: string | undefined,
     resource: string,
     body: unknown,
-    work: (operationId: string) => Promise<T>,
+    work: (operationId: string, tx?: TransactionContext, owner?: IdempotencyOwner) => Promise<T>,
+    external = false,
   ): Promise<T> {
     if (!key || key.length > 150) throw new HttpException({ code: 'INVALID_INPUT' }, 400);
     const claim = await this.idem.claim(
       { actor: p.userId, audience: 'customer', method: 'POST', resource, key },
       hashRequest(JSON.stringify(body)),
+      120,
+      hashCanonical(body),
     );
     if (claim.kind === 'replay') return claim.body as T;
     if (claim.kind === 'in_progress') throw new HttpException({ code: 'REQUEST_IN_PROGRESS' }, 409);
     if (claim.kind !== 'claimed') throw new HttpException({ code: 'IDEMPOTENCY_KEY_REUSED' }, 409);
-    const result = await work(claim.owner.operationId);
-    await this.idem.execute(claim.owner, async () => ({ status: 200, body: result as Json }));
-    return result;
+    if (!external) {
+      const response = await this.idem.execute(claim.owner, async (tx) => ({
+        status: 200,
+        body: (await work(claim.owner.operationId, tx)) as Json,
+      }));
+      return response.body as T;
+    }
+    return this.idem.withRenewal(claim.owner, async () => {
+      const result = await work(claim.owner.operationId, undefined, claim.owner);
+      await this.idem.execute(claim.owner, async () => ({ status: 200, body: result as Json }));
+      return result;
+    });
   }
 }

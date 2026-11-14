@@ -7,24 +7,34 @@ import type {
   Principal,
   VerifiedIdentity,
 } from '../contracts/identity.js';
-import { authorizeIdentity } from '../domain/identity-policy.js';
+import { authorizeIdentity, canBootstrapRole } from '../domain/identity-policy.js';
 import type { Referrals } from '../../referrals/contracts/referrals.js';
+import { queueVerifiedCustomerGroup, type CustomerGroupSync } from './customer-group-sync.js';
 export class IdentityService {
   constructor(
     private readonly db: Database,
     private readonly access: IdentityAccess,
     private readonly referrals?: Referrals,
+    private readonly customerGroupSync?: CustomerGroupSync,
+    private readonly onCustomerGroupSyncError: () => void = () => {},
   ) {}
   async bootstrap(identity: VerifiedIdentity, referralCode?: string): Promise<Principal> {
     if (identity.pool !== 'CUSTOMER' || identity.tokenUse !== 'id' || !identity.email)
       throw new Error('INVALID_BOOTSTRAP_IDENTITY');
+    if (!identity.emailVerified) throw new Error('EMAIL_NOT_VERIFIED');
+    if (!canBootstrapRole(identity.groups, 'CUSTOMER')) throw new Error('ROLE_CONFLICT');
     const email = identity.email.trim().toLowerCase();
     if (email.length > 254 || !email.includes('@')) throw new Error('INVALID_EMAIL');
     await this.db.transaction().execute(async (tx) => {
       // Serialize a subject's initial inserts across both unique indexes.
-      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`identity:customer:${identity.sub}`}, 0))`.execute(
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`identity:subject:${identity.sub}`}, 0))`.execute(
         tx,
       );
+      const conflict =
+        await sql`SELECT 1 FROM users WHERE cognito_sub=${identity.sub} AND pool<>'CUSTOMER' LIMIT 1`.execute(
+          tx,
+        );
+      if (conflict.rows.length) throw new Error('ROLE_CONFLICT');
       // Resolve only by pool/sub: never merge an existing account by e-mail.
       const existing = await sql<{
         id: string;
@@ -65,6 +75,14 @@ export class IdentityService {
     });
     const principal = await this.access.getPrincipal('CUSTOMER', identity.sub);
     if (!principal || principal.status !== 'ACTIVE') throw new Error('PROFILE_NOT_INITIALIZED');
+    // This is a recovery path for already-confirmed users and a failed trigger enqueue.
+    // Bootstrap can recover an ungrouped account, but protected endpoints require
+    // the matching group in a refreshed token as well as the database role.
+    await queueVerifiedCustomerGroup(
+      identity,
+      this.customerGroupSync,
+      this.onCustomerGroupSyncError,
+    );
     return principal;
   }
   /** Cryptographic verification occurs first; role and account state are authoritative DB reads. */

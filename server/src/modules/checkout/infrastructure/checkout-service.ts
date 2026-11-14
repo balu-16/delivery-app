@@ -1,4 +1,9 @@
 import { sql } from 'kysely';
+import {
+  IdempotencyStore,
+  type IdempotencyOwner,
+} from '../../../common/idempotency/idempotency.js';
+import { lockActiveCustomer } from '../../identity/contracts/account-lock.js';
 import { transactionWithRetry, type Database } from '../../../platform/database/database.js';
 import type { ConfigService } from '../../../config/config.service.js';
 import type { CartIntents } from '../../cart/contracts/intent.js';
@@ -23,7 +28,7 @@ import type {
   CheckoutQuoteRequest,
   CheckoutQuoteResult,
 } from '../contracts/checkout.js';
-import { evaluateCod } from '../contracts/checkout.js';
+import { codEligibility } from './cod-eligibility.js';
 import { PlaceOrderSaga } from './place-order.js';
 import { ScheduledOrderService } from './scheduled-order.js';
 import type { ScheduledOrderInput } from '../contracts/checkout.js';
@@ -64,6 +69,35 @@ export class CheckoutService implements CheckoutOperations {
   priceScheduled(input: ScheduledOrderInput, tx: TransactionContext) {
     return new ScheduledOrderService(this.deps).price(input, tx);
   }
+  async priceScheduledBatch(inputs: readonly ScheduledOrderInput[]) {
+    const output: ({ unitPricePaise: string; totalPaise: string } | null)[] = [];
+    // Keep transactions and their shared locks short; a failed estimate must not
+    // abort estimates for other deliveries in the same batch.
+    for (let offset = 0; offset < inputs.length; offset += 20) {
+      const chunk = inputs.slice(offset, offset + 20);
+      const results = await this.db
+        .transaction()
+        .execute(async (tx) => {
+          const scheduled = new ScheduledOrderService(this.deps, true);
+          const values: ({ unitPricePaise: string; totalPaise: string } | null)[] = [];
+          for (const input of chunk) {
+            await sql`SAVEPOINT scheduled_estimate`.execute(tx);
+            try {
+              values.push(await scheduled.price(input, tx));
+            } catch {
+              await sql`ROLLBACK TO SAVEPOINT scheduled_estimate`.execute(tx);
+              scheduled.clearEstimateCache();
+              values.push(null);
+            }
+            await sql`RELEASE SAVEPOINT scheduled_estimate`.execute(tx);
+          }
+          return values;
+        })
+        .catch(() => chunk.map(() => null));
+      output.push(...results);
+    }
+    return output;
+  }
   placeScheduled(input: ScheduledOrderInput, tx: TransactionContext) {
     return new ScheduledOrderService(this.deps).place(input, tx);
   }
@@ -87,33 +121,36 @@ export class CheckoutService implements CheckoutOperations {
     storeId: string,
     amountDuePaise: string,
   ): Promise<boolean> {
-    const [flag, store, completed, maxCodPaise, eligibility] = await Promise.all([
-      sql<{ enabled: boolean }>`SELECT enabled FROM feature_flags WHERE key='cod_enabled'`.execute(
-        this.db,
-      ),
-      sql<{
-        accepts_cod: boolean;
-      }>`SELECT accepts_cod FROM stores WHERE id=${storeId}::uuid`.execute(this.db),
-      sql<{ n: string }>`SELECT count(*)::text AS n FROM orders WHERE user_id=${userId}::uuid
-        AND status='DELIVERED' AND payment_status='PAID' AND payment_method IN ('GATEWAY','WALLET','ZERO_DUE')`.execute(
-        this.db,
-      ),
-      this.deps.config.get('maxCodPaise'),
-      this.deps.config.get('codEligibility'),
-    ]);
-    return evaluateCod({
-      codEnabled: flag.rows[0]?.enabled === true,
-      storeAcceptsCod: store.rows[0]?.accepts_cod === true,
-      amountDuePaise,
-      maxCodPaise,
-      completedPrepaidOrders: Number(completed.rows[0]?.n ?? '0'),
-      minCompletedPrepaidOrders: eligibility.minCompletedPrepaidOrders,
-    }).allowed;
+    return (await codEligibility(this.db, this.deps.config, userId, storeId, amountDuePaise))
+      .allowed;
   }
-  async place(userId: string, input: CheckoutPlaceRequest): Promise<CheckoutPlaceResult> {
+  async place(
+    userId: string,
+    input: CheckoutPlaceRequest,
+    owner?: IdempotencyOwner,
+  ): Promise<CheckoutPlaceResult> {
+    if (
+      owner &&
+      (owner.operationId !== input.idempotencyOperationId || owner.scope.actor !== userId)
+    )
+      throw new Error('IDEMPOTENCY_LEASE_LOST');
     const resumable = await this.saga.findResumable(input.idempotencyOperationId);
     if (resumable) return this.resume(userId, resumable);
-    const placed = await transactionWithRetry(this.db, (tx) => this.saga.place(userId, input, tx));
+    const idempotency = owner ? new IdempotencyStore(this.db) : undefined;
+    const outcome = await transactionWithRetry(this.db, async (tx) => {
+      if (owner) await idempotency!.lockOwner(tx, owner);
+      await lockActiveCustomer(userId, tx);
+      const existing = await this.saga.findResumable(input.idempotencyOperationId, tx);
+      if (existing) {
+        if (owner) await idempotency!.extendLocked(tx, owner);
+        return { existing } as const;
+      }
+      const placed = await this.saga.place(userId, input, tx);
+      if (owner) await idempotency!.extendLocked(tx, owner);
+      return { placed } as const;
+    });
+    if (outcome.existing) return this.resume(userId, outcome.existing);
+    const placed = outcome.placed;
     const payment = placed.attempt ? await this.setupPayment(placed.attempt) : null;
     await this.fraud?.recordCheckoutVelocity(userId, placed.order.orderId).catch(() => undefined);
     return {

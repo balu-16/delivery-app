@@ -95,7 +95,7 @@ it('enforces order and ticket ownership and excludes internal messages from cust
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${cannedAdmin}::uuid,'WORKFORCE',${cannedAdmin},${`${cannedAdmin}@test.invalid`},'admin')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${cannedAdmin}::uuid,'ADMIN')`.execute(
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${cannedAdmin}::uuid,'SUPER_ADMIN')`.execute(
     db.db,
   );
   await service.saveCanned(cannedAdmin, { label: 'First', body: 'one', active: true });

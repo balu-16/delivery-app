@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import type { Database } from '../../../platform/database/database.js';
+import type { Database, TransactionContext } from '../../../platform/database/database.js';
 import type {
   EligibilityRejection,
   EligibilityResult,
@@ -34,11 +34,12 @@ export class PostgresRiderEligibility implements RiderEligibility {
     riderIds: readonly string[];
     at: Date;
     codAmountPaise?: string;
+    tx?: TransactionContext;
   }): Promise<Record<string, EligibilityResult>> {
     if (!input.riderIds.length) return {};
-    const maxTasks = await this.settings.number('riderMaxConcurrentTasks');
-    const staleSeconds = await this.settings.number('riderStaleLocationSeconds');
-    const cashLimit = await this.settings.paise('cashInHandLimitPaise');
+    const maxTasks = await this.settings.number('riderMaxConcurrentTasks', input.tx);
+    const staleSeconds = await this.settings.number('riderStaleLocationSeconds', input.tx);
+    const cashLimit = await this.settings.paise('cashInHandLimitPaise', input.tx);
     const ids = [...input.riderIds].sort(); // deterministic lock order
     const rows =
       await sql<CandidateRow>`SELECT s.rider_id,p.status AS profile_status,u.status AS user_status,s.online,s.on_break,s.last_location_at,s.active_tasks
@@ -46,7 +47,9 @@ export class PostgresRiderEligibility implements RiderEligibility {
       JOIN rider_profiles p ON p.user_id=s.rider_id
       JOIN users u ON u.id=s.rider_id
       WHERE s.rider_id=ANY(${ids}::uuid[])
-      ORDER BY s.rider_id FOR UPDATE OF s`.execute(this.db);
+      ORDER BY s.rider_id ${input.tx ? sql`FOR UPDATE OF s,p,u` : sql``}`.execute(
+        input.tx ?? this.db,
+      );
     let heldByRider: Map<string, bigint> | null = null;
     if (input.codAmountPaise) {
       const held = await sql<{
@@ -54,7 +57,7 @@ export class PostgresRiderEligibility implements RiderEligibility {
         balance_after: string;
       }>`SELECT DISTINCT ON (rider_id) rider_id,balance_after FROM rider_cash_ledger
         WHERE rider_id=ANY(${ids}::uuid[]) ORDER BY rider_id, created_at DESC, id DESC`.execute(
-        this.db,
+        input.tx ?? this.db,
       );
       heldByRider = new Map(held.rows.map((row) => [row.rider_id, BigInt(row.balance_after)]));
     }

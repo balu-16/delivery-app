@@ -82,7 +82,7 @@ async function customerCommand<T>(work: () => Promise<T>): Promise<T> {
       ].includes(code)
     )
       throw new BadRequestException({ code });
-    if (code === 'ACCOUNT_DISABLED' || code === 'EMAIL_NOT_VERIFIED')
+    if (code === 'ACCOUNT_DISABLED' || code === 'EMAIL_NOT_VERIFIED' || code === 'ROLE_CONFLICT')
       throw new ForbiddenException({ code });
     if (code === 'REFERRALS_UNAVAILABLE') throw new ServiceUnavailableException({ code });
     throw error;

@@ -13,6 +13,7 @@ export function authErrorMessage(cause: unknown): string {
         return 'Referral rewards are temporarily unavailable. Try later or continue without the referral.';
       case 'EMAIL_NOT_VERIFIED': return 'Verify your email before signing in.';
       case 'ACCOUNT_DISABLED': return 'This account is unavailable. Please contact support.';
+      case 'ROLE_CONFLICT': return 'This account is registered for a different app. Use a separate customer account to order.';
     }
     if (cause.status === 429) return 'Too many attempts. Please wait a few minutes and try again.';
     if (cause.status === 401 || cause.status === 403) return 'The customer server could not verify your sign-in. Please try again or contact support.';

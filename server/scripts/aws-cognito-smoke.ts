@@ -79,7 +79,11 @@ try {
     }),
   );
   await client.send(
-    new AdminAddUserToGroupCommand({ UserPoolId: pool, Username: createdSub, GroupName: 'ADMIN' }),
+    new AdminAddUserToGroupCommand({
+      UserPoolId: pool,
+      Username: createdSub,
+      GroupName: 'SUPER_ADMIN',
+    }),
   );
   const admin = await login(adminClient);
   const customer = await login(customerClient);
@@ -99,13 +103,13 @@ try {
     userId: randomUUID(),
     pool: 'WORKFORCE' as const,
     sub: createdSub,
-    roles: ['ADMIN' as const],
+    roles: ['SUPER_ADMIN' as const],
     status: 'ACTIVE' as const,
     emailVerified: true,
     authVersion: '1',
     riderStatus: null,
   };
-  if (authorizeIdentity(verified, principal, 'admin', false).roles[0] !== 'ADMIN')
+  if (authorizeIdentity(verified, principal, 'admin', false).roles[0] !== 'SUPER_ADMIN')
     throw new Error('Admin role authorization failed');
   let denied = false;
   try {

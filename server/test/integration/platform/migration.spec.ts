@@ -15,7 +15,7 @@ afterAll(async () => {
   await services?.stop();
 }, 120000);
 
-it('upgrades an empty then populated previous schema, and reapplies a development rollback', async () => {
+it('upgrades an empty then populated previous schema and refuses to roll back a forward-only migration', async () => {
   const options = {
     databaseUrl: services.databaseUrl,
     dir: resolve('db/migrations'),
@@ -38,7 +38,7 @@ it('upgrades an empty then populated previous schema, and reapplies a developmen
   expect(history.rows[0]?.count).toBeGreaterThan(0);
   if (history.rows[0].count > 1) {
     await expect(runner({ ...options, direction: 'down', count: 1 })).rejects.toThrow(
-      'migration 031 is forward-only',
+      'User has disabled down migration on file: 046_admin_portal_read_indexes',
     );
     expect(
       (

@@ -4,11 +4,13 @@ NestJS/Fastify backend for hyperlocal groceries and scheduled subscriptions, imp
 
 Read [the implementation plan](docs/IMPLEMENTATION_PLAN.md), [current progress](docs/PROGRESS.md), and [edge-case register](docs/EDGE_CASES.md) before making changes.
 
+For the configured AWS-backed development environment, follow [the AWS development guide](docs/local-aws-development.md). It uses the existing AWS services and does not require Docker.
+
 ## Local setup
 
 Run backend commands from the `server/` directory. From the repository root, first run `cd server`.
 
-Prerequisites: Node **26.13.0**, pnpm **12.18.0**, Docker with Compose, and a working Docker daemon for Testcontainers. Versions are pinned in `.nvmrc` and `package.json`.
+For the separate container-based local environment below, prerequisites are Node **26.13.0**, pnpm **12.18.0**, Docker with Compose, and a working Docker daemon for Testcontainers. Versions are pinned in `.nvmrc` and `package.json`.
 
 ```bash
 cp .env.example .env
@@ -23,7 +25,7 @@ Local provider switches in `.env.example` select local authentication, fake maps
 
 For S3 development storage, configure separate `S3_MEDIA_BUCKET` and `S3_PRIVATE_BUCKET` values and select `STORAGE_PROVIDER=s3`. `AWS_S3_PROFILE` optionally selects a dedicated AWS profile; otherwise the standard AWS credential chain is used. With no development CDN URL, registered product images are served by `/media/:id`. Upload targets contain a URL and form fields: submit every returned field and the file as a multipart POST to the URL. Signed upload and download values are temporary credentials and must not be logged. The local seed writes local image files and is blocked while S3 storage is selected.
 
-Services bind to loopback: PostgreSQL/PostGIS on 5432, Redis on 6379, LocalStack on 4566, SMTP on 1025, and Mailpit's inbox at [localhost:8025](http://localhost:8025). The application defaults to port 3000. Operational metrics require `Authorization: Bearer <METRICS_BEARER_TOKEN>` and return 404 when the token is unset. Do not put this token in client applications.
+Services bind to loopback: PostgreSQL/PostGIS on 5432, Redis on 6379, LocalStack on 4566, SMTP on 1025, and Mailpit's inbox at [localhost:8025](http://localhost:8025). The example environment selects port 13080 for the application; without a `PORT` setting, its fallback is 3000. Operational metrics require `Authorization: Bearer <METRICS_BEARER_TOKEN>` and return 404 when the token is unset. Do not put this token in client applications.
 
 The development command compiles with TypeScript before restarting Node, preserving Nest's decorator metadata. Migration and seed scripts read `.env`. Do not point development seeds, down migrations, or test helpers at a production database.
 
@@ -42,7 +44,13 @@ Money values use integer paise internally and decimal strings in JSON. Domain de
 
 ## Development identity
 
-Authentication is email/password through Cognito in production. The backend verifies access tokens; customer `/auth/bootstrap` verifies an ID token. Customer and workforce pools are separate, as are app-client audiences.
+Authentication is email/password through Cognito in production. The backend verifies access tokens; customer `/auth/bootstrap` verifies an ID token. Customer and workforce identities can use separate pools or a shared pool, but their app-client audiences remain separate. The current AWS development configuration uses a shared pool.
+
+The supported roles are `CUSTOMER`, `RIDER`, `STORE_MANAGER`, `SUPPORT_AGENT`, and `SUPER_ADMIN`. An account has one database role and one matching Cognito application group. `ADMIN` has been merged into `SUPER_ADMIN`; `PICKER` duties belong to assigned store managers. A person who needs a different role must be explicitly converted, not assigned both roles. Confirmed accounts can appear temporarily in Cognito Users before group synchronization, but protected APIs reject a missing, conflicting or stale group. See [group synchronization and recovery](infra/customer-group/README.md).
+
+Verified self-signup riders call `POST /v1/rider/auth/bootstrap` with a rider-client ID token. This creates a pending workforce profile and queues a `RIDER` group grant for the identity worker. Matching is by verified pool subject, not email; conflicting workforce identities require manual review. The worker's Cognito principal needs `AdminAddUserToGroup` for the workforce pool, and the rider must refresh its token after synchronization. The pending role allows onboarding only: operational APIs and rider realtime require an approved profile.
+
+Rider applicants select a store and submit their documents. A `STORE_MANAGER` assigned to that store reviews them through the store portal or `/v1/store/rider-applications` and `/v1/store/rider-documents` endpoints; every required document must be approved. A super-admin may see the application list, but document decisions belong to the assigned store manager. Store managers also pick and pack orders. See [partner setup and review steps](../delivery_partner_app/README.md#applications-and-reviews) and [the store portal](store_manager_web/README.md).
 
 P1 supplies the local seed identities and development token endpoint. `/dev/auth/token` is restricted to a local provider outside production; it is unavailable with Cognito or in production. The CLI syntax for an existing local identity is:
 

@@ -41,6 +41,7 @@ import {
   PickIdempotencyHeader,
   PickTaskPageView,
   PickTaskView,
+  StoreOrderPageView,
 } from '../../../modules/picking/contracts/swagger.js';
 import { PICK_TASKS, type PickTasks } from '../../../modules/picking/contracts/tasks.js';
 import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
@@ -123,7 +124,7 @@ function key(header?: string): string {
 @ApiBearerAuth()
 @PickingApiErrors()
 @UseInterceptors(DomainErrorInterceptor)
-@AuthPolicy({ audience: 'store', roles: ['PICKER', 'STORE_MANAGER'] })
+@AuthPolicy({ audience: 'store', roles: ['STORE_MANAGER'] })
 @UseGuards(IdentityGuard)
 export class StorePickTasksController {
   @Post('pick-tasks/:id/heartbeat')
@@ -247,6 +248,7 @@ export class StorePickTasksController {
   }
   @Get('orders')
   @ApiOperation({ operationId: 'storeOrdersQueue' })
+  @ApiOkResponse({ type: StoreOrderPageView })
   orders(@CurrentPrincipal() p: Principal, @Query() q: CursorQueryDto) {
     return this.picking.storeOrders(p.userId, q.storeId, q.cursor, q.limit);
   }

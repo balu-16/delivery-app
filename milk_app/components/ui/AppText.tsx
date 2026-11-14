@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { StyleProp, TextStyle } from 'react-native';
+import type { StyleProp, TextProps, TextStyle } from 'react-native';
 import { Text } from 'react-native';
 
 import { colors, typography } from '@/constants/theme';
@@ -15,6 +15,7 @@ type AppTextProps = {
   center?: boolean;
   allowFontScaling?: boolean;
   selectable?: boolean;
+  accessibilityLiveRegion?: TextProps['accessibilityLiveRegion'];
 };
 
 export function AppText({
@@ -26,12 +27,14 @@ export function AppText({
   center,
   allowFontScaling = false,
   selectable,
+  accessibilityLiveRegion,
 }: AppTextProps) {
   return (
     <Text
       numberOfLines={numberOfLines}
       allowFontScaling={allowFontScaling}
       selectable={selectable}
+      accessibilityLiveRegion={accessibilityLiveRegion}
       style={[
         typography[variant],
         center ? { textAlign: 'center' } : null,

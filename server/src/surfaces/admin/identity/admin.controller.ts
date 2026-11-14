@@ -16,13 +16,21 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { IdentityProviderError } from '../../../modules/identity/contracts/identity.js';
-import { ApiBearerAuth, ApiOkResponse, ApiProperty, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiProperty,
+  ApiQuery,
+  ApiResponse,
+} from '@nestjs/swagger';
 import {
   ConfigSnapshotResponseDto,
   ProblemDto,
   RequestIdResponseDto,
-  UrlResponseDto,
   WorkforceResponseDto,
+  RiderApplicationDto,
+  RiderApplicationPageDto,
 } from '../../../modules/identity/contracts/swagger.js';
 import { IsBoolean, IsDefined, IsEmail, IsIn, IsString, Length } from 'class-validator';
 import {
@@ -34,9 +42,9 @@ import {
 } from '../../../modules/app-config/contracts/config.js';
 import { ZodError } from 'zod';
 import {
-  RIDER_DOCUMENTS,
-  type RiderDocuments,
-} from '../../../modules/identity/contracts/uploads.js';
+  RIDER_APPLICATIONS,
+  type RiderApplications,
+} from '../../../modules/identity/contracts/rider-applications.js';
 import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
 import {
@@ -71,6 +79,8 @@ async function identityCommand<T>(work: () => Promise<T>): Promise<T> {
         'PROVISIONING_REQUIRES_REVIEW',
         'PROVISIONING_IN_PROGRESS',
         'ROLE_NOT_ASSIGNED',
+        'ROLE_REPLACEMENT_REQUIRED',
+        'ROLE_CONFLICT',
         'DOCUMENT_STATE_INVALID',
         'WALLET_REQUIRED_FOR_SUBSCRIPTIONS',
         'INVALID_SLOT_TIMING',
@@ -85,18 +95,15 @@ async function identityCommand<T>(work: () => Promise<T>): Promise<T> {
         'INVALID_SEARCH',
         'INVALID_CONFIG_KEY',
         'INVALID_FLAG',
+        'INVALID_APPLICATION_FILTER',
         'REVIEW_REASON_REQUIRED',
       ].includes(code)
     )
       throw new BadRequestException({ code });
-    if (['STORE_NOT_FOUND', 'DOCUMENT_NOT_FOUND'].includes(code))
+    if (['STORE_NOT_FOUND', 'DOCUMENT_NOT_FOUND', 'RIDER_APPLICATION_NOT_FOUND'].includes(code))
       throw new NotFoundException({ code });
     throw error;
   }
-}
-class ReviewDto {
-  @ApiProperty() @IsBoolean() approved!: boolean;
-  @ApiProperty({ maxLength: 500 }) @IsString() @Length(0, 500) reason!: string;
 }
 class WorkforceDto {
   @ApiProperty({ format: 'email', minLength: 3, maxLength: 254 })
@@ -104,8 +111,8 @@ class WorkforceDto {
   @Length(3, 254)
   email!: string;
   @ApiProperty({ minLength: 1, maxLength: 100 }) @IsString() @Length(1, 100) name!: string;
-  @ApiProperty({ enum: ['RIDER', 'PICKER', 'STORE_MANAGER', 'SUPPORT_AGENT', 'ADMIN'] })
-  @IsIn(['RIDER', 'PICKER', 'STORE_MANAGER', 'SUPPORT_AGENT', 'ADMIN'])
+  @ApiProperty({ enum: ['RIDER', 'STORE_MANAGER', 'SUPPORT_AGENT'] })
+  @IsIn(['RIDER', 'STORE_MANAGER', 'SUPPORT_AGENT'])
   role!: Role;
 }
 class BlockDto {
@@ -113,15 +120,14 @@ class BlockDto {
 }
 class RoleChangeDto {
   @ApiProperty({
-    enum: ['RIDER', 'PICKER', 'STORE_MANAGER', 'SUPPORT_AGENT', 'ADMIN', 'SUPER_ADMIN'],
+    enum: ['RIDER', 'STORE_MANAGER', 'SUPPORT_AGENT', 'SUPER_ADMIN'],
   })
-  @IsIn(['RIDER', 'PICKER', 'STORE_MANAGER', 'SUPPORT_AGENT', 'ADMIN', 'SUPER_ADMIN'])
+  @IsIn(['RIDER', 'STORE_MANAGER', 'SUPPORT_AGENT', 'SUPER_ADMIN'])
   role!: Role;
   @ApiProperty() @IsBoolean() grant!: boolean;
 }
 class StoreAssignmentDto {
-  @ApiProperty({ enum: ['PICKER', 'STORE_MANAGER'] }) @IsIn(['PICKER', 'STORE_MANAGER']) role!:
-    'PICKER' | 'STORE_MANAGER';
+  @ApiProperty({ enum: ['STORE_MANAGER'] }) @IsIn(['STORE_MANAGER']) role!: 'STORE_MANAGER';
   @ApiProperty() @IsBoolean() grant!: boolean;
 }
 class ConfigUpdateDto {
@@ -152,14 +158,14 @@ class AdminUserPageDto {
 @ApiResponse({ status: 409, type: ProblemDto, description: 'State or approval conflict' })
 @ApiResponse({ status: 503, type: ProblemDto, description: 'Provider unavailable' })
 @Controller('v1/admin')
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 export class AdminIdentityController {
   constructor(
     @Inject(WORKFORCE_PROVISIONER) private readonly workforce: WorkforceProvisioner,
     @Inject(IDENTITY_ADMINISTRATION) private readonly administration: IdentityAdministration,
-    @Inject(RIDER_DOCUMENTS) private readonly documents: RiderDocuments | null,
     @Inject(ADMIN_CONFIG) private readonly config: AdminConfig,
+    @Inject(RIDER_APPLICATIONS) private readonly applications: RiderApplications,
   ) {}
   @Get('config')
   @ApiResponse({ status: 200, type: ConfigSnapshotResponseDto })
@@ -207,28 +213,30 @@ export class AdminIdentityController {
   ) {
     return identityCommand(() => this.administration.listUsers(principal.userId, search, before));
   }
-  @Get('rider-documents/:documentId/read-url')
-  @ApiResponse({ status: 200, type: UrlResponseDto })
-  async readDocument(
+  @Get('rider-applications')
+  @ApiOperation({ operationId: 'adminListRiderApplications' })
+  @ApiOkResponse({ type: RiderApplicationPageDto })
+  @ApiQuery({ name: 'before', required: false, type: String })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['PENDING', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'SUSPENDED'],
+  })
+  async listRiderApplications(
     @CurrentPrincipal() principal: Principal,
-    @Param('documentId', ParseUUIDPipe) documentId: string,
-  ): Promise<{ url: string }> {
-    if (!this.documents) throw new ServiceUnavailableException();
-    return {
-      url: await identityCommand(() => this.documents!.reviewUrl(principal.userId, documentId)),
-    };
+    @Query('before') before?: string,
+    @Query('status') status?: string,
+  ) {
+    return identityCommand(() => this.applications.list(principal.userId, before, status));
   }
-  @Post('rider-documents/:documentId/review')
-  @ApiResponse({ status: 201, description: 'Document reviewed; empty response' })
-  async reviewDocument(
+  @Get('rider-applications/:userId')
+  @ApiOperation({ operationId: 'adminGetRiderApplication' })
+  @ApiOkResponse({ type: RiderApplicationDto })
+  async riderApplication(
     @CurrentPrincipal() principal: Principal,
-    @Param('documentId', ParseUUIDPipe) documentId: string,
-    @Body() body: ReviewDto,
-  ): Promise<void> {
-    if (!this.documents) throw new ServiceUnavailableException();
-    await identityCommand(() =>
-      this.documents!.review(principal.userId, documentId, body.approved, body.reason),
-    );
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return identityCommand(() => this.applications.getForAdmin(principal.userId, userId));
   }
   @Post('users/workforce') @ApiResponse({ status: 201, type: WorkforceResponseDto }) async create(
     @CurrentPrincipal() principal: Principal,

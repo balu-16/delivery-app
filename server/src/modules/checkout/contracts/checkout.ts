@@ -1,6 +1,7 @@
 import type { TransactionContext } from '../../../platform/database/database.js';
 import type { QuoteSnapshot } from '../../cart/contracts/quote.js';
 import type { OrderView } from '../../orders/contracts/orders.js';
+import type { IdempotencyOwner } from '../../../common/idempotency/idempotency.js';
 
 /**
  * Public contracts of the checkout module (P6.3). Surfaces call
@@ -78,6 +79,10 @@ export interface CheckoutOperations {
     input: ScheduledOrderInput,
     tx: TransactionContext,
   ): Promise<{ unitPricePaise: string; totalPaise: string }>;
+  /** Estimate a bounded group of independent deliveries; unavailable estimates are null. */
+  priceScheduledBatch(
+    inputs: readonly ScheduledOrderInput[],
+  ): Promise<({ unitPricePaise: string; totalPaise: string } | null)[]>;
   /** Caller owns the transaction and has locked the subscription occurrence. */
   placeScheduled(
     input: ScheduledOrderInput,
@@ -90,7 +95,11 @@ export interface CheckoutOperations {
    * capacity/coupon/stock/wallet obligations, frozen order + history +
    * ORDER_CREATED outbox, then gateway setup strictly after the commit.
    */
-  place(userId: string, input: CheckoutPlaceRequest): Promise<CheckoutPlaceResult>;
+  place(
+    userId: string,
+    input: CheckoutPlaceRequest,
+    owner?: IdempotencyOwner,
+  ): Promise<CheckoutPlaceResult>;
   /** Durable gateway create for an attempt created inside the placement tx. */
   completePaymentSetup(
     operationReference: string,

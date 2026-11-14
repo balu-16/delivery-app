@@ -13,6 +13,7 @@ export interface DispatchWorld {
   storeLng: number;
   customer: string;
   manager: string;
+  admin: string;
   rider1: string;
   rider2: string;
   rider3: string;
@@ -29,6 +30,7 @@ export async function seedDispatchWorld(db: DatabaseHandle): Promise<DispatchWor
   const city = uuidV7();
   const customer = uuidV7();
   const manager = uuidV7();
+  const admin = uuidV7();
   const riders = [uuidV7(), uuidV7(), uuidV7()];
   const storeLat = 12.9;
   const storeLng = 77.6;
@@ -41,6 +43,12 @@ export async function seedDispatchWorld(db: DatabaseHandle): Promise<DispatchWor
     db.db,
   );
   await sql`INSERT INTO user_roles(user_id,role) VALUES(${manager}::uuid,'STORE_MANAGER')`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${admin}::uuid,'WORKFORCE',${admin},${`${admin}@example.invalid`},'admin')`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'SUPER_ADMIN')`.execute(
     db.db,
   );
   for (const [index, rider] of riders.entries()) {
@@ -76,6 +84,7 @@ export async function seedDispatchWorld(db: DatabaseHandle): Promise<DispatchWor
     storeLng,
     customer,
     manager,
+    admin,
     rider1: riders[0]!,
     rider2: riders[1]!,
     rider3: riders[2]!,

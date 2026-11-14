@@ -69,18 +69,17 @@ export class PostgresPickTasks implements PickTasks {
     return tx ? fn(tx) : transactionWithRetry(this.db, fn);
   }
   private async lockTask(tx: TransactionContext, taskId: string) {
+    const projection = await loadTask(tx, taskId, false);
+    if (!projection) throw new Error('RESOURCE_NOT_FOUND');
+    const order = await sql<{
+      on_hold: boolean;
+    }>`SELECT on_hold FROM orders WHERE id=${projection.order_id}::uuid FOR UPDATE`.execute(tx);
+    if (order.rows[0]?.on_hold) throw new Error('ORDER_ON_HOLD');
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`picking-task:${taskId}`},0))`.execute(
       tx,
     );
-    const projection = await loadTask(tx, taskId, false);
-    if (projection) {
-      const order = await sql<{
-        on_hold: boolean;
-      }>`SELECT on_hold FROM orders WHERE id=${projection.order_id}::uuid FOR UPDATE`.execute(tx);
-      if (order.rows[0]?.on_hold) throw new Error('ORDER_ON_HOLD');
-    }
     const task = await loadTask(tx, taskId, true);
-    if (!task) throw new Error('RESOURCE_NOT_FOUND');
+    if (!task || task.order_id !== projection.order_id) throw new Error('RESOURCE_NOT_FOUND');
     return task;
   }
   private async view(tx: TransactionContext, task: Awaited<ReturnType<typeof loadTask>>) {
@@ -112,7 +111,7 @@ export class PostgresPickTasks implements PickTasks {
     )
       throw new Error('INVALID_INPUT');
     return this.run(undefined, async (tx) => {
-      await assertStoreRole(this.identity, actorId, input.storeId, ['PICKER', 'STORE_MANAGER'], tx);
+      await assertStoreRole(this.identity, actorId, input.storeId, ['STORE_MANAGER'], tx);
       if (input.scope === 'ALL')
         await assertStoreRole(this.identity, actorId, input.storeId, ['STORE_MANAGER'], tx);
       const cursor = input.cursor ? decodeCursor(input.cursor) : null;
@@ -184,7 +183,7 @@ export class PostgresPickTasks implements PickTasks {
     assertOperationReference(reference);
     return this.run(undefined, async (tx) => {
       const task = await this.lockTask(tx, taskId);
-      await assertStoreRole(this.identity, actorId, task.store_id, ['PICKER', 'STORE_MANAGER'], tx);
+      await assertStoreRole(this.identity, actorId, task.store_id, ['STORE_MANAGER'], tx);
       const availability = await sql<{
         ready: boolean;
       }>`SELECT available_at <= clock_timestamp() AS ready FROM pick_tasks WHERE id=${taskId}::uuid`.execute(
@@ -223,7 +222,7 @@ export class PostgresPickTasks implements PickTasks {
     assertOperationReference(reference);
     return this.run(undefined, async (tx) => {
       const task = await this.lockTask(tx, taskId);
-      await assertStoreRole(this.identity, actorId, task.store_id, ['PICKER', 'STORE_MANAGER'], tx);
+      await assertStoreRole(this.identity, actorId, task.store_id, ['STORE_MANAGER'], tx);
       const availability = await sql<{
         ready: boolean;
       }>`SELECT available_at <= clock_timestamp() AS ready FROM pick_tasks WHERE id=${taskId}::uuid`.execute(
@@ -274,13 +273,7 @@ export class PostgresPickTasks implements PickTasks {
       if (task.status !== 'ASSIGNED' && task.status !== 'IN_PROGRESS')
         throw new Error('PICK_TASK_STATE_INVALID');
       if (task.assigned_to === toUserId) return this.view(tx, task);
-      await assertStoreRole(
-        this.identity,
-        toUserId,
-        task.store_id,
-        ['PICKER', 'STORE_MANAGER'],
-        tx,
-      );
+      await assertStoreRole(this.identity, toUserId, task.store_id, ['STORE_MANAGER'], tx);
       if (
         !(await operation(tx, `reassign:${taskId}:${reference}`, 'REASSIGN', {
           taskId,
@@ -366,7 +359,7 @@ export class PostgresPickTasks implements PickTasks {
   }
 
   async storeOrders(actorId: string, storeId: string, cursor?: string, limit?: number) {
-    await assertStoreRole(this.identity, actorId, storeId, ['PICKER', 'STORE_MANAGER']);
+    await assertStoreRole(this.identity, actorId, storeId, ['STORE_MANAGER']);
     return this.reads.storeOrders(storeId, cursor, limit ?? 20);
   }
 }

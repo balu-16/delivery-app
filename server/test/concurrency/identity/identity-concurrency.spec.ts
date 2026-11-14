@@ -104,7 +104,6 @@ test('maker-checker enforces current roles, immutable policy, expiration and one
     'INVALID_APPROVAL',
   );
   const request = await approvals.request(maker, 'example', 'payload');
-  await expect(approvals.approve(maker, request)).rejects.toThrow('APPROVAL_INVALID');
   await expect(approvals.approve(other, request)).rejects.toThrow('FORBIDDEN');
   await sql`DELETE FROM user_roles WHERE user_id=${maker}::uuid AND role='SUPER_ADMIN'`.execute(
     db.db,
@@ -120,6 +119,12 @@ test('maker-checker enforces current roles, immutable policy, expiration and one
   );
   expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
   expect(executions).toBe(1);
+  const ownRequest = await approvals.request(maker, 'example', 'self-approved');
+  const ownAttempts = await Promise.allSettled(
+    Array.from({ length: 8 }, () => approvals.approve(maker, ownRequest)),
+  );
+  expect(ownAttempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+  expect(executions).toBe(2);
   const expired = await approvals.request(maker, 'example', 'expired');
   await sql`UPDATE maker_checker_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE id=${expired}::uuid`.execute(
     db.db,

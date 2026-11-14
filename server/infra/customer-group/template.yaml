@@ -1,0 +1,221 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Verified customer and rider Cognito group synchronization.
+Parameters:
+  CustomerPoolId:
+    Type: String
+    AllowedPattern: '^[a-z]{2}(-gov)?-[a-z]+-[0-9]+_[a-zA-Z0-9]+$'
+  CustomerClientId:
+    Type: String
+    AllowedPattern: '^[a-zA-Z0-9]+$'
+  RiderClientId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-zA-Z0-9]+$'
+  CreateCustomerGroup:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: Set to false when the CUSTOMER group already exists in this pool.
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+  AlertTopicArn:
+    Type: String
+    Default: ''
+    Description: Optional SNS topic for customer group synchronization alarms.
+  BackendLogGroupName:
+    Type: String
+    Default: ''
+    Description: Existing customer API CloudWatch log group; enables enqueue-failure monitoring for API retries.
+Conditions:
+  HasAlertTopic: !Not [!Equals [!Ref AlertTopicArn, '']]
+  ShouldCreateCustomerGroup: !Equals [!Ref CreateCustomerGroup, 'true']
+  HasBackendLogGroup: !Not [!Equals [!Ref BackendLogGroupName, '']]
+Resources:
+  CustomerGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Condition: ShouldCreateCustomerGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupName: CUSTOMER
+      Description: Verified customer membership required alongside the database role.
+      UserPoolId: !Ref CustomerPoolId
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+  GroupQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      SqsManagedSseEnabled: true
+      VisibilityTimeout: 180
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 5
+  TriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: enqueue-and-log
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt GroupQueue.Arn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-customer-group-trigger:*'
+  WorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: consume-and-assign
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes]
+                Resource: !GetAtt GroupQueue.Arn
+              - Effect: Allow
+                Action:
+                  [
+                    cognito-idp:AdminGetUser,
+                    cognito-idp:AdminListGroupsForUser,
+                    cognito-idp:AdminAddUserToGroup,
+                  ]
+                Resource: !Sub 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CustomerPoolId}'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-customer-group-worker:*'
+  BackendQueueSendPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Allows the customer API to retry CUSTOMER group assignment after bootstrap.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sqs:SendMessage
+            Resource: !GetAtt GroupQueue.Arn
+  TriggerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-customer-group-trigger'
+      RetentionInDays: 30
+  WorkerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-customer-group-worker'
+      RetentionInDays: 30
+  Trigger:
+    Type: AWS::Lambda::Function
+    DependsOn: TriggerLogs
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-customer-group-trigger'
+      Runtime: nodejs24.x
+      Handler: trigger.handler
+      Timeout: 4
+      MemorySize: 128
+      Role: !GetAtt TriggerRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      Environment:
+        Variables:
+          CUSTOMER_POOL_ID: !Ref CustomerPoolId
+          CUSTOMER_CLIENT_ID: !Ref CustomerClientId
+          RIDER_CLIENT_ID: !Ref RiderClientId
+          QUEUE_URL: !Ref GroupQueue
+  Worker:
+    Type: AWS::Lambda::Function
+    DependsOn: WorkerLogs
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-customer-group-worker'
+      Runtime: nodejs24.x
+      Handler: worker.handler
+      Timeout: 20
+      MemorySize: 128
+      Role: !GetAtt WorkerRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      Environment:
+        Variables:
+          CUSTOMER_POOL_ID: !Ref CustomerPoolId
+  QueueConsumer:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt GroupQueue.Arn
+      FunctionName: !Ref Worker
+      BatchSize: 10
+      FunctionResponseTypes: [ReportBatchItemFailures]
+  CognitoInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref Trigger
+      Principal: cognito-idp.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CustomerPoolId}'
+  EnqueueFailureMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref TriggerLogs
+      FilterPattern: '"CUSTOMER_GROUP_ENQUEUE_FAILED"'
+      MetricTransformations:
+        - MetricNamespace: !Sub '${AWS::StackName}/CustomerGroup'
+          MetricName: EnqueueFailures
+          MetricValue: '1'
+  BackendEnqueueFailureMetric:
+    Type: AWS::Logs::MetricFilter
+    Condition: HasBackendLogGroup
+    Properties:
+      LogGroupName: !Ref BackendLogGroupName
+      FilterPattern: '"CUSTOMER_GROUP_ENQUEUE_FAILED"'
+      MetricTransformations:
+        - MetricNamespace: !Sub '${AWS::StackName}/CustomerGroup'
+          MetricName: EnqueueFailures
+          MetricValue: '1'
+  EnqueueFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: !Sub '${AWS::StackName}/CustomerGroup'
+      MetricName: EnqueueFailures
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlertTopic, [!Ref AlertTopicArn], !Ref 'AWS::NoValue']
+  DeadLetterAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions: [{ Name: QueueName, Value: !GetAtt DeadLetterQueue.QueueName }]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlertTopic, [!Ref AlertTopicArn], !Ref 'AWS::NoValue']
+Outputs:
+  QueueUrl: { Value: !Ref GroupQueue }
+  TriggerArn: { Value: !GetAtt Trigger.Arn }
+  BackendQueueSendPolicyArn: { Value: !Ref BackendQueueSendPolicy }
+  DeadLetterQueueUrl: { Value: !Ref DeadLetterQueue }

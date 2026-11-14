@@ -331,7 +331,7 @@ export class PaymentRefundService implements PaymentRefundOperations {
     return transactionWithRetry(this.db, async (tx) => {
       const actor = await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id
         WHERE u.id=${input.actorId}::uuid AND u.status='ACTIVE' AND u.pool='WORKFORCE'
-        AND r.role IN ('ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(tx);
+        AND r.role IN ('SUPER_ADMIN') FOR SHARE OF u,r`.execute(tx);
       if (!actor.rows.length) throw new Error('FORBIDDEN');
       const row = await this.refunds.lockByReference(tx, input.refundReference);
       if (!row || row.destination !== 'MANUAL_PAYOUT') throw new Error('RESOURCE_NOT_FOUND');

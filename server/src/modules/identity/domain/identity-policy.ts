@@ -3,9 +3,31 @@ import type { Audience, Principal, Role, VerifiedIdentity } from '../contracts/i
 const audienceRoles: Record<Audience, readonly Role[]> = {
   customer: ['CUSTOMER'],
   rider: ['RIDER'],
-  store: ['PICKER', 'STORE_MANAGER'],
-  admin: ['SUPPORT_AGENT', 'ADMIN', 'SUPER_ADMIN'],
+  store: ['STORE_MANAGER'],
+  admin: ['SUPPORT_AGENT', 'SUPER_ADMIN'],
 };
+
+// Retired groups also count as conflicts until stale tokens expire.
+const applicationGroups = new Set([
+  'CUSTOMER',
+  'RIDER',
+  'STORE_MANAGER',
+  'SUPPORT_AGENT',
+  'SUPER_ADMIN',
+  'PICKER',
+  'ADMIN',
+]);
+
+export function hasOnlyApplicationGroup(groups: readonly string[], role: Role): boolean {
+  const relevant = groups.filter((group) => applicationGroups.has(group));
+  return relevant.length === 1 && relevant[0] === role;
+}
+
+/** An ungrouped verified account can bootstrap while group assignment is pending. */
+export function canBootstrapRole(groups: readonly string[], role: Role): boolean {
+  const relevant = groups.filter((group) => applicationGroups.has(group));
+  return relevant.length === 0 || (relevant.length === 1 && relevant[0] === role);
+}
 
 /** Token groups only narrow permissions; the local account is the authority for current access. */
 export function authorizeIdentity(
@@ -22,11 +44,12 @@ export function authorizeIdentity(
     principal.sub !== identity.sub
   )
     throw new Error('FORBIDDEN');
-  const matching = principal.roles.filter(
-    (role) =>
-      audienceRoles[audience].includes(role) &&
-      (audience === 'customer' || identity.groups.includes(role)),
-  );
+  if (
+    principal.roles.length !== 1 ||
+    !hasOnlyApplicationGroup(identity.groups, principal.roles[0]!)
+  )
+    throw new Error('FORBIDDEN');
+  const matching = principal.roles.filter((role) => audienceRoles[audience].includes(role));
   if (!matching.length) throw new Error('FORBIDDEN');
   if (audience === 'rider' && !allowPendingRider && principal.riderStatus !== 'APPROVED')
     throw new Error('RIDER_NOT_APPROVED');

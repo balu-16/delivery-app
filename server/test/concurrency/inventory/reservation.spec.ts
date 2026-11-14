@@ -737,7 +737,9 @@ test('shelf-life changes require current admin authority, version and durable re
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${admin}::uuid,'WORKFORCE',${admin},${admin + '@example.invalid'},'Admin')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'ADMIN')`.execute(db.db);
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
   await sql`INSERT INTO catalog_categories(id,name) VALUES(${newCategory}::uuid,'Fresh')`.execute(
     db.db,
   );

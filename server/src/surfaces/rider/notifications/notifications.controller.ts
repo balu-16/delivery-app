@@ -75,6 +75,7 @@ export class RiderNotificationsController {
 
   @Delete('device-tokens')
   @ApiOperation({ operationId: 'riderUnregisterDeviceToken' })
+  @AuthPolicy({ audience: 'rider', roles: ['RIDER'], allowPendingRider: true })
   async unregister(
     @CurrentPrincipal() p: Principal,
     @Body() body: UnregisterDeviceTokenDto,

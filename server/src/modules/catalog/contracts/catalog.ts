@@ -31,6 +31,8 @@ export interface CatalogAdmin {
     kind: 'categories' | 'brands' | 'products' | 'variants',
     limit: number,
     cursor?: string,
+    id?: string,
+    productId?: string,
   ): Promise<{ items: unknown[]; nextCursor: string | null }>;
   get(
     actor: string,
@@ -71,6 +73,7 @@ export interface CatalogReadResult {
   nextCursor: string | null;
 }
 export interface CatalogQuery {
+  preview(): Promise<{ items: CatalogPreviewItem[] }>;
   categories(
     user: string,
     address: string | undefined,
@@ -88,4 +91,18 @@ export interface CatalogQuery {
       favorites?: boolean;
     },
   ): Promise<CatalogReadResult>;
+}
+
+/** A preview deliberately contains no address-specific stock or purchase limit. */
+export interface CatalogPreviewItem {
+  productId: string;
+  name: string;
+  description: string;
+  categoryId: string;
+  variantId: string;
+  variantName: string;
+  sellingPaise: string;
+  mrpPaise: string;
+  discountPercent: number;
+  images: string[];
 }

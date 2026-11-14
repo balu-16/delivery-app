@@ -34,6 +34,7 @@ const MATRIX: Readonly<
   },
   RIDER: {},
   PICKER: {},
+  STORE_MANAGER: {},
 };
 
 export function evaluateCancellation(status: OrderStatus, actor: ActorType): CancellationVerdict {

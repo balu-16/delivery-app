@@ -1,9 +1,9 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { sql } from 'kysely';
 import {
-  IDENTITY_ACCESS,
+  IDENTITY_AUTHORIZER,
   TOKEN_VERIFIER,
-  type IdentityAccess,
+  type IdentityAuthorizer,
   type TokenVerifier,
 } from '../../identity/contracts/identity.js';
 import { PLATFORM_DATABASE, REALTIME_GATEWAY } from '../../../platform/contracts/runtime.js';
@@ -44,7 +44,7 @@ export class DispatchRealtimeLifecycle {
   constructor(
     @Inject(PLATFORM_DATABASE) handle: DatabaseHandle,
     @Inject(TOKEN_VERIFIER) private readonly verifier: TokenVerifier,
-    @Inject(IDENTITY_ACCESS) private readonly identities: IdentityAccess,
+    @Inject(IDENTITY_AUTHORIZER) private readonly identities: IdentityAuthorizer,
     private readonly env: ConfigService,
     @Inject(NAMESPACE_REGISTRY) private readonly registry: NamespaceRegistryPort,
     @Inject(DELIVERY_TASKS) private readonly tasks: DeliveryTasks,
@@ -75,6 +75,22 @@ export class DispatchRealtimeLifecycle {
           ? { orderId: row.order_id, customerUserId: row.customer_user_id, taskStatus: row.status }
           : null;
       },
+      activeOrdersForRider: async (riderId: string) => {
+        const rows = await sql<{
+          order_id: string;
+          customer_user_id: string | null;
+          status: string;
+        }>`
+          SELECT order_id,customer_user_id,status FROM delivery_tasks
+          WHERE rider_id=${riderId}::uuid AND status IN ('ASSIGNED','AT_STORE','PICKED_UP','ARRIVED')`.execute(
+          this.db,
+        );
+        return rows.rows.map((row) => ({
+          orderId: row.order_id,
+          customerUserId: row.customer_user_id,
+          taskStatus: row.status,
+        }));
+      },
     };
     this.resolverHolder?.register(resolver);
     if (!this.gateway) return; // metadata composition / worker-only roles
@@ -98,9 +114,7 @@ export class DispatchRealtimeLifecycle {
         if (!token) return null;
         try {
           const identity = await this.verifier.verify(token, 'rider', 'access');
-          const principal = await this.identities.getPrincipal('WORKFORCE', identity.sub);
-          if (!principal || principal.status !== 'ACTIVE') return null;
-          if (!principal.roles.includes('RIDER')) return null;
+          const principal = await this.identities.authorize(identity, 'rider', false);
           return { userId: principal.userId, pool: 'WORKFORCE', roles: principal.roles };
         } catch {
           return null;
@@ -115,11 +129,28 @@ export class DispatchRealtimeLifecycle {
         return rows.rows.length > 0;
       },
       snapshot: async (identity: RealtimeIdentity): Promise<Json> => {
-        const [offers, current] = await Promise.all([
+        const [offers, current, active] = await Promise.all([
           this.tasks.offers(identity.userId),
           this.tasks.currentTask(identity.userId),
+          sql<{
+            id: string;
+            status: string;
+            order_id: string;
+          }>`SELECT id,status,order_id FROM delivery_tasks
+            WHERE rider_id=${identity.userId}::uuid AND status IN ('ASSIGNED','AT_STORE','PICKED_UP','ARRIVED')
+            ORDER BY created_at DESC`.execute(this.db),
         ]);
-        return JSON.parse(JSON.stringify({ offers: offers.items, currentTask: current })) as Json;
+        return JSON.parse(
+          JSON.stringify({
+            offers: offers.items,
+            currentTask: current,
+            activeTasks: active.rows.map((row) => ({
+              id: row.id,
+              status: row.status,
+              orderId: row.order_id,
+            })),
+          }),
+        ) as Json;
       },
     };
   }
@@ -131,8 +162,7 @@ export class DispatchRealtimeLifecycle {
         if (!token) return null;
         try {
           const identity = await this.verifier.verify(token, 'customer', 'access');
-          const principal = await this.identities.getPrincipal('CUSTOMER', identity.sub);
-          if (!principal || principal.status !== 'ACTIVE') return null;
+          const principal = await this.identities.authorize(identity, 'customer', false);
           return { userId: principal.userId, pool: 'CUSTOMER', roles: principal.roles };
         } catch {
           return null;

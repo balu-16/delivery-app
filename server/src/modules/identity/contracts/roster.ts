@@ -1,7 +1,7 @@
 export interface StaffMember {
   userId: string;
   name: string;
-  role: 'PICKER' | 'STORE_MANAGER';
+  role: 'STORE_MANAGER';
 }
 
 export const IDENTITY_ROSTER = Symbol('IDENTITY_ROSTER');

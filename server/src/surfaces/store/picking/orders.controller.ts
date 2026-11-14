@@ -71,7 +71,7 @@ function key(header?: string): string {
 @ApiBearerAuth()
 @PickingApiErrors()
 @UseInterceptors(DomainErrorInterceptor)
-@AuthPolicy({ audience: 'store', roles: ['PICKER', 'STORE_MANAGER'] })
+@AuthPolicy({ audience: 'store', roles: ['STORE_MANAGER'] })
 @UseGuards(IdentityGuard)
 export class StoreOrderFulfillmentController {
   constructor(

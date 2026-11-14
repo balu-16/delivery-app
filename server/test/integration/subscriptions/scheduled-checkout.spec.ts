@@ -108,6 +108,105 @@ it('places and confirms a real wallet-funded scheduled order in the caller trans
   });
 });
 
+it('batches calendar estimates, keeps different dates distinct, and preserves unavailable estimates', async () => {
+  const { SubscriptionsService } =
+    await import('../../../src/modules/subscriptions/infrastructure/subscriptions-service.js');
+  const user = uuidV7(),
+    address = uuidV7(),
+    plan = uuidV7(),
+    slot = uuidV7();
+  const ids = [uuidV7(), uuidV7(), uuidV7()];
+  const variant = await world.variant();
+  await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${user}::uuid,'CUSTOMER',${user},${`${user}@example.invalid`},'calendar')`.execute(
+    world.db.db,
+  );
+  await sql`INSERT INTO addresses(id,user_id,line1,pincode,contact_name,contact_phone,point,is_default)
+    SELECT ${address}::uuid,${user}::uuid,line1,pincode,contact_name,contact_phone,point,true FROM addresses WHERE id=${world.address}::uuid`.execute(
+    world.db.db,
+  );
+  await sql`INSERT INTO subscription_plans(id,variant_id) VALUES(${plan}::uuid,${variant.id}::uuid)`.execute(
+    world.db.db,
+  );
+  await sql`INSERT INTO subscription_slots(id,store_id,name,start_time,end_time) VALUES(${slot}::uuid,${world.store}::uuid,${slot},'07:00','09:00')`.execute(
+    world.db.db,
+  );
+  for (const [index, id] of ids.entries()) {
+    await sql`INSERT INTO subscriptions(id,user_id,plan_id,store_id,address_id,start_date,next_delivery_date)
+      VALUES(${id}::uuid,${user}::uuid,${plan}::uuid,${world.store}::uuid,${address}::uuid,'2040-05-01','2040-05-01')`.execute(
+      world.db.db,
+    );
+    await sql`INSERT INTO subscription_schedule_versions(id,subscription_id,effective_from,quantity,frequency_rule,slot_id)
+      VALUES(${uuidV7()}::uuid,${id}::uuid,'2040-05-01',${index === 2 ? 2 : 1},'{"type":"DAILY"}'::jsonb,${slot}::uuid)`.execute(
+      world.db.db,
+    );
+  }
+  await sql`INSERT INTO subscription_skips(subscription_id,delivery_date) VALUES(${ids[0]!}::uuid,'2040-05-05')`.execute(
+    world.db.db,
+  );
+  let calls = 0;
+  let seen: import('../../../src/modules/checkout/contracts/checkout.js').ScheduledOrderInput[] =
+    [];
+  const checkout = {
+    async priceScheduledBatch(inputs: typeof seen) {
+      calls++;
+      seen = inputs;
+      return inputs.map((input) =>
+        input.deliveryDate === '2040-05-10'
+          ? null
+          : { unitPricePaise: '100', totalPaise: input.quantity === '1' ? '100' : '200' },
+      );
+    },
+  } as unknown as CheckoutOperations;
+  const service = new SubscriptionsService(
+    world.db.db,
+    world.config as never,
+    {} as never,
+    checkout,
+  );
+  const calendar = await service.calendar(user, '2040-05', 10);
+  expect(calls).toBe(1);
+  expect(seen).toHaveLength(62);
+  expect(new Set(seen.map((input) => input.slotStart)).size).toBe(31);
+  const first = calendar.items.find((item) => item.subscriptionId === ids[0])!.deliveries;
+  const second = calendar.items.find((item) => item.subscriptionId === ids[1])!.deliveries;
+  const third = calendar.items.find((item) => item.subscriptionId === ids[2])!.deliveries;
+  expect(first.find((delivery) => delivery.date === '2040-05-05')).toMatchObject({
+    status: 'SKIPPED',
+    amountPaise: null,
+  });
+  expect(second.find((delivery) => delivery.date === '2040-05-05')?.amountPaise).toBe('100');
+  expect(third.find((delivery) => delivery.date === '2040-05-05')?.amountPaise).toBe('200');
+  expect(second.find((delivery) => delivery.date === '2040-05-10')?.amountPaise).toBeNull();
+});
+
+it('isolates a bad estimate and preserves real scheduled pricing for later deliveries in the batch', async () => {
+  const variant = await world.variant();
+  const checkout = app.get<CheckoutOperations>(CHECKOUT);
+  const start = new Date(Date.now() + 86400000),
+    end = new Date(start.getTime() + 3600000);
+  const input = {
+    userId: world.customer,
+    subscriptionId: uuidV7(),
+    deliveryDate: start.toISOString().slice(0, 10),
+    storeId: world.store,
+    addressId: world.address,
+    variantId: variant.id,
+    quantity: '1',
+    slotStart: start.toISOString(),
+    slotEnd: end.toISOString(),
+  };
+  const expected = await world.db.db
+    .transaction()
+    .execute((tx) => checkout.priceScheduled(input, tx));
+  const results = await checkout.priceScheduledBatch([
+    { ...input, addressId: 'invalid-uuid' },
+    input,
+    { ...input, quantity: '0' },
+    input,
+  ]);
+  expect(results).toEqual([null, expected, null, expected]);
+});
+
 it('serializes simultaneous generation and records one occurrence, order and debit', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
@@ -734,10 +833,10 @@ it('cancels and fully refunds a subscription when a picked quantity is short', a
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${picker}::uuid,'WORKFORCE',${picker},${picker + '@example.invalid'},'Picker')`.execute(
     world.db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${picker}::uuid,'PICKER')`.execute(
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${picker}::uuid,'STORE_MANAGER')`.execute(
     world.db.db,
   );
-  await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${picker}::uuid,${world.store}::uuid,'PICKER')`.execute(
+  await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${picker}::uuid,${world.store}::uuid,'STORE_MANAGER')`.execute(
     world.db.db,
   );
   await sql`UPDATE wallet_accounts SET cash_balance_paise=5000 WHERE user_id=${world.customer}::uuid`.execute(

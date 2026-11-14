@@ -90,7 +90,7 @@ function key(value: string | undefined): string {
 @ApiBearerAuth()
 @UseGuards(IdentityGuard)
 @UseInterceptors(DomainErrorInterceptor)
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 export class AdminReportsController {
   constructor(@Inject(COMPLIANCE_EXPORTS) private readonly exports: ComplianceExports) {}
   @Post('exports')

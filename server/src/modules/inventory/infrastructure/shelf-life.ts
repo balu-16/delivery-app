@@ -24,8 +24,7 @@ export class PostgresShelfLife implements InventoryShelfLife {
     )
       throw new Error('INVALID_INPUT');
     await transactionWithRetry(this.db, async (tx) => {
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const reference = `shelf-life:${actor}:${input.reference}`;
       if (!(await operation(tx, reference, 'SHELF_LIFE', { actor, ...input }))) return;
       const category =
@@ -53,8 +52,7 @@ export class PostgresShelfLife implements InventoryShelfLife {
     const scope = ['shelf-life'];
     const after = stockCursorId(cursor, scope);
     return this.db.transaction().execute(async (tx) => {
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const rows = await sql<{
         categoryId: string;
         minSeconds: number;

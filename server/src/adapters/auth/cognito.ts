@@ -8,6 +8,7 @@ import {
   AdminEnableUserCommand,
   AdminRemoveUserFromGroupCommand,
   AdminGetUserCommand,
+  AdminListGroupsForUserCommand,
   AdminResetUserPasswordCommand,
   CognitoIdentityProviderClient,
 } from '@aws-sdk/client-cognito-identity-provider';
@@ -112,6 +113,35 @@ export class CognitoIdentityAdmin implements IdentityAdminPort {
     }
   }
   async addToGroup(username: string, group: Role): Promise<void> {
+    let nextToken: string | undefined;
+    do {
+      const page = await this.client.send(
+        new AdminListGroupsForUserCommand({
+          UserPoolId: this.userPoolId,
+          Username: username,
+          ...(nextToken ? { NextToken: nextToken } : {}),
+        }),
+        { abortSignal: AbortSignal.timeout(this.timeoutMs) },
+      );
+      if (
+        (page.Groups ?? []).some(
+          (entry) =>
+            entry.GroupName &&
+            entry.GroupName !== group &&
+            [
+              'CUSTOMER',
+              'RIDER',
+              'STORE_MANAGER',
+              'SUPPORT_AGENT',
+              'SUPER_ADMIN',
+              'ADMIN',
+              'PICKER',
+            ].includes(entry.GroupName),
+        )
+      )
+        throw new Error('ROLE_CONFLICT');
+      nextToken = page.NextToken;
+    } while (nextToken);
     await this.client.send(
       new AdminAddUserToGroupCommand({
         UserPoolId: this.userPoolId,

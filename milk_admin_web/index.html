@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="DairyDirect Admin Portal — manage farms, cities, orders, deliveries, finance and staff." />
+    <title>DairyDirect — Admin Portal</title>
+    <!-- Self-hosted, subset fonts (woff2, font-display: swap). Main weight preloaded. -->
+    <link rel="preload" href="/fonts/poppins-600.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="modulepreload" href="/src/main.tsx" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Boot error reporter (helps diagnose blank screens during development)
+      window.addEventListener('error', function (e) {
+        var d = document.createElement('pre')
+        d.id = 'boot-error'
+        d.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#fee2e2;color:#991b1b;padding:12px;font-size:11px;max-width:100vw;white-space:pre-wrap'
+        d.textContent = 'Boot error: ' + e.message + '\n' + ((e.error && e.error.stack) || '')
+        document.body.appendChild(d)
+      })
+      window.addEventListener('unhandledrejection', function (e) {
+        var d = document.createElement('pre')
+        d.id = 'boot-error-reject'
+        d.style.cssText = 'position:fixed;bottom:0;left:0;z-index:99999;background:#fef3c7;color:#92400e;padding:12px;font-size:11px;max-width:100vw;white-space:pre-wrap'
+        d.textContent = 'Promise rejection: ' + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason)
+        document.body.appendChild(d)
+      })
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

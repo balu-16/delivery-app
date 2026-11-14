@@ -13,6 +13,7 @@ import {
 import { closeP5World, createP5World, type P5World } from '../../helpers/p5-world.js';
 import { createAwsTestQueues, trackAwsTestRateKeys } from '../../helpers/aws-test-queues.js';
 import { PLATFORM_REDIS } from '../../../src/platform/contracts/runtime.js';
+import { WALLET_TOPUPS, type WalletTopups } from '../../../src/modules/wallet/contracts/wallet.js';
 
 let world: P5World;
 let app: Awaited<ReturnType<typeof createApplication>>;
@@ -249,6 +250,13 @@ it('same-key concurrent HTTP placement rejects an in-progress request and replay
   const replay = await send();
   expect(replay.statusCode).toBe(201);
   expect(replay.json()).toEqual(original.json());
+  const reordered = await send({
+    method: payload.method,
+    intentId: payload.intentId,
+    quoteId: payload.quoteId,
+  });
+  expect(reordered.statusCode).toBe(201);
+  expect(reordered.json()).toEqual(original.json());
   const changed = await send({ ...payload, intentId: uuidV7() });
   expect(changed.statusCode).toBe(409);
   expect(changed.json().code).toBe('IDEMPOTENCY_KEY_REUSED');
@@ -260,4 +268,32 @@ it('same-key concurrent HTTP placement rejects an in-progress request and replay
     world.db.db,
   );
   expect(state.rows[0]).toEqual({ orders: '1', attempts: '1', reserved: '1' });
+});
+
+it('returns the stored HTTP error when a failed wallet top-up is replayed', async () => {
+  const topups = app.get<WalletTopups>(WALLET_TOPUPS);
+  const create = jest
+    .spyOn(topups, 'create')
+    .mockRejectedValueOnce(new Error('ExternalServiceUnavailable'));
+  const requestKey = uuidV7();
+  const send = () =>
+    app
+      .getHttpAdapter()
+      .getInstance()
+      .inject({
+        method: 'POST',
+        url: '/v1/customer/wallet/topups',
+        headers: { authorization: `Bearer ${token}`, 'idempotency-key': requestKey },
+        payload: { amountPaise: '1000' },
+      });
+  try {
+    const first = await send();
+    const replay = await send();
+    expect(first.statusCode).toBe(503);
+    expect(replay.statusCode).toBe(503);
+    expect(replay.json().code).toBe('ExternalServiceUnavailable');
+    expect(create).toHaveBeenCalledTimes(1);
+  } finally {
+    create.mockRestore();
+  }
 });

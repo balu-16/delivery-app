@@ -5,6 +5,7 @@ import type { PrivateUploadPort } from '../contracts/uploads.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import { documentsApproved, documentsReady } from '../domain/identity-policy.js';
 import { appendEvent } from '../../../platform/outbox/outbox.js';
+import { assertRiderReviewAccess } from './store-review-access.js';
 
 export class RiderOnboarding {
   constructor(
@@ -45,25 +46,20 @@ export class RiderOnboarding {
         tx,
       );
       if (documentsReady(required, types.rows))
-        await sql`UPDATE rider_profiles SET status='UNDER_REVIEW' WHERE user_id=${userId}::uuid AND vehicle_type IS NOT NULL AND vehicle_no IS NOT NULL`.execute(
+        await sql`UPDATE rider_profiles SET status='UNDER_REVIEW' WHERE user_id=${userId}::uuid AND vehicle_type IS NOT NULL AND vehicle_no IS NOT NULL AND home_store_id IS NOT NULL`.execute(
           tx,
         );
     });
   }
   async reviewUrl(reviewerId: string, documentId: string): Promise<string> {
     const mediaId = await this.db.transaction().execute(async (tx) => {
-      const reviewer = await sql<{
-        id: string;
-      }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${reviewerId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(
-        tx,
-      );
-      if (!reviewer.rows[0]) throw new Error('FORBIDDEN');
       const doc = await sql<{
         media_id: string;
         rider_id: string;
       }>`SELECT media_id,rider_id FROM rider_documents WHERE id=${documentId}::uuid`.execute(tx);
       if (!doc.rows[0] || doc.rows[0].rider_id === reviewerId)
         throw new Error('DOCUMENT_NOT_FOUND');
+      await assertRiderReviewAccess(tx, reviewerId, doc.rows[0].rider_id);
       await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id) VALUES (${uuidV7()}::uuid,${reviewerId}::uuid,'RIDER_DOCUMENT_READ','rider_document',${documentId})`.execute(
         tx,
       );
@@ -80,20 +76,15 @@ export class RiderOnboarding {
     const required = await this.config.get('requiredRiderDocuments');
     if (!approved && !reason.trim()) throw new Error('REVIEW_REASON_REQUIRED');
     await this.db.transaction().execute(async (tx) => {
-      const reviewer = await sql<{
-        id: string;
-      }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${reviewerId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(
-        tx,
-      );
-      if (!reviewer.rows[0]) throw new Error('FORBIDDEN');
       const owner = await sql<{
         rider_id: string;
       }>`SELECT rider_id FROM rider_documents WHERE id=${documentId}::uuid`.execute(tx);
       if (!owner.rows[0]) throw new Error('DOCUMENT_STATE_INVALID');
       // Serialize reviews with each other and with submissions for this rider.
+      await assertRiderReviewAccess(tx, reviewerId, owner.rows[0].rider_id, 'update');
       const profile = await sql<{
         status: string;
-      }>`SELECT status FROM rider_profiles WHERE user_id=${owner.rows[0].rider_id}::uuid FOR UPDATE`.execute(
+      }>`SELECT status FROM rider_profiles WHERE user_id=${owner.rows[0].rider_id}::uuid`.execute(
         tx,
       );
       if (profile.rows[0]?.status !== 'UNDER_REVIEW') throw new Error('DOCUMENT_STATE_INVALID');

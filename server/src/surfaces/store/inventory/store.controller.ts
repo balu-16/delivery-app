@@ -82,7 +82,7 @@ class BinDto {
 @ApiBearerAuth()
 @InventoryApiErrors()
 @UseInterceptors(DomainErrorInterceptor)
-@AuthPolicy({ audience: 'store', roles: ['PICKER', 'STORE_MANAGER'] })
+@AuthPolicy({ audience: 'store', roles: ['STORE_MANAGER'] })
 @UseGuards(IdentityGuard)
 export class StoreInventoryController {
   @Post('bin-location')

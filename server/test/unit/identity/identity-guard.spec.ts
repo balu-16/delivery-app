@@ -2,6 +2,7 @@ import type { ExecutionContext } from '@nestjs/common';
 import { HttpException } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { IdentityGuard } from '../../../src/modules/identity/contracts/identity-guard.js';
+import type { AdminSessionAuthenticator } from '../../../src/modules/identity/contracts/admin-auth.js';
 import type {
   IdentityAuthorizer,
   Principal,
@@ -60,8 +61,13 @@ function setup(bootstrap: boolean, decision: AuthenticatedLimitDecision) {
       return decision;
     },
   };
+  const adminSessions = {
+    authenticate: async (): Promise<never> => {
+      throw new Error('SESSION_EXPIRED');
+    },
+  } as unknown as AdminSessionAuthenticator;
   return {
-    guard: new IdentityGuard(reflector, verifier, authorizer, limiter),
+    guard: new IdentityGuard(reflector, verifier, authorizer, limiter, adminSessions),
     context,
     calls,
     headers,

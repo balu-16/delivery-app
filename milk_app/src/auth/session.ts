@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthError, cognitoRequest, type AuthResult } from './cognito';
 import { customerApi } from '../api/customer';
-import { ApiError, customerRequest } from '../api/client';
+import { ApiAddressError, ApiError, customerRequest } from '../api/client';
 
 const SESSION_KEY = 'dairydirect.customer.session.v1';
 const referralKey = (email:string) => `@dairydirect/signup-referral-v1:${encodeURIComponent(email.trim().toLowerCase())}`;
@@ -111,13 +111,43 @@ async function finishCognitoLogin(tokens: AuthResult['AuthenticationResult'], us
     await customerApi.bootstrap(tokens.IdToken, code, controller.signal);
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    if (error instanceof Error && error.message.includes('EXPO_PUBLIC_API_URL')) throw new AuthError('BACKEND_CONFIGURATION');
+    if (error instanceof ApiAddressError) throw new AuthError(error.code);
     throw new AuthError('BACKEND_UNREACHABLE');
   } finally {
     clearTimeout(timeout);
   }
   if (generation !== sessionGeneration) throw new Error('Session changed.');
-  await save({ mode: 'cognito', accessToken: tokens.AccessToken, refreshToken: tokens.RefreshToken, expiresAt: Date.now() + (tokens.ExpiresIn ?? 3600) * 1000 });
+  // Group assignment is asynchronous. A session is usable only after the
+  // server accepts a fresh access token with the CUSTOMER group.
+  let access = tokens.AccessToken;
+  let refresh = tokens.RefreshToken;
+  let expiresIn = tokens.ExpiresIn ?? 3600;
+  let ready = false;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    if (generation !== sessionGeneration) throw new Error('Session changed.');
+    try {
+      await customerApi.profile(access);
+      ready = true;
+      break;
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 403 && error.code === 'FORBIDDEN')) {
+        if (error instanceof ApiError) throw error;
+        throw new AuthError('BACKEND_UNREACHABLE');
+      }
+    }
+    if (attempt === 11) break;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    if (attempt > 0 && attempt % 4 === 0) await customerApi.bootstrap(tokens.IdToken, code);
+    const result = await cognitoRequest<AuthResult>('InitiateAuth', {
+      AuthFlow: 'REFRESH_TOKEN_AUTH', AuthParameters: { REFRESH_TOKEN: refresh },
+    });
+    if (!result.AuthenticationResult?.AccessToken) throw new AuthError('UNSUPPORTED_CHALLENGE');
+    access = result.AuthenticationResult.AccessToken;
+    refresh = result.AuthenticationResult.RefreshToken ?? refresh;
+    expiresIn = result.AuthenticationResult.ExpiresIn ?? 3600;
+  }
+  if (!ready) throw new AuthError('GROUP_PENDING');
+  await save({ mode: 'cognito', accessToken: access, refreshToken: refresh, expiresAt: Date.now() + expiresIn * 1000 });
   await AsyncStorage.removeItem(referralKey(username)).catch(() => {});
 }
 
@@ -204,9 +234,9 @@ export async function requestPasswordReset(email: string) {
 export async function confirmPasswordReset(email: string, code: string, password: string) {
   await cognitoRequest('ConfirmForgotPassword', { Username: email.trim(), ConfirmationCode: code.trim(), Password: password });
 }
-export async function accessToken(): Promise<string> {
+export async function accessToken(force = false): Promise<string> {
   if (!current) throw new Error('Sign in to continue.');
-  if (Date.now() < current.expiresAt - 60_000) return current.accessToken;
+  if (!force && Date.now() < current.expiresAt - 60_000) return current.accessToken;
   if (refreshInFlight) return refreshInFlight;
   const previous = current;
   refreshInFlight = (async () => {

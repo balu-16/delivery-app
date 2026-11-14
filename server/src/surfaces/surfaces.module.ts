@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { AdminAuthSurfaceModule } from './admin/auth/auth.module.js';
+import { AdminPortalSurfaceModule } from './admin/portal/p14.module.js';
 import { CustomerSubscriptionsModule } from './customer/subscriptions/p10.module.js';
 import { AdminSubscriptionsModule } from './admin/subscriptions/p10.module.js';
 import { CustomerP11Module } from './customer/p11/p11.module.js';
@@ -82,6 +84,7 @@ export class StoreSurfaceModule {}
 @Module({
   imports: [
     AdminIdentitySurfaceModule,
+    AdminAuthSurfaceModule,
     AdminStoresSurfaceModule,
     AdminCatalogSurfaceModule,
     AdminCatalogMediaSurfaceModule,
@@ -97,6 +100,7 @@ export class StoreSurfaceModule {}
     AdminP11Module,
     AdminComplianceSurfaceModule,
     AdminReportsSurfaceModule,
+    AdminPortalSurfaceModule,
   ],
 })
 export class AdminSurfaceModule {}

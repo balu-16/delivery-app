@@ -5,6 +5,7 @@ import type { IdentityAdminPort, Pool, Role } from '../contracts/identity.js';
 
 interface Operation {
   id: string;
+  user_id: string;
   token: string;
   action: string;
   details: Json;
@@ -54,11 +55,12 @@ export class IdentitySyncWorker {
     const operation = await this.db.transaction().execute(async (tx) => {
       const result = await sql<{
         id: string;
+        user_id: string;
         action: string;
         details: Json;
         pool: Pool;
         username: string;
-      }>`SELECT o.id,o.action,o.details,u.pool,COALESCE(p.username,u.cognito_sub) AS username
+      }>`SELECT o.id,o.user_id,o.action,o.details,u.pool,COALESCE(p.username,u.cognito_sub) AS username
         FROM identity_sync_operations o JOIN users u ON u.id=o.user_id LEFT JOIN identity_provisioning p ON p.cognito_sub=u.cognito_sub AND u.pool='WORKFORCE'
         WHERE o.state<>'COMPLETE' AND o.next_attempt_at<=clock_timestamp() AND (o.state='REQUESTED' OR o.lease_until<=clock_timestamp())
           AND NOT EXISTS (SELECT 1 FROM identity_sync_operations earlier WHERE earlier.user_id=o.user_id AND earlier.seq<o.seq AND earlier.state<>'COMPLETE')
@@ -97,7 +99,14 @@ export class IdentitySyncWorker {
     )
       throw new Error('INVALID_SYNC_OPERATION');
     const role = operation.details.role as Role;
-    if (operation.action === 'ROLE_GRANTED') return provider.addToGroup(operation.username, role);
+    if (operation.action === 'ROLE_GRANTED') {
+      // Do not replay an old grant after the database role has changed.
+      const current = await sql`SELECT 1 FROM users u JOIN user_roles r ON r.user_id=u.id
+        WHERE u.id=${operation.user_id}::uuid AND u.pool=${operation.pool}
+          AND u.status='ACTIVE' AND r.role=${role}`.execute(this.db);
+      if (!current.rows.length) return;
+      return provider.addToGroup(operation.username, role);
+    }
     if (operation.action === 'ROLE_REMOVED')
       return provider.removeFromGroup(operation.username, role);
     throw new Error('INVALID_SYNC_OPERATION');

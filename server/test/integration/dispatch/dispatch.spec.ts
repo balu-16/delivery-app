@@ -34,6 +34,7 @@ import { DispatchSettings } from '../../../src/modules/dispatch/infrastructure/s
 import { CanonicalDeliveryCodes } from '../../../src/modules/dispatch/infrastructure/canonical-codes.js';
 import { PostgresDeliveryTaskCancellation } from '../../../src/modules/dispatch/infrastructure/postgres-cancellation.js';
 import { PostgresDeliveryTasks } from '../../../src/modules/dispatch/infrastructure/postgres-delivery-tasks.js';
+import { RiderTaskReads } from '../../../src/modules/dispatch/infrastructure/rider-task-reads.js';
 import { PostgresTaskActions } from '../../../src/modules/dispatch/infrastructure/postgres-task-actions.js';
 import { DeliveryTasksFacade } from '../../../src/modules/dispatch/infrastructure/delivery-tasks-facade.js';
 import { PostgresRiderEarnings } from '../../../src/modules/riders/infrastructure/postgres-rider-earnings.js';
@@ -198,22 +199,35 @@ async function releaseAndDispatch(orderId: string) {
   await engine.dispatchOne(orderId);
 }
 
+test('rider task projections hide another rider’s assignment and preserve reassignment history', async () => {
+  const order = await confirmOrder();
+  const repository = new PostgresDeliveryTasks(db.db, settings, broadcasts, packing);
+  const manual = new ManualAssignment(repository);
+  const reads = new RiderTaskReads(db.db, repository);
+  const first = await manual.assign(order.orderId, world.rider1, world.admin, 'test', uuidV7());
+  expect((await reads.active(world.rider1)).items.some((task) => task.id === first.id)).toBe(true);
+  await expect(reads.detail(world.rider2, first.id)).rejects.toThrow('RESOURCE_NOT_FOUND');
+  await manual.assign(order.orderId, world.rider2, world.admin, 'reassign', uuidV7());
+  await expect(reads.detail(world.rider1, first.id)).rejects.toThrow('RESOURCE_NOT_FOUND');
+  const history = (await reads.history(world.rider1)).items.find((task) => task.id === first.id);
+  expect(history?.status).toBe('REASSIGNED');
+  expect(history).not.toHaveProperty('destination');
+  expect((await reads.detail(world.rider2, first.id)).orderId).toBe(order.orderId);
+});
+
 test('holds prevent dispatch, offer acceptance and manual assignment until resumed', async () => {
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${world.manager}::uuid,'ADMIN') ON CONFLICT DO NOTHING`.execute(
-    db.db,
-  );
   const order = await confirmOrder();
   const holds = new OrderHoldService(db.db);
-  await holds.set(order.orderId, world.manager, true, 'review');
+  await holds.set(order.orderId, world.admin, true, 'review');
   await releaseAndDispatch(order.orderId);
   expect(await engine.dispatchOne(order.orderId)).toBe('INELIGIBLE');
   const manual = new ManualAssignment(
     new PostgresDeliveryTasks(db.db, settings, broadcasts, packing),
   );
   await expect(
-    manual.assign(order.orderId, world.rider1, world.manager, 'manual', uuidV7()),
+    manual.assign(order.orderId, world.rider1, world.admin, 'manual', uuidV7()),
   ).rejects.toThrow('ORDER_ON_HOLD');
-  await holds.set(order.orderId, world.manager, false, 'cleared');
+  await holds.set(order.orderId, world.admin, false, 'cleared');
   expect(await engine.dispatchOne(order.orderId)).toBe('OFFERED');
   const offers = await sql<{
     id: string;
@@ -222,9 +236,9 @@ test('holds prevent dispatch, offer acceptance and manual assignment until resum
     db.db,
   );
   const offer = offers.rows[0]!;
-  await holds.set(order.orderId, world.manager, true, 'review again');
+  await holds.set(order.orderId, world.admin, true, 'review again');
   await expect(tasks.accept(offer.rider_id, offer.id, uuidV7())).rejects.toThrow('ORDER_ON_HOLD');
-  await holds.set(order.orderId, world.manager, false, 'cleared again');
+  await holds.set(order.orderId, world.admin, false, 'cleared again');
   const accepted = await tasks.accept(offer.rider_id, offer.id, uuidV7());
   expect(accepted.riderId).toBe(offer.rider_id);
   await tasks.arrivedAtStore(offer.rider_id, accepted.id, uuidV7());
@@ -232,7 +246,7 @@ test('holds prevent dispatch, offer acceptance and manual assignment until resum
     VALUES(${uuidV7()}::uuid,${order.orderId}::uuid,${world.store}::uuid,'COMPLETED',clock_timestamp(),clock_timestamp(),${world.manager}::uuid)`.execute(
     db.db,
   );
-  await holds.set(order.orderId, world.manager, true, 'packing review');
+  await holds.set(order.orderId, world.admin, true, 'packing review');
   await expect(
     packing.pack(
       world.manager,
@@ -245,7 +259,7 @@ test('holds prevent dispatch, offer acceptance and manual assignment until resum
   await expect(
     packing.verify(world.manager, { orderId: order.orderId, code: code.code }),
   ).rejects.toThrow('ORDER_ON_HOLD');
-  await holds.set(order.orderId, world.manager, false, 'packing cleared');
+  await holds.set(order.orderId, world.admin, false, 'packing cleared');
   await packing.pack(
     world.manager,
     order.orderId,
@@ -253,13 +267,13 @@ test('holds prevent dispatch, offer acceptance and manual assignment until resum
     uuidV7(),
   );
   await packing.verify(world.manager, { orderId: order.orderId, code: code.code });
-  await holds.set(order.orderId, world.manager, true, 'pickup review');
+  await holds.set(order.orderId, world.admin, true, 'pickup review');
   await expect(tasks.pickedUp(offer.rider_id, accepted.id, uuidV7())).rejects.toThrow(
     'ORDER_ON_HOLD',
   );
-  await holds.set(order.orderId, world.manager, false, 'pickup cleared');
+  await holds.set(order.orderId, world.admin, false, 'pickup cleared');
   await tasks.pickedUp(offer.rider_id, accepted.id, uuidV7());
-  await expect(holds.set(order.orderId, world.manager, true, 'too late')).rejects.toThrow(
+  await expect(holds.set(order.orderId, world.admin, true, 'too late')).rejects.toThrow(
     'ILLEGAL_STATE_TRANSITION',
   );
 });
@@ -345,10 +359,7 @@ beforeAll(async () => {
   tasks = new DeliveryTasksFacade(deliveryTasks, actions);
   maintenance = new DispatchMaintenance(db.db, settings, engine, broadcasts);
   consumer = new OrderConfirmedConsumer(config, codes);
-  trigger = new PickTriggerConsumer(
-    () => settings.trigger(),
-    async () => undefined,
-  );
+  trigger = new PickTriggerConsumer(() => settings.trigger());
   for (const rider of [world.rider1, world.rider2, world.rider3])
     await geo.updateMember(
       rider,
@@ -427,6 +438,75 @@ test('the ON_PICK_START trigger releases the task and the engine offers to the f
   // The offered rider sees the offer over the poll fallback.
   const offers = await tasks.offers(task.rows[0]!.offered_rider_id!);
   expect(offers.items.map((offer) => offer.orderId)).toContain(order.orderId);
+});
+
+test('maps preflight holds no order lock and rechecks rider eligibility before offering', async () => {
+  const order = await confirmOrder();
+  await sql`UPDATE delivery_tasks SET dispatch_not_before=clock_timestamp() WHERE order_id=${order.orderId}::uuid`.execute(
+    db.db,
+  );
+  await sql`UPDATE rider_status SET online=(rider_id=${world.rider1}::uuid),last_location_at=clock_timestamp()`.execute(
+    db.db,
+  );
+  await geo.updateMember(
+    world.rider1,
+    { lat: world.storeLat, lng: world.storeLng, ts: new Date().toISOString() },
+    120,
+  );
+  let entered!: () => void;
+  let release!: () => void;
+  const matrixEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const continueMatrix = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const maps = {
+    async distanceMatrix(origins: unknown[]) {
+      entered();
+      await continueMatrix;
+      return origins.map(() => [{ durationSeconds: 30, distanceMetres: 100, degraded: false }]);
+    },
+  };
+  const config = fakeConfig();
+  const contender = new DispatchEngine(
+    db.db,
+    settings,
+    config,
+    broadcasts,
+    geo,
+    new PostgresRiderEligibility(db.db, new RiderSettings(config)),
+    orderSystemCancel,
+    cancellation,
+    maps as never,
+  );
+  const dispatching = contender.dispatchOne(order.orderId);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      matrixEntered,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('matrix was not called')), 5000);
+      }),
+    ]);
+    await db.db.transaction().execute(async (tx) => {
+      await sql`SELECT id FROM orders WHERE id=${order.orderId}::uuid FOR UPDATE NOWAIT`.execute(
+        tx,
+      );
+    });
+    await sql`UPDATE rider_status SET online=false WHERE rider_id=${world.rider1}::uuid`.execute(
+      db.db,
+    );
+  } finally {
+    clearTimeout(timeout);
+    release();
+  }
+  expect(await dispatching).toBe('RETRY');
+  const offers =
+    await sql`SELECT 1 FROM rider_offers o JOIN delivery_tasks t ON t.id=o.task_id WHERE t.order_id=${order.orderId}::uuid`.execute(
+      db.db,
+    );
+  expect(offers.rows).toHaveLength(0);
 });
 
 test('a rider outside eligibility (offline) is never offered, widening and alerts follow', async () => {

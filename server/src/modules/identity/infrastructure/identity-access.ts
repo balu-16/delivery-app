@@ -51,14 +51,17 @@ export class DatabaseIdentityAccess implements IdentityAccess {
     );
     return result.rows[0]?.allowed === true;
   }
-  async listStoreAssignments(userId: string): Promise<Array<{ storeId: string; role: Role }>> {
+  async listStoreAssignments(
+    userId: string,
+  ): Promise<Array<{ storeId: string; role: Role; name: string }>> {
     const rows = await sql<{
       store_id: string;
       role: Role;
-    }>`SELECT s.store_id,s.role FROM store_staff s JOIN users u ON u.id=s.user_id JOIN user_roles r ON r.user_id=s.user_id AND r.role=s.role WHERE s.user_id=${userId}::uuid AND u.status='ACTIVE' ORDER BY s.store_id,s.role`.execute(
+      name: string;
+    }>`SELECT s.store_id,s.role,st.name FROM store_staff s JOIN stores st ON st.id=s.store_id JOIN users u ON u.id=s.user_id JOIN user_roles r ON r.user_id=s.user_id AND r.role=s.role WHERE s.user_id=${userId}::uuid AND u.status='ACTIVE' ORDER BY st.name,s.store_id`.execute(
       this.db,
     );
-    return rows.rows.map((row) => ({ storeId: row.store_id, role: row.role }));
+    return rows.rows.map((row) => ({ storeId: row.store_id, role: row.role, name: row.name }));
   }
   async hasStoreRole(
     userId: string,

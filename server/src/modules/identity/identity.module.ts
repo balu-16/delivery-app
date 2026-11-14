@@ -1,7 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
+import { SQSClient } from '@aws-sdk/client-sqs';
+import type { Redis } from 'ioredis';
 import { ConfigService as RuntimeConfig } from '../../config/config.service.js';
-import { PLATFORM_DATABASE } from '../../platform/contracts/runtime.js';
+import { PLATFORM_DATABASE, PLATFORM_REDIS } from '../../platform/contracts/runtime.js';
 import type { DatabaseHandle } from '../../platform/database/database.js';
 import { createS3Client } from '../../adapters/storage/s3-client.js';
 import { S3PrivateUploads } from '../../adapters/storage/s3-private.js';
@@ -9,15 +11,27 @@ import { LocalPrivateUploads } from '../../adapters/storage/local-private.js';
 import { APP_CONFIG, type AppConfig } from '../app-config/contracts/config.js';
 import { PRIVATE_UPLOADS, RIDER_DOCUMENTS, type PrivateUploadPort } from './contracts/uploads.js';
 import { RiderOnboarding } from './infrastructure/rider-onboarding.js';
+import { RIDER_APPLICATIONS } from './contracts/rider-applications.js';
+import { PostgresRiderApplications } from './infrastructure/rider-applications.js';
 import { AppConfigModule } from '../app-config/app-config.module.js';
 import { ComplianceModule } from '../compliance/compliance.module.js';
 import { APPROVAL_FACTORY, type ApprovalFactory } from '../compliance/contracts/approval.js';
 import { IdentityAdminService } from './infrastructure/admin-service.js';
 import { IdentityAdministrationService } from './infrastructure/identity-administration.js';
 import { CognitoIdentityAdmin, CognitoTokenVerifier } from '../../adapters/auth/cognito.js';
+import { CognitoAdminAuth } from '../../adapters/auth/cognito-admin-auth.js';
 import { ResilientIdentityAdmin } from '../../adapters/auth/resilient.js';
 import { LocalIdentityAdmin } from '../../adapters/auth/local-admin.js';
 import { LocalTokenAdapter } from '../../adapters/auth/local.js';
+import { LocalAdminAuthProvider } from '../../adapters/auth/local-admin-auth.js';
+import { AdminSessionAuthenticator, AdminSessionStore } from './infrastructure/admin-sessions.js';
+import {
+  ADMIN_PORTAL_AUTH_PROVIDER,
+  ADMIN_SESSION_AUTHENTICATOR,
+  ADMIN_SESSIONS,
+  type AdminPortalAuthProvider,
+  type AdminSessions as AdminSessionsPort,
+} from './contracts/admin-auth.js';
 import {
   IDENTITY_ACCESS,
   IDENTITY_ADMIN,
@@ -29,11 +43,14 @@ import {
   RIDER_PROFILE_ONBOARDING,
   type IdentityAccess,
   type IdentityAdminPort,
+  type IdentityAuthorizer,
+  type TokenVerifier,
 } from './contracts/identity.js';
 import { IdentityGuard } from './contracts/identity-guard.js';
 import { IDENTITY_ROSTER } from './contracts/roster.js';
 import { PostgresIdentityRoster } from './infrastructure/roster.js';
 import { IdentityService } from './infrastructure/identity-service.js';
+import { SqsCustomerGroupSync } from './infrastructure/customer-group-sync.js';
 import { DatabaseIdentityAccess } from './infrastructure/identity-access.js';
 import { DatabaseUserProfiles } from './infrastructure/user-profiles.js';
 import { RiderProfileService } from './infrastructure/rider-profile.js';
@@ -52,9 +69,26 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
     },
     {
       provide: IDENTITY_AUTHORIZER,
-      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS, REFERRALS],
-      useFactory: (handle: DatabaseHandle, access: IdentityAccess, referrals: Referrals) =>
-        new IdentityService(handle.db, access, referrals),
+      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS, REFERRALS, RuntimeConfig],
+      useFactory: (
+        handle: DatabaseHandle,
+        access: IdentityAccess,
+        referrals: Referrals,
+        config: RuntimeConfig,
+      ) => {
+        const queueUrl = config.get('CUSTOMER_GROUP_SYNC_QUEUE_URL');
+        const sync =
+          queueUrl && config.get('AUTH_PROVIDER') === 'cognito'
+            ? new SqsCustomerGroupSync(
+                new SQSClient({ region: config.get('AWS_REGION'), maxAttempts: 1 }),
+                queueUrl,
+                config.get('COGNITO_CUSTOMER_POOL_ID'),
+              )
+            : undefined;
+        return new IdentityService(handle.db, access, referrals, sync, () =>
+          Logger.error('CUSTOMER_GROUP_ENQUEUE_FAILED', undefined, 'CustomerGroupSync'),
+        );
+      },
     },
     {
       provide: USER_PROFILES,
@@ -118,6 +152,12 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
         new RiderProfileService(handle.db, config),
     },
     {
+      provide: RIDER_APPLICATIONS,
+      inject: [PLATFORM_DATABASE, APP_CONFIG],
+      useFactory: (handle: DatabaseHandle, config: AppConfig) =>
+        new PostgresRiderApplications(handle.db, config),
+    },
+    {
       provide: PRIVATE_UPLOADS,
       inject: [PLATFORM_DATABASE, RuntimeConfig],
       useFactory: (handle: DatabaseHandle, config: RuntimeConfig) =>
@@ -150,6 +190,49 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
       inject: [PLATFORM_DATABASE],
       useFactory: (handle: DatabaseHandle) => new PostgresIdentityRoster(handle.db),
     },
+    {
+      provide: ADMIN_PORTAL_AUTH_PROVIDER,
+      inject: [PLATFORM_DATABASE, RuntimeConfig],
+      useFactory: (handle: DatabaseHandle, config: RuntimeConfig): AdminPortalAuthProvider =>
+        config.get('AUTH_PROVIDER') === 'local'
+          ? new LocalAdminAuthProvider(
+              handle.db,
+              config.get('LOCAL_JWT_SECRET'),
+              (pool, sub, audience, tokenUse, lifetimeSeconds) =>
+                new LocalTokenAdapter(config.get('LOCAL_JWT_SECRET'), handle.db).issue(
+                  pool,
+                  sub,
+                  audience,
+                  tokenUse,
+                  lifetimeSeconds,
+                ),
+            )
+          : new CognitoAdminAuth(
+              new CognitoIdentityProviderClient({
+                region: config.get('AWS_REGION'),
+                maxAttempts: 1,
+              }),
+              config.get('COGNITO_WORKFORCE_POOL_ID'),
+              config.get('COGNITO_ADMIN_CLIENT_ID'),
+              config.get('COGNITO_TIMEOUT_MS'),
+            ),
+    },
+    {
+      provide: ADMIN_SESSIONS,
+      inject: [PLATFORM_DATABASE, PLATFORM_REDIS, RuntimeConfig],
+      useFactory: (handle: DatabaseHandle, redis: Redis, config: RuntimeConfig) =>
+        new AdminSessionStore(handle.db, redis, config),
+    },
+    {
+      provide: ADMIN_SESSION_AUTHENTICATOR,
+      inject: [ADMIN_PORTAL_AUTH_PROVIDER, ADMIN_SESSIONS, TOKEN_VERIFIER, IDENTITY_AUTHORIZER],
+      useFactory: (
+        provider: AdminPortalAuthProvider,
+        sessions: AdminSessionsPort,
+        verifier: TokenVerifier,
+        authorizer: IdentityAuthorizer,
+      ) => new AdminSessionAuthenticator(provider, sessions, verifier, authorizer),
+    },
     IdentityGuard,
   ],
   exports: [
@@ -163,10 +246,14 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
     IDENTITY_ADMIN,
     WORKFORCE_PROVISIONER,
     RIDER_PROFILE_ONBOARDING,
+    RIDER_APPLICATIONS,
     PRIVATE_UPLOADS,
     RIDER_DOCUMENTS,
     ReferralsModule,
     IdentityGuard,
+    ADMIN_PORTAL_AUTH_PROVIDER,
+    ADMIN_SESSIONS,
+    ADMIN_SESSION_AUTHENTICATOR,
   ],
 })
 export class IdentityModule {}
@@ -176,6 +263,7 @@ import { CustomerIdentityController } from '../../surfaces/customer/identity/cus
 import { PrivateMediaController } from '../../surfaces/rider/identity/private-media.controller.js';
 import { RiderIdentityController } from '../../surfaces/rider/identity/rider.controller.js';
 import { StoreIdentityController } from '../../surfaces/store/identity/store.controller.js';
+import { StoreRiderApplicationsController } from '../../surfaces/store/identity/rider-applications.controller.js';
 import { AdminIdentityController } from '../../surfaces/admin/identity/admin.controller.js';
 @Module({ imports: [IdentityModule], controllers: [CustomerIdentityController, DevAuthController] })
 export class CustomerIdentitySurfaceModule {}
@@ -186,7 +274,10 @@ export class PrivateMediaSurfaceModule {}
   controllers: [RiderIdentityController],
 })
 export class RiderIdentitySurfaceModule {}
-@Module({ imports: [IdentityModule], controllers: [StoreIdentityController] })
+@Module({
+  imports: [IdentityModule, PrivateMediaSurfaceModule],
+  controllers: [StoreIdentityController, StoreRiderApplicationsController],
+})
 export class StoreIdentitySurfaceModule {}
 @Module({
   imports: [IdentityModule, PrivateMediaSurfaceModule],

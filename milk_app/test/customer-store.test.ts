@@ -8,7 +8,7 @@ jest.mock('@react-native-async-storage/async-storage', () => require('@react-nat
 jest.mock('expo-crypto', () => ({randomUUID: jest.fn(() => 'checkout-key')}));
 jest.mock('../src/auth/session', () => ({accessToken: jest.fn(async () => 'token'), restoreSession: jest.fn(async () => true), signOut: jest.fn(async () => {})}));
 jest.mock('../src/api/customer', () => ({
-  customerApi: {profile:jest.fn(), addresses:jest.fn(), cart:jest.fn(), catalog:jest.fn(), favorites:jest.fn(), setFavorite:jest.fn(), putItem:jest.fn(), quote:jest.fn(), place:jest.fn()},
+  customerApi: {profile:jest.fn(), addresses:jest.fn(), cart:jest.fn(), catalog:jest.fn(), favorites:jest.fn(), setFavorite:jest.fn(), putItem:jest.fn(), quote:jest.fn(), place:jest.fn(), serviceability:jest.fn(), createAddress:jest.fn()},
   customerDetailsApi: {orders:jest.fn(), subscriptions:jest.fn(), ledger:jest.fn(), notifications:jest.fn(), createSubscription:jest.fn(), subscriptionAction:jest.fn()},
 }));
 const api = jest.mocked(customerApi);
@@ -45,6 +45,15 @@ test('an expired quote can be replaced after the server definitively rejects it'
   expect(await useCustomer.getState().placeOrder()).toBe(false);
   expect(useCustomer.getState().pendingPlacement).toBeNull();
   expect(await AsyncStorage.getItem('@dairydirect/pending-checkout-v1:user-1')).toBeNull();
+});
+test('keeps the original checkout request when its idempotency lease is lost', async () => {
+  api.place.mockRejectedValueOnce(new ApiError(409, 'IDEMPOTENCY_LEASE_LOST')).mockResolvedValueOnce({order:{orderId:'order',status:'CONFIRMED',paymentStatus:'COD_PENDING'},confirmation:'CONFIRMED',payment:null});
+  expect(await useCustomer.getState().placeOrder()).toBe(false);
+  expect(useCustomer.getState().pendingPlacement?.key).toBe('checkout-key');
+  expect(await AsyncStorage.getItem('@dairydirect/pending-checkout-v1:user-1')).toBeTruthy();
+  const first = api.place.mock.calls[0];
+  expect(await useCustomer.getState().placeOrder()).toBe(true);
+  expect(api.place.mock.calls[1]).toEqual(first);
 });
 test('a wallet balance change releases the rejected checkout for a fresh quote', async () => {
   api.place.mockRejectedValue(new ApiError(409, 'WALLET_INSUFFICIENT'));
@@ -102,4 +111,11 @@ test('does not submit checkout when the backend reports cash is unavailable', as
   expect(await useCustomer.getState().placeOrder()).toBe(false);
   expect(api.place).not.toHaveBeenCalled();
   expect(useCustomer.getState().error).toMatch(/not available/);
+});
+
+test('explains a coverage lookup failure before attempting to save an address', async () => {
+  api.serviceability.mockRejectedValueOnce(new TypeError('network unavailable'));
+  await expect(useCustomer.getState().addAddress({line1:'12 Main Street',pincode:'520001',contactName:'Customer',contactPhone:'+919876543210',lat:16.50547,lng:80.64823}))
+    .rejects.toThrow('Could not check delivery coverage. Check your connection and try again.');
+  expect(api.createAddress).not.toHaveBeenCalled();
 });

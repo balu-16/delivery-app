@@ -46,7 +46,9 @@ beforeAll(async () => {
     await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${id}::uuid,'WORKFORCE',${sub},${sub + '@example.invalid'},${sub})`.execute(
       db.db,
     );
-    await sql`INSERT INTO user_roles(user_id,role) VALUES(${id}::uuid,'ADMIN')`.execute(db.db);
+    await sql`INSERT INTO user_roles(user_id,role) VALUES(${id}::uuid,'SUPER_ADMIN')`.execute(
+      db.db,
+    );
   }
   await sql`INSERT INTO catalog_categories(id,name) VALUES(${category}::uuid,'Dairy')`.execute(
     db.db,

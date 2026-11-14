@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText } from '@/components/ui/AppText';
@@ -14,9 +14,11 @@ import {
   PasswordChangedError, PasswordChangeUncertainError, requestPasswordReset, resendSignUpCode, signUp, type LoginResult, type RequiredAttribute,
 } from '@/src/auth/session';
 import { useCustomer } from '@/src/store/customer';
+import { indianPhoneE164, indianPhoneInput } from '@/src/utils/indian-phone';
 
 type Stage = 'login' | 'signup' | 'verify' | 'forgot' | 'reset' | 'newPassword';
 type Notice = { text: string; error: boolean };
+type Field = 'name' | 'email' | 'phone' | 'password' | 'newPassword' | 'code' | 'referral';
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { status, initialize, load, logout, error } = useCustomer();
@@ -33,6 +35,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [skipReferral, setSkipReferral] = useState(false);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [fields, setFields] = useState<Partial<Record<Field, string>>>({});
   useEffect(() => { void initialize(); }, [initialize]);
   useEffect(() => () => cancelPasswordChange(), []);
   if (status === 'signedIn') return <>{children}</>;
@@ -51,6 +54,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   const submit = async (withoutReferral = false) => {
     if (pending) return;
+    const next: Partial<Record<Field, string>> = {};
+    if (!email.trim()) next.email = 'Enter your email address.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) next.email = 'Enter a valid email address.';
+    if ((stage === 'signup' || (stage === 'newPassword' && required.includes('name'))) && !name.trim()) next.name = 'Enter your name.';
+    if (['login', 'signup', 'reset'].includes(stage) && !password) next.password = stage === 'reset' ? 'Enter a new password.' : 'Enter your password.';
+    if (stage === 'newPassword' && !newPassword) next.newPassword = 'Enter a new password.';
+    if (stage === 'newPassword' && required.includes('phone_number') && !indianPhoneE164(phone)) next.phone = 'Enter a valid 10-digit Indian phone number.';
+    if (['verify', 'reset'].includes(stage) && !code.trim()) next.code = 'Enter the code sent to your email.';
+    if (!withoutReferral && (stage === 'login' || stage === 'signup') && referral.trim() && !/^[A-F0-9]{16}$/i.test(referral.trim())) next.referral = 'Enter a valid 16-character referral code.';
+    setFields(next);
+    if (Object.keys(next).length) return;
     setPending(true); setNotice(null); setSkipReferral(false);
     let verified = false;
     try {
@@ -71,7 +85,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         setPassword(''); setCode(''); setStage('login');
         setNotice({ text: 'Password updated. Sign in to continue.', error: false });
       } else if (stage === 'newPassword') {
-        await completePasswordChange(newPassword, { name, email, phone_number: phone });
+        await completePasswordChange(newPassword, { name, email, phone_number: indianPhoneE164(phone) ?? '' });
         setNewPassword(''); setReferral(''); await load();
       } else {
         await handleLogin(await login(email, password, withoutReferral ? null : referral.trim() || undefined));
@@ -84,6 +98,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
       } else if (cause instanceof PasswordChangeUncertainError) {
         setNewPassword(''); setPassword(''); setStage('login');
         setNotice({ text: cause.message, error: true });
+      } else if (cause instanceof AuthError && !verified && cause.code === 'INVALID_PASSWORD') {
+        setFields(previous => ({ ...previous, [stage === 'newPassword' ? 'newPassword' : 'password']: cause.message }));
+      } else if (cause instanceof AuthError && !verified && (cause.code === 'INVALID_CODE' || cause.code === 'EXPIRED_CODE')) {
+        setFields(previous => ({ ...previous, code: cause.message }));
+      } else if (cause instanceof AuthError && !verified && stage === 'signup' && cause.code === 'ACCOUNT_EXISTS') {
+        setFields(previous => ({ ...previous, email: cause.message }));
       } else {
         if (cause instanceof AuthError && cause.code === 'EMAIL_NOT_VERIFIED') setStage('verify');
         if (cause instanceof AuthError && cause.code === 'CHALLENGE_EXPIRED') { setStage('login'); setNewPassword(''); }
@@ -103,42 +123,50 @@ export function AuthGate({ children }: { children: ReactNode }) {
     finally { setPending(false); }
   };
   const goTo = (next: Stage) => {
-    cancelPasswordChange(); setNewPassword(''); setRequired([]); setStage(next); setNotice(null); setSkipReferral(false);
+    cancelPasswordChange(); setNewPassword(''); setRequired([]); setStage(next); setNotice(null); setSkipReferral(false); setFields({});
   };
   const title = stage === 'signup' ? 'Create your account' : stage === 'verify' ? 'Verify your email' : stage === 'forgot' ? 'Reset your password' : stage === 'reset' || stage === 'newPassword' ? 'Choose a new password' : 'Welcome to DairyDirect';
   const label = stage === 'login' ? 'Sign in' : stage === 'signup' ? 'Create account' : stage === 'verify' ? 'Verify email' : stage === 'forgot' ? 'Send reset code' : 'Update password';
-  const disabled = pending || !email.trim() || (stage === 'signup' && !name.trim()) || (['login', 'signup', 'reset'].includes(stage) && !password) || (['verify', 'reset'].includes(stage) && !code.trim()) || (stage === 'newPassword' && (!newPassword || (required.includes('name') && !name.trim()) || (required.includes('phone_number') && !phone.trim())));
+  const clear = (field: Field) => setFields(previous => ({ ...previous, [field]: undefined }));
+  const fieldError = (field: Field) => fields[field] ? <AppText accessibilityLiveRegion="polite" style={styles.errorText}>{fields[field]}</AppText> : null;
 
-  return <Screen><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.page, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 24 }]}>
+  return <Screen><KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}><View style={[styles.page, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 24 }]}>
     <Image source={images.logoEmblem} style={styles.logo} contentFit="contain" />
     <AppText style={styles.title}>{title}</AppText>
     <AppText style={styles.subtitle}>Sign in to see your deliveries, dairy and wallet.</AppText>
-    {status === 'loading' ? <ActivityIndicator color={colors.green} /> : status === 'unavailable' ? <View style={styles.card}>
+    {status === 'loading' ? <ActivityIndicator color={colors.green} /> : <ScrollView style={styles.formScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    {status === 'unavailable' ? <View style={styles.card}>
       <AppText style={styles.body}>{error ?? 'The service is temporarily unavailable.'}</AppText>
       <Button label="Try again" onPress={() => void initialize()} fullWidth />
       <Button label="Sign out" variant="soft" onPress={() => void logout()} fullWidth />
     </View> : <View style={styles.card}>
-      {(stage === 'signup' || (stage === 'newPassword' && required.includes('name'))) && <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Your name" autoComplete="name" accessibilityLabel="Your name" />}
-      <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="Email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" accessibilityLabel="Email address" editable={stage !== 'newPassword'} />
-      {stage === 'newPassword' && required.includes('phone_number') && <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="Phone number with country code" keyboardType="phone-pad" autoComplete="tel" accessibilityLabel="Phone number with country code" />}
-      {(stage === 'login' || stage === 'signup' || stage === 'reset') && <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder={stage === 'reset' ? 'New password' : 'Password'} secureTextEntry autoComplete={stage === 'login' ? 'current-password' : 'new-password'} accessibilityLabel={stage === 'reset' ? 'New password' : 'Password'} />}
-      {stage === 'newPassword' && <TextInput style={styles.input} value={newPassword} onChangeText={setNewPassword} placeholder="New password" secureTextEntry autoComplete="new-password" accessibilityLabel="New password" />}
-      {(stage === 'login' || stage === 'signup') && <TextInput style={styles.input} value={referral} onChangeText={setReferral} placeholder="Referral code (optional for new accounts)" autoCapitalize="characters" maxLength={16} accessibilityLabel="Referral code" />}
-      {(stage === 'verify' || stage === 'reset') && <TextInput style={styles.input} value={code} onChangeText={setCode} placeholder={stage === 'reset' ? 'Password reset code' : 'Email verification code'} keyboardType="number-pad" accessibilityLabel={stage === 'reset' ? 'Password reset code' : 'Verification code'} />}
+      {(stage === 'signup' || (stage === 'newPassword' && required.includes('name'))) && <><TextInput style={[styles.input, fields.name && styles.invalid]} value={name} onChangeText={value => { setName(value); clear('name'); }} placeholder="Your name" autoComplete="name" accessibilityLabel="Your name" />{fieldError('name')}</>}
+      <TextInput style={[styles.input, fields.email && styles.invalid]} value={email} onChangeText={value => { setEmail(value); clear('email'); }} placeholder="Email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" accessibilityLabel="Email address" editable={stage !== 'newPassword'} />{fieldError('email')}
+      {stage === 'newPassword' && required.includes('phone_number') && <><View style={[styles.input, styles.phoneRow, fields.phone && styles.invalid]}><AppText style={styles.prefix}>+91</AppText><TextInput style={styles.phoneInput} value={phone} onChangeText={value => { setPhone(indianPhoneInput(value)); clear('phone'); }} placeholder="10-digit phone number" keyboardType="phone-pad" autoComplete="tel-national" accessibilityLabel="Phone number" /></View>{fieldError('phone')}</>}
+      {(stage === 'login' || stage === 'signup' || stage === 'reset') && <><TextInput style={[styles.input, fields.password && styles.invalid]} value={password} onChangeText={value => { setPassword(value); clear('password'); }} placeholder={stage === 'reset' ? 'New password' : 'Password'} secureTextEntry autoComplete={stage === 'login' ? 'current-password' : 'new-password'} accessibilityLabel={stage === 'reset' ? 'New password' : 'Password'} />{fieldError('password')}</>}
+      {stage === 'newPassword' && <><TextInput style={[styles.input, fields.newPassword && styles.invalid]} value={newPassword} onChangeText={value => { setNewPassword(value); clear('newPassword'); }} placeholder="New password" secureTextEntry autoComplete="new-password" accessibilityLabel="New password" />{fieldError('newPassword')}</>}
+      {(stage === 'login' || stage === 'signup') && <><TextInput style={[styles.input, fields.referral && styles.invalid]} value={referral} onChangeText={value => { setReferral(value); clear('referral'); }} placeholder="Referral code (optional for new accounts)" autoCapitalize="characters" maxLength={16} accessibilityLabel="Referral code" />{fieldError('referral')}</>}
+      {(stage === 'verify' || stage === 'reset') && <><TextInput style={[styles.input, fields.code && styles.invalid]} value={code} onChangeText={value => { setCode(value); clear('code'); }} placeholder={stage === 'reset' ? 'Password reset code' : 'Email verification code'} keyboardType="number-pad" accessibilityLabel={stage === 'reset' ? 'Password reset code' : 'Verification code'} />{fieldError('code')}</>}
       {notice && <View accessibilityLiveRegion="polite" style={[styles.notice, notice.error ? styles.errorNotice : styles.infoNotice]}><AppText style={[styles.body, notice.error && styles.errorText]}>{notice.text}</AppText></View>}
-      <Button label={label} fullWidth onPress={() => void submit()} loading={pending} disabled={disabled} />
+      <Button label={label} fullWidth onPress={() => void submit()} loading={pending} disabled={pending} />
       {skipReferral && <Button label="Sign in without referral" variant="soft" fullWidth disabled={pending || !email.trim() || !password} onPress={() => void submit(true)} />}
       {stage === 'verify' && <Button label="Resend verification code" variant="ghost" fullWidth disabled={pending || !email.trim()} onPress={() => void resend()} />}
       {stage === 'login' ? <><Button label="Create account" variant="soft" fullWidth disabled={pending} onPress={() => goTo('signup')} /><Button label="Verify email" variant="ghost" fullWidth disabled={pending} onPress={() => goTo('verify')} /><Button label="Forgot password?" variant="ghost" fullWidth disabled={pending} onPress={() => goTo('forgot')} /></> : <Button label="Back to sign in" variant="soft" fullWidth disabled={pending} onPress={() => goTo('login')} />}
     </View>}
-  </ScrollView></Screen>;
+    </ScrollView>}
+  </View></KeyboardAvoidingView></Screen>;
 }
 const styles = StyleSheet.create({
-  page: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 22, gap: 12 },
+  page: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 22, gap: 12 },
+  formScroll: { width: '100%', maxWidth: 420, flexGrow: 0, flexShrink: 1 },
   logo: { width: 85, height: 78 }, title: { fontFamily: fonts.bold, fontSize: 25, color: colors.brownDark, textAlign: 'center' },
   subtitle: { color: colors.textSecondary, textAlign: 'center', fontSize: 13 },
   card: { width: '100%', maxWidth: 420, padding: 18, borderRadius: 20, backgroundColor: colors.surfaceRaised, gap: 12, borderWidth: 1, borderColor: colors.line },
   input: { minHeight: 48, borderWidth: 1, borderColor: colors.lineStrong, backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 12, color: colors.text },
+  invalid: { borderColor: colors.danger },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  prefix: { color: colors.text, borderRightWidth: 1, borderRightColor: colors.lineStrong, paddingRight: 10 },
+  phoneInput: { flex: 1, minHeight: 48, color: colors.text, paddingVertical: 0 },
   body: { color: colors.textSecondary, fontSize: 13, lineHeight: 20 },
   notice: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
   errorNotice: { backgroundColor: colors.dangerSoft }, infoNotice: { backgroundColor: colors.greenSoft },

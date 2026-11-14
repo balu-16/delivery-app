@@ -25,7 +25,7 @@ interface PayoutRow {
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function authorize(tx: TransactionContext, actor: string): Promise<void> {
   const result =
-    await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actor}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(
+    await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actor}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('SUPER_ADMIN') FOR SHARE OF u,r`.execute(
       tx,
     );
   if (!result.rows.length) throw new Error('FORBIDDEN');
@@ -70,7 +70,7 @@ export class PostgresPayouts implements Payouts {
     this.approval = factory.create({
       payout: {
         version: 1,
-        makerRole: 'ADMIN',
+        makerRole: 'SUPER_ADMIN',
         checkerRole: 'SUPER_ADMIN',
         ttlSeconds: 86400,
         validate: (payload: Json) => {
@@ -123,7 +123,7 @@ export class PostgresPayouts implements Payouts {
       },
       payoutCorrection: {
         version: 1,
-        makerRole: 'ADMIN',
+        makerRole: 'SUPER_ADMIN',
         checkerRole: 'SUPER_ADMIN',
         ttlSeconds: 86400,
         validate: (payload: Json) => {

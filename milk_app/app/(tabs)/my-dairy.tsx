@@ -1,8 +1,7 @@
 import { useFocusEffect, router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { io, type Socket } from 'socket.io-client';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Screen } from '@/components/ui/Screen';
@@ -11,8 +10,8 @@ import { Card, ErrorBanner, formatPaise, Heading, shared } from '@/components/co
 import { SubscriptionManagement } from '@/components/connected/SubscriptionManagement';
 import { colors, fonts } from '@/constants/theme';
 import { customerDetailsApi, type CustomerOrder, type CustomerSubscription } from '@/src/api/customer';
-import { apiBaseUrl } from '@/src/api/client';
 import { accessToken } from '@/src/auth/session';
+import { startOrderRealtime } from '@/src/orderRealtime';
 import { useCustomer } from '@/src/store/customer';
 
 const date = (value: string) => { const d = new Date(value); return Number.isNaN(d.getTime()) ? value : new Intl.DateTimeFormat('en-IN', { day:'numeric', month:'short', year:'numeric', timeZone:'Asia/Kolkata' }).format(d); };
@@ -27,26 +26,21 @@ export default function MyDairy() {
   const [loading, setLoading] = useState(true);
   useFocusEffect(useCallback(() => { let active = true; void loadActivity().finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [loadActivity]));
   const orderId = selected?.orderId;
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (!orderId) return;
-    let active = true; let socket: Socket | undefined;
+    let active = true;
     const refresh = async () => {
       try { const data = await customerDetailsApi.tracking(await accessToken(), orderId); if (active) setTracking(data.eta ? `${label(data.taskStatus)} · ${data.eta.minMinutes}–${data.eta.maxMinutes} min` : label(data.taskStatus)); }
       catch { if (active) setTracking('Tracking will appear when a delivery partner is assigned.'); }
     };
     void refresh();
-    void accessToken().then(token => {
-      if (!active) return;
-      socket = io(`${apiBaseUrl()}/customer`, { auth: { token }, transports:['websocket'], reconnection:true });
-      socket.on('connect', () => { socket?.emit('subscribe', {room:`order:${orderId}`}); void refresh(); });
-      socket.on('rider.location', () => void refresh());
-      socket.on('snapshot', () => void refresh());
-      socket.on('eta.updated', () => void refresh());
-      socket.on('order.status', () => { void refresh(); void loadActivity(); void accessToken().then(token => customerDetailsApi.order(token, orderId)).then(order => { if (active) setSelected(current => current?.orderId === orderId ? order : current); }).catch(() => {}); });
-    }).catch(() => {});
+    let stopSocket: (() => void) | undefined;
+    try { stopSocket = startOrderRealtime(orderId, () => void refresh(), () => {
+      void refresh(); void loadActivity(); void accessToken().then(token => customerDetailsApi.order(token, orderId)).then(order => { if (active) setSelected(current => current?.orderId === orderId ? order : current); }).catch(() => {});
+    }); } catch { /* polling remains available */ }
     const timer = setInterval(() => void refresh(), 30000);
-    return () => { active = false; clearInterval(timer); socket?.emit('unsubscribe', {room:`order:${orderId}`}); socket?.disconnect(); };
-  }, [orderId, loadActivity]);
+    return () => { active = false; clearInterval(timer); stopSocket?.(); };
+  }, [orderId, loadActivity]));
   const open = (order: CustomerOrder) => { setTracking(''); setCode(''); setConfirmCancel(false); setSelected(order); void accessToken().then(token => customerDetailsApi.order(token, order.orderId)).then(detail => setSelected(current => current?.orderId === detail.orderId ? detail : current)).catch(() => {}); };
   const showCode = async () => { if (!orderId) return; try { const result = await customerDetailsApi.deliveryCode(await accessToken(), orderId); setCode(result.code); } catch { setCode('A delivery code is not available yet.'); } };
   return <Screen><ScrollView contentContainerStyle={[shared.scroll, {paddingTop:insets.top+12}]} showsVerticalScrollIndicator={false}>

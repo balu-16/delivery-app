@@ -30,7 +30,7 @@ function clean(value: string, max: number): string {
 async function staff(tx: TransactionContext, actorId: string): Promise<boolean> {
   const actor = await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id
     WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE'
-      AND r.role IN ('SUPPORT_AGENT','ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(tx);
+      AND r.role IN ('SUPPORT_AGENT','SUPER_ADMIN') FOR SHARE OF u,r`.execute(tx);
   return actor.rows.length > 0;
 }
 export class PostgresSupport implements Support {
@@ -205,7 +205,7 @@ export class PostgresSupport implements Support {
       body = clean(input.body, await this.config.get('supportMessageMaxLength'));
     return transactionWithRetry(this.db, async (tx) => {
       const authorized =
-        await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(
+        await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('SUPER_ADMIN') FOR SHARE OF u,r`.execute(
           tx,
         );
       if (!authorized.rows.length) throw new Error('FORBIDDEN');

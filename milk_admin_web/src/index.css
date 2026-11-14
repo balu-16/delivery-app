@@ -1,0 +1,267 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Keep navigation usable in short desktop windows and mobile landscape. */
+@media (max-height: 720px) {
+  .sidebar-artwork {
+    display: none;
+  }
+}
+
+/* ── Self-hosted Poppins (latin subset, woff2, swap) — 3 weights only ── */
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/poppins-400.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/poppins-600.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/fonts/poppins-800.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@layer base {
+  :root {
+    --background: 100 40% 97%;
+    --foreground: 152 20% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 152 20% 12%;
+    --primary: 99 66% 30%;
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 100 58% 92%;
+    --primary-softer: 100 55% 96%;
+    --muted: 110 22% 94%;
+    --muted-foreground: 152 8% 44%;
+    --border: 110 18% 89%;
+    --input: 110 18% 86%;
+    --ring: 99 62% 45%;
+    --destructive: 359 74% 59%;
+    --destructive-soft: 359 85% 96%;
+    --warning: 38 92% 50%;
+    --warning-soft: 43 100% 95%;
+    --info: 203 86% 55%;
+    --info-soft: 204 92% 95%;
+    --success: 124 45% 40%;
+    --success-soft: 122 55% 94%;
+  }
+
+  .dark {
+    --background: 150 18% 6%;
+    --foreground: 120 22% 93%;
+    --card: 150 14% 9%;
+    --card-foreground: 120 22% 93%;
+    --primary: 99 55% 42%;
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 140 32% 15%;
+    --primary-softer: 140 30% 11%;
+    --muted: 150 12% 14%;
+    --muted-foreground: 130 12% 62%;
+    --border: 148 14% 17%;
+    --input: 148 14% 20%;
+    --ring: 99 55% 45%;
+    --destructive: 359 70% 60%;
+    --destructive-soft: 359 40% 16%;
+    --warning: 38 90% 55%;
+    --warning-soft: 38 40% 15%;
+    --info: 203 80% 60%;
+    --info-soft: 204 45% 15%;
+    --success: 124 48% 48%;
+    --success-soft: 124 35% 14%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.22);
+  }
+}
+
+@layer components {
+  /* Soft layered page background with faint illustrated scenery tint */
+  .page-bg {
+    background:
+      radial-gradient(1200px 500px at 85% -8%, hsl(99 60% 90% / 0.55), transparent 60%),
+      radial-gradient(900px 420px at -10% 110%, hsl(43 70% 92% / 0.5), transparent 60%),
+      linear-gradient(180deg, hsl(var(--card)) 0%, hsl(var(--background)) 42%, hsl(var(--background)) 100%);
+  }
+  .dark .page-bg {
+    background:
+      radial-gradient(1200px 500px at 85% -8%, hsl(120 40% 18% / 0.5), transparent 60%),
+      radial-gradient(900px 420px at -10% 110%, hsl(43 30% 14% / 0.35), transparent 60%),
+      linear-gradient(180deg, hsl(var(--card)) 0%, hsl(var(--background)) 42%, hsl(var(--background)) 100%);
+  }
+
+  .btn-shine {
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-shine::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 45%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  .btn-shine:hover::after {
+    animation: shine 0.9s ease;
+  }
+
+  .gradient-primary {
+    background-image: linear-gradient(135deg, #2e7d1a 0%, #5dae2b 100%);
+  }
+  .dark .gradient-primary {
+    background-image: linear-gradient(135deg, #2e7d1a 0%, #4c9423 100%);
+  }
+  .text-gradient {
+    background-image: linear-gradient(135deg, #2e7d1a 20%, #5dae2b 90%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .skeleton {
+    @apply rounded-lg bg-muted;
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      hsl(var(--foreground) / 0.06) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ── Recharts polish ─────────────────────────────────────────── */
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+.chart-tooltip {
+  border-radius: 12px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card) / 0.96);
+  box-shadow: 0 8px 24px -8px rgba(23, 37, 26, 0.18);
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.recharts-surface:focus {
+  outline: none;
+}
+
+/* ── Leaflet: soft light-green map like the mockups ──────────── */
+.leaflet-container {
+  font-family: inherit;
+  background: #e8f0e2;
+  border-radius: 14px;
+}
+.leaflet-control-attribution {
+  font-size: 9px !important;
+  background: rgba(255, 255, 255, 0.7) !important;
+}
+.leaflet-bar a {
+  border-radius: 8px !important;
+  border: 1px solid hsl(var(--border)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+.map-tiles-soft {
+  filter: brightness(1.08) saturate(0.5) hue-rotate(28deg) contrast(0.9);
+}
+.dairy-pin {
+  display: grid;
+  place-items: center;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes drawerIn {
+  from { opacity: 0; transform: translateX(28px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Animation power-saving ─────────────────────────────────────
+   All looping animations use only transform/opacity (GPU-composited).
+   They pause when scrolled off-screen (.anim-offscreen via IntersectionObserver)
+   and when the tab is hidden (body.tab-hidden via visibilitychange). */
+.anim-offscreen *,
+.anim-offscreen {
+  animation-play-state: paused !important;
+}
+body.tab-hidden *,
+body.tab-hidden {
+  animation-play-state: paused !important;
+}
+/* Soften continuous loops on small/low-power devices (no heavy parallax used) */
+@media (max-width: 768px), (pointer: coarse) {
+  .animate-drift,
+  .animate-floaty {
+    animation: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

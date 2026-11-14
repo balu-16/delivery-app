@@ -133,7 +133,7 @@ export class PostgresRatings implements Ratings {
       throw new Error('INVALID_INPUT');
     await transactionWithRetry(this.db, async (tx) => {
       const actor =
-        await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('SUPPORT_AGENT','ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(
+        await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('SUPPORT_AGENT','SUPER_ADMIN') FOR SHARE OF u,r`.execute(
           tx,
         );
       if (!actor.rows.length) throw new Error('FORBIDDEN');

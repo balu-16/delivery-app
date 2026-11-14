@@ -33,7 +33,7 @@ test('fraud and reconciliation review is audited, role protected and has no mone
     (${ordinary}::uuid,'WORKFORCE',${ordinary},${`${ordinary}@test.example`},'Agent')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES (${admin}::uuid,'SUPER_ADMIN'),(${ordinary}::uuid,'ADMIN')`.execute(
+  await sql`INSERT INTO user_roles(user_id,role) VALUES (${admin}::uuid,'SUPER_ADMIN'),(${ordinary}::uuid,'SUPPORT_AGENT')`.execute(
     db.db,
   );
   await sql`INSERT INTO fraud_signals(id,kind,severity,reference) VALUES (${signal}::uuid,'CHECKOUT_VELOCITY','WARN',${signal})`.execute(
@@ -475,6 +475,7 @@ test('identity cleanup disables only the matching pool and deleted customer cann
       tokenUse: 'id',
       groups: [],
       email: 'former@example.test',
+      emailVerified: true,
       expiresAt: 9999999999,
     }),
   ).rejects.toThrow('ACCOUNT_DISABLED');

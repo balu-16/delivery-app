@@ -68,10 +68,13 @@ it('exposes onboarding upload and restricts reviewer access over HTTP', async ()
   const { LocalTokenAdapter } = await import('../../../src/adapters/auth/local.js');
   const rider = uuidV7(),
     admin = uuidV7(),
-    other = uuidV7();
+    other = uuidV7(),
+    entity = uuidV7(),
+    city = uuidV7(),
+    store = uuidV7();
   for (const [id, subject, role] of [
     [rider, 'http-rider', 'RIDER'],
-    [admin, 'http-admin', 'ADMIN'],
+    [admin, 'http-admin', 'STORE_MANAGER'],
     [other, 'http-other', 'RIDER'],
   ] as const) {
     await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES (${id}::uuid,'WORKFORCE',${subject},${`${subject}@test.invalid`},${subject})`.execute(
@@ -83,6 +86,19 @@ it('exposes onboarding upload and restricts reviewer access over HTTP', async ()
         db.db,
       );
   }
+  await sql`INSERT INTO legal_entities(id,name) VALUES(${entity}::uuid,'Entity')`.execute(db.db);
+  await sql`INSERT INTO cities(id,name,bounds) VALUES(${city}::uuid,'City',ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))',4326))`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO stores(id,legal_entity_id,city_id,name,location,status,hourly_capacity) VALUES(${store}::uuid,${entity}::uuid,${city}::uuid,'Store',ST_GeogFromText('POINT(0.5 0.5)'),'ONLINE',100)`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${admin}::uuid,${store}::uuid,'STORE_MANAGER')`.execute(
+    db.db,
+  );
+  await sql`UPDATE rider_profiles SET home_store_id=${store}::uuid WHERE user_id=${rider}::uuid`.execute(
+    db.db,
+  );
   const env = readEnv({
     NODE_ENV: 'test',
     APP_ROLE: 'all',
@@ -95,7 +111,7 @@ it('exposes onboarding upload and restricts reviewer access over HTTP', async ()
   const adapter = new LocalTokenAdapter(env.LOCAL_JWT_SECRET, db.db);
   const riderToken = await adapter.issue('WORKFORCE', 'http-rider', 'rider', 'access');
   const otherToken = await adapter.issue('WORKFORCE', 'http-other', 'rider', 'access');
-  const adminToken = await adapter.issue('WORKFORCE', 'http-admin', 'admin', 'access');
+  const adminToken = await adapter.issue('WORKFORCE', 'http-admin', 'store', 'access');
   const app = await createApplication(env);
   try {
     const server = app.getHttpAdapter().getInstance();
@@ -158,7 +174,7 @@ it('exposes onboarding upload and restricts reviewer access over HTTP', async ()
     const doc = await sql<{
       id: string;
     }>`SELECT id FROM rider_documents WHERE media_id=${target.mediaId}::uuid`.execute(db.db);
-    const url = `/v1/admin/rider-documents/${doc.rows[0]!.id}/read-url`;
+    const url = `/v1/store/rider-documents/${doc.rows[0]!.id}/read-url`;
     expect(
       (
         await server.inject({

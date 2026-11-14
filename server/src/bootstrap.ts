@@ -27,6 +27,9 @@ export async function createApplication(
     bodyLimit: env.HTTP_BODY_LIMIT_BYTES,
     requestTimeout: env.HTTP_REQUEST_TIMEOUT_MS,
     connectionTimeout: env.HTTP_HEADERS_TIMEOUT_MS,
+    trustProxy: env.TRUSTED_PROXY_CIDRS
+      ? env.TRUSTED_PROXY_CIDRS.split(',').map((value) => value.trim())
+      : false,
     http: { connectionsCheckingInterval: Math.min(1000, env.HTTP_HEADERS_TIMEOUT_MS) },
     logController: new LogController({ disableRequestLogging: true }),
     genReqId: (request: IncomingMessage) => {
@@ -108,7 +111,9 @@ export async function createApplication(
         // Shared-NAT clients get a broader IP envelope; auth-adjacent routes
         // retain their stricter anonymous limit before identity is verified.
         const ipLimit =
-          route.name === 'auth' ? route.limit : Math.min(route.limit * 10, Number.MAX_SAFE_INTEGER);
+          route.name === 'auth' || route.name === 'webhook'
+            ? route.limit
+            : Math.min(route.limit * 10, Number.MAX_SAFE_INTEGER);
         const result = await checkRateLimit(
           redis,
           request.ip,

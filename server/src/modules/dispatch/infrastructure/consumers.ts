@@ -87,14 +87,10 @@ export class OrderConfirmedConsumer {
  * Dispatch trigger consumer (23.2.1): ON_PICK_START consumes
  * `picking.task_changed` with status IN_PROGRESS; ON_PACKED consumes
  * ORDER_PACKED from packing. Releasing the task is a
- * transactional next_dispatch_at update; the immediate round is best-effort
- * and the periodic sweep is the guaranteed fallback.
+ * transactional next_dispatch_at update; the periodic sweep performs dispatch.
  */
 export class PickTriggerConsumer {
-  constructor(
-    private readonly trigger: () => Promise<DispatchTrigger>,
-    private readonly dispatchDue: (orderId: string) => Promise<unknown>,
-  ) {}
+  constructor(private readonly trigger: () => Promise<DispatchTrigger>) {}
   async handle(tx: TransactionContext, event: EventEnvelope): Promise<void> {
     const mode = await this.trigger();
     if (mode === 'ON_PICK_START') {
@@ -111,7 +107,5 @@ export class PickTriggerConsumer {
       WHERE order_id=${orderId}::uuid AND status='UNASSIGNED' AND next_dispatch_at='infinity'::timestamptz`.execute(
       tx,
     );
-    // Post-commit best effort; the sweep guarantees progress either way.
-    void this.dispatchDue;
   }
 }

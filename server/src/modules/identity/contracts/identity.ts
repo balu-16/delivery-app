@@ -1,8 +1,7 @@
 import type { TransactionContext } from '../../../platform/database/database.js';
 
 export type Pool = 'CUSTOMER' | 'WORKFORCE';
-export type Role =
-  'CUSTOMER' | 'RIDER' | 'PICKER' | 'STORE_MANAGER' | 'SUPPORT_AGENT' | 'ADMIN' | 'SUPER_ADMIN';
+export type Role = 'CUSTOMER' | 'RIDER' | 'STORE_MANAGER' | 'SUPPORT_AGENT' | 'SUPER_ADMIN';
 export type Audience = 'customer' | 'rider' | 'store' | 'admin';
 export type TokenUse = 'id' | 'access';
 export interface VerifiedIdentity {
@@ -28,7 +27,9 @@ export interface Principal {
 export interface IdentityAccess {
   getPrincipal(pool: Pool, sub: string, tx?: TransactionContext): Promise<Principal | null>;
   hasRole(userId: string, roles: readonly Role[], tx?: TransactionContext): Promise<boolean>;
-  listStoreAssignments(userId: string): Promise<Array<{ storeId: string; role: Role }>>;
+  listStoreAssignments(
+    userId: string,
+  ): Promise<Array<{ storeId: string; role: Role; name: string }>>;
   hasStoreRole(
     userId: string,
     storeId: string,
@@ -117,7 +118,7 @@ export interface IdentityAdministration {
     actorId: string,
     userId: string,
     storeId: string,
-    role: 'PICKER' | 'STORE_MANAGER',
+    role: 'STORE_MANAGER',
     grant: boolean,
   ): Promise<void>;
   requestRoleChange(makerId: string, userId: string, role: Role, grant: boolean): Promise<string>;

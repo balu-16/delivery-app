@@ -69,7 +69,7 @@ export class StoreOrderPageView {
 export class StoreStaffMemberView {
   @ApiProperty({ format: 'uuid' }) userId!: string;
   @ApiProperty() name!: string;
-  @ApiProperty({ enum: ['PICKER', 'STORE_MANAGER'] }) role!: string;
+  @ApiProperty({ enum: ['STORE_MANAGER'] }) role!: string;
   @ApiProperty() activeTasks!: number;
 }
 export class StoreStaffPageView {

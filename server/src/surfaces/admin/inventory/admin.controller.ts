@@ -41,7 +41,7 @@ class LedgerQuery {
 @ApiBearerAuth()
 @InventoryApiErrors()
 @UseInterceptors(DomainErrorInterceptor)
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 export class AdminInventoryController {
   constructor(@Inject(INVENTORY_MANAGEMENT) private readonly inventory: InventoryManagement) {}

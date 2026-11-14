@@ -73,7 +73,7 @@ class ShelfLifeDto {
 @ApiBearerAuth()
 @InventoryApiErrors()
 @UseInterceptors(DomainErrorInterceptor)
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 export class AdminShelfLifeController {
   constructor(@Inject(INVENTORY_SHELF_LIFE) private readonly shelf: InventoryShelfLife) {}

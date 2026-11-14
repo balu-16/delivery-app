@@ -87,6 +87,8 @@ export const riderDemo: RiderTransport = {
           attemptNo: 1,
           expiresAt: new Date(state.offerExpiresAt).toISOString(),
           codAmountPaise: state.offerCash ? String(state.offerCash) : null,
+          storeName: "Sample store",
+          orderNumber: "Sample order",
         },
       ],
     };

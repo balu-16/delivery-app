@@ -5,6 +5,7 @@ import {
   AdminDisableUserCommand,
   AdminEnableUserCommand,
   AdminGetUserCommand,
+  AdminListGroupsForUserCommand,
   AdminRemoveUserFromGroupCommand,
   AdminResetUserPasswordCommand,
   type CognitoIdentityProviderClient,
@@ -37,6 +38,7 @@ test('Cognito admin translates all port operations to the documented pool and us
   expect(commands.map((c) => c.constructor)).toEqual([
     AdminCreateUserCommand,
     AdminGetUserCommand,
+    AdminListGroupsForUserCommand,
     AdminAddUserToGroupCommand,
     AdminRemoveUserFromGroupCommand,
     AdminDisableUserCommand,
@@ -53,5 +55,20 @@ test('Cognito admin translates all port operations to the documented pool and us
     ],
     DesiredDeliveryMediums: ['EMAIL'],
   });
-  expect(commands[2]?.input).toMatchObject({ GroupName: 'RIDER' });
+  expect(commands[3]?.input).toMatchObject({ GroupName: 'RIDER' });
+});
+
+test('Cognito admin refuses a second application group', async () => {
+  const commands: string[] = [];
+  const client = {
+    send: async (command: object) => {
+      commands.push(command.constructor.name);
+      return command instanceof AdminListGroupsForUserCommand
+        ? { Groups: [{ GroupName: 'SUPER_ADMIN' }] }
+        : {};
+    },
+  } as unknown as CognitoIdentityProviderClient;
+  const adapter = new CognitoIdentityAdmin(client, 'pool');
+  await expect(adapter.addToGroup('subject', 'RIDER')).rejects.toThrow('ROLE_CONFLICT');
+  expect(commands).not.toContain('AdminAddUserToGroupCommand');
 });

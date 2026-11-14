@@ -49,7 +49,7 @@ export class InboxQueryDto {
 @ApiBearerAuth()
 @NotificationApiErrors()
 @UseInterceptors(DomainErrorInterceptor)
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 export class AdminNotificationsController {
   constructor(

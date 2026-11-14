@@ -19,7 +19,7 @@ export class PostgresStoreManagement implements StoreManagement {
       }>`SELECT status,version::text FROM stores WHERE id=${input.storeId} FOR UPDATE`.execute(tx);
       if (!existing.rows[0]) throw new Error('STORE_NOT_FOUND');
       const authorized = input.admin
-        ? await this.identity.hasRole(input.actorId, ['ADMIN', 'SUPER_ADMIN'], tx)
+        ? await this.identity.hasRole(input.actorId, ['SUPER_ADMIN'], tx)
         : await this.identity.hasStoreRole(input.actorId, input.storeId, ['STORE_MANAGER'], tx);
       if (!authorized) throw new Error(input.admin ? 'FORBIDDEN' : 'STORE_NOT_FOUND');
       const previous = existing.rows[0].status;

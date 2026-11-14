@@ -46,6 +46,43 @@ export class DispatchEngine {
 
   /** Attempts one dispatch round for a single order (locks order → task). */
   async dispatchOne(orderId: string): Promise<'OFFERED' | 'RETRY' | 'INELIGIBLE' | 'CANCELLED'> {
+    // GEO and maps are external dependencies. Capture a candidate snapshot
+    // before taking order/task locks; all business eligibility is checked again
+    // under the offer transaction below.
+    const previews = await sql<
+      TaskRow & { payment_method: string | null; amount_due_paise: string }
+    >`SELECT t.*,o.payment_method,o.amount_due_paise::text AS amount_due_paise
+      FROM delivery_tasks t JOIN orders o ON o.id=t.order_id WHERE t.order_id=${orderId}::uuid
+      AND t.status='UNASSIGNED' ORDER BY t.created_at DESC LIMIT 1`.execute(this.db);
+    const preview = previews.rows[0];
+    if (!preview) return 'INELIGIBLE';
+    const previewStore = await storePoint(this.db, preview.store_id);
+    let preflightError: unknown;
+    let scores: CandidateScoreInput[] = [];
+    if (previewStore)
+      try {
+        const [baseRadius, steps] = await Promise.all([
+          this.settings.number('dispatchRadiusM'),
+          this.settings.wideningSteps(),
+        ]);
+        const ids = await this.riderGeo.candidatesNear(
+          previewStore,
+          radiusForAttempt(preview.dispatch_attempts, baseRadius, steps),
+          GEO_CANDIDATE_LIMIT,
+        );
+        const initial = await this.eligibility.eligibleForDispatch({
+          riderIds: ids,
+          at: new Date(),
+          codAmountPaise: preview.payment_method === 'COD' ? preview.amount_due_paise : undefined,
+        });
+        const excluded = await this.excludedRiders(this.db, preview.id, new Date());
+        scores = await this.scoreInputs(
+          ids.filter((id) => initial[id]?.eligible && !excluded.has(id)),
+          previewStore,
+        );
+      } catch (error) {
+        preflightError = error;
+      }
     let notification:
       | { riderId: string; offerId: string; taskId: string; orderId: string; expiresAt: string }
       | undefined;
@@ -69,17 +106,23 @@ export class DispatchEngine {
       if (await this.maybeAutoCancel(tx, task, now)) return 'CANCELLED';
       const store = await storePoint(tx, task.store_id);
       if (!store) return 'INELIGIBLE';
-      const [baseRadius, steps] = await Promise.all([
-        this.settings.number('dispatchRadiusM'),
-        this.settings.wideningSteps(),
-      ]);
-      const radius = radiusForAttempt(task.dispatch_attempts, baseRadius, steps);
-      const geoIds = await this.riderGeo.candidatesNear(store, radius, GEO_CANDIDATE_LIMIT);
+      if (
+        !previewStore ||
+        task.id !== preview.id ||
+        task.store_id !== preview.store_id ||
+        task.dispatch_attempts !== preview.dispatch_attempts ||
+        store.lat !== previewStore.lat ||
+        store.lng !== previewStore.lng
+      )
+        return 'RETRY';
+      if (preflightError) throw preflightError;
+      const geoIds = scores.map((score) => score.riderId);
       const codAmount = order.payment_method === 'COD' ? order.amount_due_paise : undefined;
       const eligible = await this.eligibility.eligibleForDispatch({
         riderIds: geoIds,
         at: now,
         codAmountPaise: codAmount,
+        tx,
       });
       const excluded = await this.excludedRiders(tx, task.id, now);
       const candidates = geoIds.filter(
@@ -90,7 +133,7 @@ export class DispatchEngine {
         return 'RETRY';
       }
       const scored = scoreCandidates(
-        await this.scoreInputs(candidates, store),
+        scores.filter((score) => candidates.includes(score.riderId)),
         await this.settings.weights(),
       );
       const best = nextOfferCandidate(scored, new Set());
@@ -114,13 +157,12 @@ export class DispatchEngine {
     return result;
   }
 
-  /** Sweep: due UNASSIGNED tasks get one dispatch round (SKIP LOCKED claim). */
+  /** Sweep: each due task is revalidated under lock by dispatchOne. */
   async dispatchDue(limit = 20): Promise<number> {
     const due = await sql<{ order_id: string }>`SELECT order_id FROM delivery_tasks
       WHERE status='UNASSIGNED' AND dispatch_not_before <= clock_timestamp() AND (next_dispatch_at IS NULL OR next_dispatch_at <= clock_timestamp())
       AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.id=delivery_tasks.order_id AND o.on_hold)
-      ORDER BY COALESCE(next_dispatch_at, created_at), id LIMIT ${limit}
-      FOR UPDATE SKIP LOCKED`.execute(this.db);
+      ORDER BY COALESCE(next_dispatch_at, created_at), id LIMIT ${limit}`.execute(this.db);
     let offered = 0;
     for (const row of due.rows) {
       const result = await this.dispatchOne(row.order_id).catch(() => 'RETRY' as const);
@@ -233,7 +275,7 @@ export class DispatchEngine {
 
   /** Riders with a live offer or a recent decline for this task are excluded. */
   private async excludedRiders(
-    tx: TransactionContext,
+    tx: TransactionContext | Database,
     taskId: string,
     now: Date,
   ): Promise<Set<string>> {
@@ -337,7 +379,14 @@ export class DispatchEngine {
       task.id,
       task.order_id,
       'rider.offer_created',
-      { riderId, offerId, taskId: task.id, orderId: task.order_id, storeId: task.store_id },
+      {
+        riderId,
+        offerId,
+        taskId: task.id,
+        orderId: task.order_id,
+        storeId: task.store_id,
+        expiresAt: expiresAt.toISOString(),
+      },
       ['notifications'],
     );
     return {
@@ -362,7 +411,7 @@ async function txSelectOrder(tx: TransactionContext, orderId: string) {
   return rows.rows[0] ?? null;
 }
 
-async function storePoint(tx: TransactionContext, storeId: string) {
+async function storePoint(tx: TransactionContext | Database, storeId: string) {
   const rows = await sql<{
     lat: string | null;
     lng: string | null;

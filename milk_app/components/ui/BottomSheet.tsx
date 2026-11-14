@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useEffect } from 'react';
 import {
   Modal,
+  KeyboardAvoidingView,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -30,6 +31,7 @@ export function BottomSheet({
   children,
   scroll = true,
   maxHeight = '86%',
+  keyboardAware = false,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -38,6 +40,7 @@ export function BottomSheet({
   children: ReactNode;
   scroll?: boolean;
   maxHeight?: `${number}%`;
+  keyboardAware?: boolean;
 }) {
   const enabled = useMotionEnabled();
   const insets = useSafeAreaInsets();
@@ -81,6 +84,33 @@ export function BottomSheet({
   }));
   const backdropStyle = useAnimatedStyle(() => ({ opacity: backdrop.value * 0.42 }));
 
+  const handle = <View style={styles.handleWrap}><View style={styles.handle} /></View>;
+  const sheet = (
+    <Animated.View style={[styles.sheet, { maxHeight, paddingBottom: Math.max(insets.bottom, 18), flexShrink: keyboardAware ? 1 : 0 }, sheetStyle]}>
+      {keyboardAware ? <GestureDetector gesture={pan}>{handle}</GestureDetector> : handle}
+      {title ? (
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <AppText style={styles.title}>{title}</AppText>
+            {subtitle ? <AppText style={styles.subtitle}>{subtitle}</AppText> : null}
+          </View>
+          <Pressable onPress={close} hitSlop={10} style={styles.close} accessibilityLabel="Close sheet">
+            <Ionicons name="close" size={18} color={colors.textSecondary} />
+          </Pressable>
+        </View>
+      ) : null}
+      {scroll ? (
+        <ScrollView
+          style={{ flexShrink: 1 }}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: 6 }}
+        >{children}</ScrollView>
+      ) : <View>{children}</View>}
+    </Animated.View>
+  );
+
   return (
     <Modal
       visible={visible}
@@ -93,42 +123,9 @@ export function BottomSheet({
         <Animated.View style={[styles.backdrop, backdropStyle]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Close" />
         </Animated.View>
-        <GestureDetector gesture={pan}>
-          <Animated.View
-            style={[
-              styles.sheet,
-              { maxHeight, paddingBottom: Math.max(insets.bottom, 18) },
-              sheetStyle,
-            ]}
-          >
-            <View style={styles.handleWrap}>
-              <View style={styles.handle} />
-            </View>
-            {title ? (
-              <View style={styles.header}>
-                <View style={{ flex: 1 }}>
-                  <AppText style={styles.title}>{title}</AppText>
-                  {subtitle ? <AppText style={styles.subtitle}>{subtitle}</AppText> : null}
-                </View>
-                <Pressable onPress={close} hitSlop={10} style={styles.close} accessibilityLabel="Close sheet">
-                  <Ionicons name="close" size={18} color={colors.textSecondary} />
-                </Pressable>
-              </View>
-            ) : null}
-            {scroll ? (
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                bounces={false}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ paddingBottom: 6 }}
-              >
-                {children}
-              </ScrollView>
-            ) : (
-              <View>{children}</View>
-            )}
-          </Animated.View>
-        </GestureDetector>
+        {keyboardAware ? (
+          <KeyboardAvoidingView pointerEvents="box-none" behavior="padding" style={styles.keyboardLayer}>{sheet}</KeyboardAvoidingView>
+        ) : <GestureDetector gesture={pan}>{sheet}</GestureDetector>}
       </View>
     </Modal>
   );
@@ -139,6 +136,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
   },
+  keyboardLayer: { flex: 1, justifyContent: 'flex-end' },
   backdrop: {
     position: 'absolute',
     top: 0,

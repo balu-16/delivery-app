@@ -65,3 +65,26 @@ test('offers a new-password form after accepting a temporary password', async ()
   expect(completePasswordChange).toHaveBeenCalledWith('New-password-123!', expect.objectContaining({name:'Person'}));
   expect(mockLoad).toHaveBeenCalled();
 });
+
+test('shows the specific missing login fields rather than one generic error', async () => {
+  await render(<AuthGate><></></AuthGate>);
+  await fireEvent.press(screen.getByText('Sign in'));
+  expect(screen.getByText('Enter your email address.')).toBeTruthy();
+  expect(screen.getByText('Enter your password.')).toBeTruthy();
+  await fireEvent.changeText(screen.getByLabelText('Email address'), 'person@example.com');
+  expect(screen.queryByText('Enter your email address.')).toBeNull();
+  expect(screen.getByText('Enter your password.')).toBeTruthy();
+});
+
+test('adds the Indian country code to a required phone attribute', async () => {
+  jest.mocked(login).mockResolvedValue({ kind:'newPasswordRequired', requiredAttributes:['phone_number'] });
+  jest.mocked(completePasswordChange).mockResolvedValue();
+  await render(<AuthGate><></></AuthGate>);
+  await fireEvent.changeText(screen.getByLabelText('Email address'), 'person@example.com');
+  await fireEvent.changeText(screen.getByLabelText('Password'), 'temporary');
+  await fireEvent.press(screen.getByText('Sign in'));
+  await fireEvent.changeText(screen.getByLabelText('Phone number'), '9876543210');
+  await fireEvent.changeText(screen.getByLabelText('New password'), 'New-password-123!');
+  await fireEvent.press(screen.getByText('Update password'));
+  expect(completePasswordChange).toHaveBeenCalledWith('New-password-123!', expect.objectContaining({ phone_number: '+919876543210' }));
+});

@@ -305,10 +305,10 @@ test('handover verification is attempt-limited, lockable and manager override is
   expect(locked.rows[0]!.attempts).toBe(3);
   expect(locked.rows[0]!.locked_until).toBeTruthy();
   expect(locked.rows[0]!.state).toBe('PENDING');
-  // Manager override bypasses the lock with an audited reason; PICKERs cannot override.
+  // An unassigned administrator cannot override a store handover; a manager can.
   await expect(
-    packing.verify(world.picker1, { orderId: order.orderId, override: true, reason: 'code lost' }),
-  ).rejects.toThrow('FORBIDDEN');
+    packing.verify(world.admin, { orderId: order.orderId, override: true, reason: 'code lost' }),
+  ).rejects.toThrow('RESOURCE_NOT_FOUND');
   const override = await packing.verify(world.manager, {
     orderId: order.orderId,
     override: true,

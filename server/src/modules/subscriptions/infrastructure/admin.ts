@@ -39,8 +39,7 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
   }
   async savePlan(actor: string, variantId: string, active: boolean, outer?: TransactionContext) {
     return this.run(outer, async (tx) => {
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const result = await sql<{
         id: string;
       }>`INSERT INTO subscription_plans(id,variant_id,active) VALUES(${uuidV7()}::uuid,${variantId}::uuid,${active}) ON CONFLICT(variant_id) DO UPDATE SET active=EXCLUDED.active RETURNING id::text`.execute(
@@ -85,8 +84,7 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
     return this.run(outer, async (tx) => {
       // Shared with ConfigService: serialize slot constraints before actor/config locks.
       await sql`SELECT pg_advisory_xact_lock(701001)`.execute(tx);
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const deadline = await this.config.get('subscriptionGraceDeadlineTime', tx),
         lead = await this.config.get('subscriptionDispatchLeadMinutes', tx);
       const mins = (s: string) => {
@@ -126,8 +124,7 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
     addDays(date, 0);
     if (reason && reason.length > 200) throw new Error('INVALID_INPUT');
     return this.run(outer, async (tx) => {
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       if (remove)
         await sql`DELETE FROM subscription_holidays WHERE store_id=${storeId}::uuid AND holiday_date=${date}::date`.execute(
           tx,
@@ -153,8 +150,7 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
   }
   async retryRun(actor: string, id: string, outer?: TransactionContext) {
     return this.run(outer, async (tx) => {
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const run =
         await sql`UPDATE subscription_generation_runs SET status='PENDING',updated_at=clock_timestamp() WHERE id=${id}::uuid AND status<>'COMPLETE' RETURNING id`.execute(
           tx,

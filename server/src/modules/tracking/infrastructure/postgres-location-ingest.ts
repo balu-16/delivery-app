@@ -45,10 +45,12 @@ export class PostgresLocationIngest implements LocationIngest {
         ts: Date | null;
         lat: number | null;
         lng: number | null;
-      }>`SELECT last_location_at AS ts, ST_Y(last_location::geometry) AS lat, ST_X(last_location::geometry) AS lng FROM rider_status WHERE rider_id=${riderId}::uuid FOR UPDATE`.execute(
+        online: boolean;
+      }>`SELECT online,last_location_at AS ts, ST_Y(last_location::geometry) AS lat, ST_X(last_location::geometry) AS lng FROM rider_status WHERE rider_id=${riderId}::uuid FOR UPDATE`.execute(
         tx,
       );
       const current = locked.rows[0]!;
+      if (!current.online) throw new Error('RIDER_OFFLINE');
       const last = current.ts
         ? { ts: current.ts, lat: Number(current.lat), lng: Number(current.lng) }
         : null;
@@ -90,11 +92,15 @@ export class PostgresLocationIngest implements LocationIngest {
     });
     const latest = result.latest;
     if (latest && (await this.geo.updateMember(riderId, latest.input, ttlSeconds))) {
-      const order = await this.resolverHolder.get()?.activeOrderForRider(riderId);
-      if (
-        order &&
-        !['DELIVERED', 'FAILED', 'CANCELLED', 'UNASSIGNED', 'OFFERED'].includes(order.taskStatus)
-      ) {
+      const resolver = this.resolverHolder.get();
+      const orders = resolver?.activeOrdersForRider
+        ? await resolver.activeOrdersForRider(riderId)
+        : [await resolver?.activeOrderForRider(riderId)].filter((order) => order != null);
+      for (const order of orders) {
+        if (
+          ['DELIVERED', 'FAILED', 'CANCELLED', 'UNASSIGNED', 'OFFERED'].includes(order.taskStatus)
+        )
+          continue;
         this.broadcasts.emitOrderLocation(order.orderId, {
           lat: latest.input.lat,
           lng: latest.input.lng,

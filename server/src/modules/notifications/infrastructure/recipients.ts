@@ -43,7 +43,7 @@ export async function resolveRecipients(
     case 'ADMINS': {
       const rows = await sql<{
         id: string;
-      }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role IN ('ADMIN','SUPER_ADMIN') AND u.status='ACTIVE' ORDER BY u.id LIMIT ${MAX_ADMIN_RECIPIENTS}`.execute(
+      }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role IN ('SUPER_ADMIN') AND u.status='ACTIVE' ORDER BY u.id LIMIT ${MAX_ADMIN_RECIPIENTS}`.execute(
         tx,
       );
       return rows.rows.map((row) => row.id);

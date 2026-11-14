@@ -170,11 +170,12 @@ export class SqsConcernStore {
   ): Promise<boolean> {
     if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 100)
       throw new Error('INVALID_ATTEMPT_LIMIT');
+    const jitter = Math.random();
     const result =
       await sql`UPDATE sqs_concern_jobs SET state=CASE WHEN attempts>=${maxAttempts} THEN 'FAILED' ELSE 'QUEUED' END,
       failed_at=CASE WHEN attempts>=${maxAttempts} THEN clock_timestamp() ELSE NULL END,lease_token=NULL,lease_until=NULL,
-      available_at=clock_timestamp()+(LEAST(300,power(2,LEAST(attempts,8))))*interval '1 second',
-      next_send_at=clock_timestamp()+(LEAST(300,power(2,LEAST(attempts,8))))*interval '1 second',updated_at=clock_timestamp()
+      available_at=statement_timestamp()+(LEAST(300,power(2,LEAST(attempts,8)))+${jitter})*interval '1 second',
+      next_send_at=statement_timestamp()+(LEAST(300,power(2,LEAST(attempts,8)))+${jitter})*interval '1 second',updated_at=clock_timestamp()
       WHERE concern=${concern} AND id=${pointer.jobId} AND generation=${pointer.generation} AND state='RUNNING' AND lease_token=${token}::uuid AND lease_until>clock_timestamp()`.execute(
         this.db,
       );

@@ -48,7 +48,17 @@
         }
       ],
       "expo-image",
-      "expo-font"
+      "expo-font",
+      "expo-secure-store",
+      ["expo-location", {
+        "locationWhenInUsePermission": "Allow DairyDirect Partner to find nearby deliveries while you are online.",
+        "locationAlwaysAndWhenInUsePermission": "Allow DairyDirect Partner to share your location during an online shift, including in the background.",
+        "isIosBackgroundLocationEnabled": true,
+        "isAndroidBackgroundLocationEnabled": true,
+        "isAndroidForegroundServiceEnabled": true
+      }],
+      "expo-notifications",
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true

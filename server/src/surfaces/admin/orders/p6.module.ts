@@ -12,6 +12,7 @@ import {
   UseInterceptors,
   ParseUUIDPipe,
   HttpException,
+  HttpCode,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -19,6 +20,7 @@ import {
   ApiProperty,
   ApiPropertyOptional,
   ApiHeader,
+  ApiOkResponse,
 } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -37,6 +39,18 @@ import {
 import { IdentityModule } from '../../../modules/identity/identity.module.js';
 import { OrdersModule } from '../../../modules/orders/orders.module.js';
 import { PaymentsModule } from '../../../modules/payments/payments.module.js';
+import { InvoicingModule } from '../../../modules/invoicing/invoicing.module.js';
+import {
+  INVOICING,
+  type InvoicingOperations,
+} from '../../../modules/invoicing/contracts/invoicing.js';
+import {
+  IdempotencyStore,
+  hashCanonical,
+  hashRequest,
+} from '../../../common/idempotency/idempotency.js';
+import { PLATFORM_DATABASE } from '../../../platform/contracts/runtime.js';
+import type { DatabaseHandle } from '../../../platform/database/database.js';
 import {
   ORDERS,
   ORDER_CODES,
@@ -95,6 +109,20 @@ class OrdersDto extends PageDto {
 class ReasonDto {
   @ApiProperty() @IsString() @Length(1, 300) reason!: string;
 }
+class InvoiceRenderFailureDto {
+  @ApiProperty({ format: 'uuid' }) documentId!: string;
+  @ApiProperty() number!: string;
+  @ApiProperty() attempts!: number;
+  @ApiProperty({ format: 'date-time' }) suspendedAt!: string;
+}
+class InvoiceRenderFailurePageDto {
+  @ApiProperty({ type: [InvoiceRenderFailureDto] }) items!: InvoiceRenderFailureDto[];
+  @ApiProperty({ nullable: true, type: String }) nextCursor!: string | null;
+}
+class InvoiceRenderRetryDto {
+  @ApiProperty({ format: 'uuid' }) documentId!: string;
+  @ApiProperty({ enum: ['PENDING'] }) status!: 'PENDING';
+}
 class HoldDto extends ReasonDto {
   @ApiProperty() @IsBoolean() held!: boolean;
 }
@@ -106,14 +134,16 @@ class RepairDto extends ReasonDto {
     'CANCELLED' | 'EXPIRED';
 }
 function key(value?: string) {
-  if (!value || value.length > 150) throw new HttpException('IDEMPOTENCY_KEY_REQUIRED', 400);
+  if (!value || value.length > 150)
+    throw new HttpException({ code: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
   return value;
 }
+const INVOICE_IDEMPOTENCY = Symbol('INVOICE_IDEMPOTENCY');
 @Controller('v1/admin')
 @ApiBearerAuth()
 @UseGuards(IdentityGuard)
 @UseInterceptors(DomainErrorInterceptor)
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 export class AdminCommerceController {
   constructor(
     @Inject(ORDERS) private readonly orders: OrderOperations,
@@ -123,6 +153,8 @@ export class AdminCommerceController {
     @Inject(PAYMENT_ORDERS) private readonly payments: PaymentOrderOperations,
     @Inject(PAYMENT_REFUNDS) private readonly refunds: PaymentRefundOperations,
     @Inject(PAYMENT_FINDINGS) private readonly findings: PaymentFindings,
+    @Inject(INVOICING) private readonly invoices: InvoicingOperations,
+    @Inject(INVOICE_IDEMPOTENCY) private readonly invoiceIdempotency: IdempotencyStore,
   ) {}
   @Get('orders') @ApiOperation({ operationId: 'adminOrdersList' }) list(@Query() q: OrdersDto) {
     return this.orders.adminList(q, q.limit ?? 50, q.cursor);
@@ -209,9 +241,50 @@ export class AdminCommerceController {
   reconciliation(@Query() q: PageDto) {
     return this.findings.list(q.limit ?? 50, q.cursor);
   }
+  @Get('invoices/render-failures')
+  @ApiOperation({ operationId: 'adminInvoiceRenderFailures' })
+  @ApiOkResponse({ type: InvoiceRenderFailurePageDto })
+  renderFailures(@Query() q: PageDto) {
+    return this.invoices.listRenderFailures(q.limit ?? 50, q.cursor);
+  }
+  @Post('invoices/:id/render-retry')
+  @HttpCode(200)
+  @ApiOperation({ operationId: 'adminInvoiceRenderRetry' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
+  @ApiOkResponse({ type: InvoiceRenderRetryDto })
+  async retryRender(
+    @CurrentPrincipal() p: Principal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: ReasonDto,
+    @Headers('idempotency-key') requestKey?: string,
+  ) {
+    const resource = `/v1/admin/invoices/${id}/render-retry`;
+    const claim = await this.invoiceIdempotency.claim(
+      { actor: p.userId, audience: 'admin', method: 'POST', resource, key: key(requestKey) },
+      hashRequest(JSON.stringify(body)),
+      30,
+      hashCanonical(body),
+    );
+    if (claim.kind === 'replay') return claim.body;
+    if (claim.kind === 'in_progress') throw new HttpException({ code: 'REQUEST_IN_PROGRESS' }, 409);
+    if (claim.kind !== 'claimed') throw new HttpException({ code: 'IDEMPOTENCY_KEY_REUSED' }, 409);
+    return (
+      await this.invoiceIdempotency.execute(claim.owner, async (tx) => ({
+        status: 200,
+        body: await this.invoices.retryRender(p.userId, id, body.reason, tx),
+      }))
+    ).body;
+  }
 }
 @Module({
-  imports: [IdentityModule, OrdersModule, PaymentsModule],
+  imports: [IdentityModule, OrdersModule, PaymentsModule, InvoicingModule],
   controllers: [AdminCommerceController],
+  providers: [
+    {
+      provide: INVOICE_IDEMPOTENCY,
+      inject: [PLATFORM_DATABASE],
+      useFactory: (handle: DatabaseHandle) => new IdempotencyStore(handle.db),
+    },
+  ],
 })
 export class AdminCommerceSurfaceModule {}

@@ -376,7 +376,14 @@ function tolerantRiderPlan(
           'TRANSACTIONAL',
           ['PUSH', 'INBOX'],
           'USER',
-          data,
+          {
+            ...data,
+            ...(uuidAt(payload, 'offerId') ? { offerId: uuidAt(payload, 'offerId')! } : {}),
+            ...(stringAt(payload, 'expiresAt') &&
+            Number.isFinite(Date.parse(stringAt(payload, 'expiresAt')!))
+              ? { expiresAt: stringAt(payload, 'expiresAt')! }
+              : {}),
+          },
           '/rider/offers',
           'HIGH',
         )

@@ -45,9 +45,48 @@ export class UrlResponseDto {
 export class RiderResponseDto extends ProfileResponseDto {
   @ApiProperty({ type: String, nullable: true }) riderStatus!: string | null;
 }
+export class RiderBootstrapResponseDto {
+  @ApiProperty({ format: 'uuid' }) userId!: string;
+  @ApiProperty({ enum: ['PENDING', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'SUSPENDED'] })
+  status!: string;
+  @ApiProperty() groupPending!: boolean;
+}
+export class RiderApplicationDocumentDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() type!: string;
+  @ApiProperty({ enum: ['PENDING', 'APPROVED', 'REJECTED'] }) status!: string;
+  @ApiProperty({ type: String, nullable: true }) reason!: string | null;
+  @ApiProperty({ format: 'date-time' }) createdAt!: string;
+}
+export class RiderApplicationDto {
+  @ApiProperty({ format: 'uuid' }) userId!: string;
+  @ApiProperty({ enum: ['PENDING', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'SUSPENDED'] })
+  status!: string;
+  @ApiProperty({ type: String, nullable: true }) vehicleType!: string | null;
+  @ApiProperty({ type: String, nullable: true }) vehicleNo!: string | null;
+  @ApiProperty({ type: String, nullable: true, format: 'uuid' }) homeStoreId!: string | null;
+  @ApiProperty({ type: [String] }) requiredDocuments!: string[];
+  @ApiProperty({ type: [RiderApplicationDocumentDto] }) documents!: RiderApplicationDocumentDto[];
+}
+export class RiderOnboardingStoreDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() city!: string;
+}
+export class RiderApplicationListItemDto {
+  @ApiProperty({ format: 'uuid' }) userId!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() email!: string;
+  @ApiProperty() status!: string;
+}
+export class RiderApplicationPageDto {
+  @ApiProperty({ type: [RiderApplicationListItemDto] }) items!: RiderApplicationListItemDto[];
+  @ApiProperty({ type: String, nullable: true }) nextCursor!: string | null;
+}
 class StoreAssignmentResponseDto {
   @ApiProperty({ format: 'uuid' }) storeId!: string;
   @ApiProperty() role!: string;
+  @ApiProperty() name!: string;
 }
 export class StoreResponseDto extends ProfileResponseDto {
   @ApiProperty({ type: [String] }) roles!: string[];

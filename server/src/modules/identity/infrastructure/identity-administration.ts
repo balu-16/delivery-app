@@ -2,14 +2,7 @@ import type { ApprovalExecutor, ApprovalFactory } from '../../compliance/contrac
 import type { Json } from '../../../platform/database/database.js';
 import { IdentityAdminService } from './admin-service.js';
 import type { IdentityAdministration, Role } from '../contracts/identity.js';
-const manageable: readonly string[] = [
-  'RIDER',
-  'PICKER',
-  'STORE_MANAGER',
-  'SUPPORT_AGENT',
-  'ADMIN',
-  'SUPER_ADMIN',
-];
+const manageable: readonly string[] = ['RIDER', 'STORE_MANAGER', 'SUPPORT_AGENT', 'SUPER_ADMIN'];
 export class IdentityAdministrationService implements IdentityAdministration {
   private readonly approvals: ApprovalExecutor;
   constructor(
@@ -67,7 +60,7 @@ export class IdentityAdministrationService implements IdentityAdministration {
     actorId: string,
     userId: string,
     storeId: string,
-    role: 'PICKER' | 'STORE_MANAGER',
+    role: 'STORE_MANAGER',
     grant: boolean,
   ): Promise<void> {
     await this.admin.setStoreAssignment(actorId, userId, storeId, role, grant);

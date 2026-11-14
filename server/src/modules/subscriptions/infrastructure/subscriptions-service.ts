@@ -11,7 +11,7 @@ import type { AppConfig } from '../../app-config/contracts/config.js';
 import type { OrderOperations } from '../../orders/contracts/orders.js';
 import { decodePage, pageResult } from '../domain/page.js';
 import type { SubscriptionChanges } from '../contracts/subscriptions.js';
-import type { CheckoutOperations } from '../../checkout/contracts/checkout.js';
+import type { CheckoutOperations, ScheduledOrderInput } from '../../checkout/contracts/checkout.js';
 import {
   addDays,
   firstEditableDate,
@@ -42,6 +42,27 @@ interface SubscriptionRow {
   slot_id: string;
   address_id: string;
   next_delivery_date: string | null;
+}
+interface CalendarRow {
+  subscription_id: string;
+  date: string;
+  start_date: string;
+  end_date: string | null;
+  status: string;
+  store_id: string;
+  address_id: string;
+  variant_id: string;
+  quantity: string;
+  frequency_rule: FrequencyRule;
+  slot_start: string;
+  slot_end: string;
+  occurrence_state: string | null;
+  reason: string | null;
+  order_id: string | null;
+  amount: string | null;
+  skipped: boolean;
+  paused: boolean;
+  holiday: boolean;
 }
 export class SubscriptionsService {
   constructor(
@@ -215,65 +236,53 @@ export class SubscriptionsService {
     )
       throw new Error('INVALID_DATE_RANGE');
     await this.get(userId, id);
-    const rows = await sql<{
-      date: string;
-      start_date: string;
-      end_date: string | null;
-      status: string;
-      store_id: string;
-      address_id: string;
-      variant_id: string;
-      quantity: string;
-      frequency_rule: FrequencyRule;
-      slot_start: string;
-      slot_end: string;
-      occurrence_state: string | null;
-      reason: string | null;
-      order_id: string | null;
-      amount: string | null;
-      skipped: boolean;
-      paused: boolean;
-      holiday: boolean;
-    }>`SELECT d.day::date::text AS date,s.start_date::text,s.end_date::text,s.status,s.store_id::text,COALESCE(v.address_id,s.address_id)::text AS address_id,p.variant_id::text,v.quantity::text,v.frequency_rule,sl.start_time::text AS slot_start,sl.end_time::text AS slot_end,o.state AS occurrence_state,o.reason,o.order_id::text,orders.total_paise::text AS amount,
+    return (await this.calendarDeliveries(userId, [id], from, to, limit)).get(id) ?? [];
+  }
+
+  private async calendarDeliveries(
+    userId: string,
+    ids: string[],
+    from: string,
+    to: string,
+    limit: number,
+  ) {
+    const deliveries = new Map(
+      ids.map((id) => [
+        id,
+        [] as {
+          date: string;
+          status: string;
+          reason: string | null;
+          orderId: string | null;
+          amountPaise: string | null;
+          estimated: boolean;
+        }[],
+      ]),
+    );
+    if (!ids.length) return deliveries;
+    const rows =
+      await sql<CalendarRow>`SELECT s.id::text AS subscription_id,d.day::date::text AS date,s.start_date::text,s.end_date::text,s.status,s.store_id::text,COALESCE(v.address_id,s.address_id)::text AS address_id,p.variant_id::text,v.quantity::text,v.frequency_rule,sl.start_time::text AS slot_start,sl.end_time::text AS slot_end,o.state AS occurrence_state,o.reason,o.order_id::text,orders.total_paise::text AS amount,
     EXISTS(SELECT 1 FROM subscription_skips sk WHERE sk.subscription_id=s.id AND sk.delivery_date=d.day::date) AS skipped,
     EXISTS(SELECT 1 FROM subscription_pauses pa WHERE pa.subscription_id=s.id AND d.day::date BETWEEN pa.starts_on AND pa.ends_on) AS paused,
     EXISTS(SELECT 1 FROM subscription_holidays h WHERE h.store_id=s.store_id AND h.holiday_date=d.day::date) AS holiday
     FROM subscriptions s JOIN subscription_plans p ON p.id=s.plan_id CROSS JOIN generate_series(${from}::date,${to}::date,interval '1 day') d(day)
     JOIN LATERAL (SELECT * FROM subscription_schedule_versions sv WHERE sv.subscription_id=s.id AND sv.effective_from<=d.day::date ORDER BY effective_from DESC LIMIT 1) v ON true
     JOIN subscription_slots sl ON sl.id=v.slot_id LEFT JOIN subscription_occurrences o ON o.subscription_id=s.id AND o.delivery_date=d.day::date
-    LEFT JOIN orders ON orders.id=o.order_id WHERE s.id=${id}::uuid AND s.user_id=${userId}::uuid ORDER BY d.day`.execute(
-      this.db,
-    );
-    const output = [];
+    LEFT JOIN orders ON orders.id=o.order_id WHERE s.id=ANY(${ids}::uuid[]) AND s.user_id=${userId}::uuid ORDER BY s.id,d.day`.execute(
+        this.db,
+      );
+    const inputs: ScheduledOrderInput[] = [];
+    const indexes = new Map<string, number>();
+    const assignments: { index: number; delivery: { amountPaise: string | null } }[] = [];
     for (const r of rows.rows) {
-      if (output.length >= limit) break;
-      if ((r.end_date && r.date > r.end_date) || !occursOn(r.start_date, r.date, r.frequency_rule))
+      const output = deliveries.get(r.subscription_id)!;
+      if (
+        output.length >= limit ||
+        (r.end_date && r.date > r.end_date) ||
+        !occursOn(r.start_date, r.date, r.frequency_rule)
+      )
         continue;
-      let amount = r.amount;
-      if (amount === null && r.status === 'ACTIVE' && !r.skipped && !r.paused && !r.holiday) {
-        try {
-          const estimate = await this.db.transaction().execute((tx) =>
-            this.checkout.priceScheduled(
-              {
-                userId,
-                subscriptionId: id,
-                deliveryDate: r.date,
-                storeId: r.store_id,
-                addressId: r.address_id,
-                variantId: r.variant_id,
-                quantity: r.quantity,
-                slotStart: new Date(`${r.date}T${r.slot_start}+05:30`).toISOString(),
-                slotEnd: new Date(`${r.date}T${r.slot_end}+05:30`).toISOString(),
-              },
-              tx,
-            ),
-          );
-          amount = estimate.totalPaise;
-        } catch {
-          /* unavailable estimates are explicit nulls */
-        }
-      }
-      output.push({
+      const delivery = {
         date: r.date,
         status:
           r.occurrence_state ??
@@ -288,12 +297,48 @@ export class SubscriptionsService {
                   : r.status),
         reason: r.reason,
         orderId: r.order_id,
-        amountPaise: amount,
+        amountPaise: r.amount,
         estimated: r.order_id === null,
-      });
+      };
+      output.push(delivery);
+      if (r.amount === null && r.status === 'ACTIVE' && !r.skipped && !r.paused && !r.holiday) {
+        const input: ScheduledOrderInput = {
+          userId,
+          subscriptionId: r.subscription_id,
+          deliveryDate: r.date,
+          storeId: r.store_id,
+          addressId: r.address_id,
+          variantId: r.variant_id,
+          quantity: r.quantity,
+          slotStart: new Date(`${r.date}T${r.slot_start}+05:30`).toISOString(),
+          slotEnd: new Date(`${r.date}T${r.slot_end}+05:30`).toISOString(),
+        };
+        // The estimate does not use subscriptionId or deliveryDate; the exact
+        // slot timestamps still distinguish different dates and store hours.
+        const key = JSON.stringify([
+          input.userId,
+          input.storeId,
+          input.addressId,
+          input.variantId,
+          input.quantity,
+          input.slotStart,
+          input.slotEnd,
+        ]);
+        let index = indexes.get(key);
+        if (index === undefined) {
+          index = inputs.length;
+          indexes.set(key, index);
+          inputs.push(input);
+        }
+        assignments.push({ index, delivery });
+      }
     }
-    return output;
+    const estimates = await this.checkout.priceScheduledBatch(inputs);
+    for (const { index, delivery } of assignments)
+      delivery.amountPaise = estimates[index]?.totalPaise ?? null;
+    return deliveries;
   }
+
   async calendar(userId: string, month: string, limit?: number, cursor?: string) {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('INVALID_DATE');
     const from = `${month}-01`,
@@ -311,14 +356,19 @@ export class SubscriptionsService {
     }>`SELECT id::text FROM subscriptions WHERE user_id=${userId}::uuid AND (${page.after}::uuid IS NULL OR id>${page.after}::uuid) ORDER BY id LIMIT ${page.limit + 1}`.execute(
       this.db,
     );
-    const result = [];
-    for (const s of subscriptions.rows.slice(0, page.limit))
-      result.push({
-        subscriptionId: s.id,
-        deliveries: await this.upcoming(userId, s.id, from, to),
-      });
+    const selected = subscriptions.rows.slice(0, page.limit);
+    const deliveries = await this.calendarDeliveries(
+      userId,
+      selected.map((s) => s.id),
+      from,
+      to,
+      100,
+    );
     return {
-      items: result,
+      items: selected.map((s) => ({
+        subscriptionId: s.id,
+        deliveries: deliveries.get(s.id) ?? [],
+      })),
       nextCursor:
         subscriptions.rows.length > page.limit
           ? Buffer.from(

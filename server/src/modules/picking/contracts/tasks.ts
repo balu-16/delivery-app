@@ -101,7 +101,7 @@ export interface SlaTaskPage {
 export interface StoreStaffMember {
   userId: string;
   name: string;
-  role: 'PICKER' | 'STORE_MANAGER';
+  role: 'STORE_MANAGER';
   activeTasks: number;
 }
 

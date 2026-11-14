@@ -47,7 +47,8 @@ export class CustomerPaymentRecoveryController {
     @Param('orderId', new ParseUUIDPipe()) id: string,
     @Headers('idempotency-key') key?: string,
   ) {
-    if (!key || key.length > 150) throw new HttpException('IDEMPOTENCY_KEY_REQUIRED', 400);
+    if (!key || key.length > 150)
+      throw new HttpException({ code: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
     return this.payments.retry(p.userId, id, key);
   }
   @Post(':orderId/verify')

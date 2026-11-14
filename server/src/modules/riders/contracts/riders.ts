@@ -20,6 +20,7 @@ export type EligibilityRejection =
 export interface RiderStatusView {
   riderId: string;
   online: boolean;
+  onBreak: boolean;
   lastHeartbeatAt: string | null;
   lastLocationAt: string | null;
   activeTasks: number;
@@ -169,5 +170,6 @@ export interface RiderEligibility {
     at: Date;
     /** When set, cash-in-hand + amount must stay under the configured limit. */
     codAmountPaise?: string;
+    tx?: import('../../../platform/database/database.js').TransactionContext;
   }): Promise<Record<string, EligibilityResult>>;
 }

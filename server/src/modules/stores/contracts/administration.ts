@@ -46,7 +46,7 @@ export interface StoreAdministration {
     actorId: string,
     storeId: string,
     userId: string,
-    role: 'PICKER' | 'STORE_MANAGER',
+    role: 'STORE_MANAGER',
     active: boolean,
   ): Promise<void>;
 }

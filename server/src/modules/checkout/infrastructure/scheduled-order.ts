@@ -2,7 +2,10 @@ import { sql } from 'kysely';
 import { uuidV7 } from '../../../common/ids/ids.js';
 import { computeQuote } from '../../pricing/contracts/pricing.js';
 import { appendEvent } from '../../../platform/outbox/outbox.js';
-import type { TransactionContext } from '../../../platform/database/database.js';
+import {
+  databaseTimeAfterLock,
+  type TransactionContext,
+} from '../../../platform/database/database.js';
 import type { CheckoutDependencies } from './checkout-service.js';
 
 import type { ScheduledOrderInput } from '../contracts/checkout.js';
@@ -10,14 +13,33 @@ import { lockActiveCustomer } from '../../identity/contracts/account-lock.js';
 
 /** Real scheduled checkout uses the same pricing, capacity, wallet, stock and order contracts as customer checkout. */
 export class ScheduledOrderService {
-  constructor(private readonly deps: CheckoutDependencies) {}
+  private readonly estimateCache: Map<string, Promise<unknown>> | undefined;
+  constructor(
+    private readonly deps: CheckoutDependencies,
+    cacheEstimates = false,
+  ) {
+    this.estimateCache = cacheEstimates ? new Map() : undefined;
+  }
+  clearEstimateCache() {
+    this.estimateCache?.clear();
+  }
+  private memo<T>(key: string, read: () => Promise<T>): Promise<T> {
+    if (!this.estimateCache) return read();
+    const cached = this.estimateCache.get(key);
+    if (cached) return cached as Promise<T>;
+    const value = read();
+    this.estimateCache.set(key, value);
+    return value;
+  }
   private async prepare(input: ScheduledOrderInput, tx: TransactionContext) {
     if (!/^[1-9]\d{0,18}$/.test(input.quantity)) throw new Error('INVALID_QUANTITY');
-    const flags = await sql<{
-      key: string;
-      enabled: boolean;
-    }>`SELECT key,enabled FROM feature_flags WHERE key IN ('wallet_enabled','subscriptions_enabled')`.execute(
-      tx,
+    const flags = await this.memo('flags', () =>
+      sql<{
+        key: string;
+        enabled: boolean;
+      }>`SELECT key,enabled FROM feature_flags WHERE key IN ('wallet_enabled','subscriptions_enabled')`.execute(
+        tx,
+      ),
     );
     if (
       !['wallet_enabled', 'subscriptions_enabled'].every((key) =>
@@ -28,23 +50,27 @@ export class ScheduledOrderService {
     const start = new Date(input.slotStart);
     if (!Number.isFinite(start.getTime()) || new Date(input.slotEnd) <= start)
       throw new Error('INVALID_SLOT');
-    const address = await sql<{
-      line1: string;
-      line2: string | null;
-      landmark: string | null;
-      pincode: string;
-      contact_name: string;
-      contact_phone: string;
-      lat: string;
-      lng: string;
-    }>`SELECT line1,line2,landmark,pincode,contact_name,contact_phone,ST_Y(point::geometry)::text AS lat,ST_X(point::geometry)::text AS lng FROM addresses WHERE id=${input.addressId}::uuid AND user_id=${input.userId}::uuid AND deleted_at IS NULL FOR SHARE`.execute(
-      tx,
+    const address = await this.memo(`address:${input.userId}:${input.addressId}`, () =>
+      sql<{
+        line1: string;
+        line2: string | null;
+        landmark: string | null;
+        pincode: string;
+        contact_name: string;
+        contact_phone: string;
+        lat: string;
+        lng: string;
+      }>`SELECT line1,line2,landmark,pincode,contact_name,contact_phone,ST_Y(point::geometry)::text AS lat,ST_X(point::geometry)::text AS lng FROM addresses WHERE id=${input.addressId}::uuid AND user_id=${input.userId}::uuid AND deleted_at IS NULL FOR SHARE`.execute(
+        tx,
+      ),
     );
     const a = address.rows[0];
     if (!a) throw new Error('ADDRESS_NOT_SERVICEABLE');
-    const service = await this.deps.serviceability.check(
-      { lat: Number(a.lat), lng: Number(a.lng), targetTime: start },
-      tx,
+    const service = await this.memo(`service:${a.lat}:${a.lng}:${start.toISOString()}`, () =>
+      this.deps.serviceability.check(
+        { lat: Number(a.lat), lng: Number(a.lng), targetTime: start },
+        tx,
+      ),
     );
     if (service.reasons.includes('STORE_CLOSED')) throw new Error('STORE_CLOSED');
     if (service.reasons.includes('STORE_AT_CAPACITY')) throw new Error('STORE_AT_CAPACITY');
@@ -54,14 +80,16 @@ export class ScheduledOrderService {
       !service.zone
     )
       throw new Error('ADDRESS_NOT_SERVICEABLE');
-    const product = await sql<{
-      name: string;
-      hsn: string;
-      tax: number;
-      selling: string;
-      mrp: string;
-    }>`SELECT v.name,p.hsn_code AS hsn,COALESCE(p.gst_rate_bps,0) AS tax, cp.selling_paise::text AS selling,cp.mrp_paise::text AS mrp FROM catalog_variants v JOIN catalog_products p ON p.id=v.product_id JOIN catalog_prices cp ON cp.variant_id=v.id AND cp.store_id=${input.storeId}::uuid AND cp.valid_from<=statement_timestamp() AND (cp.valid_to IS NULL OR cp.valid_to>statement_timestamp()) WHERE v.id=${input.variantId}::uuid AND v.deleted_at IS NULL AND p.deleted_at IS NULL AND p.published FOR SHARE OF v,p,cp`.execute(
-      tx,
+    const product = await this.memo(`product:${input.storeId}:${input.variantId}`, () =>
+      sql<{
+        name: string;
+        hsn: string;
+        tax: number;
+        selling: string;
+        mrp: string;
+      }>`SELECT v.name,p.hsn_code AS hsn,COALESCE(p.gst_rate_bps,0) AS tax, cp.selling_paise::text AS selling,cp.mrp_paise::text AS mrp FROM catalog_variants v JOIN catalog_products p ON p.id=v.product_id JOIN catalog_prices cp ON cp.variant_id=v.id AND cp.store_id=${input.storeId}::uuid AND cp.valid_from<=statement_timestamp() AND (cp.valid_to IS NULL OR cp.valid_to>statement_timestamp()) WHERE v.id=${input.variantId}::uuid AND v.deleted_at IS NULL AND p.deleted_at IS NULL AND p.published FOR SHARE OF v,p,cp`.execute(
+        tx,
+      ),
     );
     const p = product.rows[0];
     if (!p) throw new Error('ITEM_UNAVAILABLE');
@@ -77,13 +105,15 @@ export class ScheduledOrderService {
       'minOrderPaise',
       'maxOrderPaise',
     ] as const;
-    const pricing = c.getMany
-      ? await c.getMany(keys, tx)
-      : (Object.fromEntries(
-          await Promise.all(keys.map(async (key) => [key, await c.get(key, tx)])),
-        ) as {
-          [K in (typeof keys)[number]]: Awaited<ReturnType<typeof c.get<K>>>;
-        });
+    const pricing = await this.memo('pricing', async () =>
+      c.getMany
+        ? await c.getMany(keys, tx)
+        : (Object.fromEntries(
+            await Promise.all(keys.map(async (key) => [key, await c.get(key, tx)])),
+          ) as {
+            [K in (typeof keys)[number]]: Awaited<ReturnType<typeof c.get<K>>>;
+          }),
+    );
     const {
       deliveryFeeSlabs: slabs,
       freeDeliveryThresholdPaise: free,
@@ -95,13 +125,17 @@ export class ScheduledOrderService {
       minOrderPaise: min,
       maxOrderPaise: max,
     } = pricing;
-    const surgeFlag = await sql<{
-      enabled: boolean;
-    }>`SELECT enabled FROM feature_flags WHERE key='surge_enabled'`.execute(tx);
-    const entitlement = await sql<{
-      id: string;
-    }>`SELECT id::text FROM referral_claims WHERE friend_id=${input.userId}::uuid AND redeemed_order_id IS NULL`.execute(
-      tx,
+    const surgeFlag = await this.memo('surge', () =>
+      sql<{
+        enabled: boolean;
+      }>`SELECT enabled FROM feature_flags WHERE key='surge_enabled'`.execute(tx),
+    );
+    const entitlement = await this.memo(`entitlement:${input.userId}`, () =>
+      sql<{
+        id: string;
+      }>`SELECT id::text FROM referral_claims WHERE friend_id=${input.userId}::uuid AND redeemed_order_id IS NULL`.execute(
+        tx,
+      ),
     );
     const referralClaimId = entitlement.rows[0]?.id ?? null;
     const quote = computeQuote({
@@ -260,7 +294,7 @@ export class ScheduledOrderService {
         aggregateType: 'order',
         aggregateId: id,
         aggregateVersion: '1',
-        occurredAt: new Date().toISOString(),
+        occurredAt: (await databaseTimeAfterLock(tx)).toISOString(),
         correlationId: id,
         causationId: null,
         payload: {

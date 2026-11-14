@@ -3,6 +3,56 @@
   "description": "Security case inventory; partial and unassessed entries are coverage gaps, not complete evidence.",
   "items": [
     {
+      "id": "adminInvoiceRenderFailures",
+      "method": "GET",
+      "path": "/v1/admin/invoices/render-failures",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "Dedicated HTTP authorization checks remain to be run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "Dedicated HTTP validation checks remain to be run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "Dedicated HTTP replay checks remain to be run."
+      },
+      "success": {
+        "status": "covered",
+        "test": "test/integration/invoicing/financial-year-recovery.spec.ts: protects invoice recovery over HTTP and replays an audited retry"
+      }
+    },
+    {
+      "id": "adminInvoiceRenderRetry",
+      "method": "POST",
+      "path": "/v1/admin/invoices/{id}/render-retry",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "Dedicated HTTP authorization checks remain to be run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "Dedicated HTTP validation checks remain to be run."
+      },
+      "replay": {
+        "status": "covered",
+        "test": "test/integration/invoicing/financial-year-recovery.spec.ts: protects invoice recovery over HTTP and replays an audited retry"
+      },
+      "success": {
+        "status": "covered",
+        "test": "test/integration/invoicing/financial-year-recovery.spec.ts: protects invoice recovery over HTTP and replays an audited retry"
+      }
+    },
+    {
       "id": "adminPreviewPushCampaign",
       "method": "POST",
       "path": "/v1/admin/push-campaigns/preview",
@@ -264,9 +314,9 @@
       }
     },
     {
-      "id": "AdminIdentityController_readDocument",
+      "id": "StoreIdentityController_readDocument",
       "method": "GET",
-      "path": "/v1/admin/rider-documents/{documentId}/read-url",
+      "path": "/v1/store/rider-documents/{documentId}/read-url",
       "authentication": {
         "status": "covered",
         "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
@@ -293,9 +343,9 @@
       }
     },
     {
-      "id": "AdminIdentityController_reviewDocument",
+      "id": "StoreIdentityController_reviewDocument",
       "method": "POST",
-      "path": "/v1/admin/rider-documents/{documentId}/review",
+      "path": "/v1/store/rider-documents/{documentId}/review",
       "authentication": {
         "status": "covered",
         "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
@@ -727,7 +777,7 @@
       },
       "authorization": {
         "status": "partial",
-        "reason": "A second rider cannot register another rider’s uploaded media.",
+        "reason": "A second rider cannot register another rider\u2019s uploaded media.",
         "test": "test/integration/identity/private-media.spec.ts: exposes onboarding upload and restricts reviewer access over HTTP",
         "additionalTests": [
           "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
@@ -9894,6 +9944,497 @@
       "success": {
         "status": "unassessed",
         "reason": "Successful operation behavior has not been mapped to a passing test."
+      }
+    },
+    {
+      "id": "riderBootstrap",
+      "method": "POST",
+      "path": "/v1/rider/auth/bootstrap",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "riderGetOnboarding",
+      "method": "GET",
+      "path": "/v1/rider/onboarding",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "riderListOnboardingStores",
+      "method": "GET",
+      "path": "/v1/rider/onboarding/stores",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "Pending rider access is covered; further resource cases remain to be mapped."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "Operation-specific validation cases remain to be mapped."
+      },
+      "replay": { "status": "not-applicable", "reason": "Read-only operation." },
+      "success": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: enrolls a rider through document rejection, resubmission and store-manager approval over HTTP"
+      }
+    },
+    {
+      "id": "riderSelectOnboardingStore",
+      "method": "POST",
+      "path": "/v1/rider/onboarding/store",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "Pending rider access and state restrictions are covered; further cases remain to be mapped."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "Operation-specific validation cases remain to be mapped."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "Resource-state behavior is covered; further replay cases remain to be mapped."
+      },
+      "success": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: enrolls a rider through document rejection, resubmission and store-manager approval over HTTP"
+      }
+    },
+    {
+      "id": "storeListRiderApplications",
+      "method": "GET",
+      "path": "/v1/store/rider-applications",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "Assigned-store access is covered; further scope cases remain to be mapped."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "Operation-specific validation cases remain to be mapped."
+      },
+      "replay": { "status": "not-applicable", "reason": "Read-only operation." },
+      "success": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: enrolls a rider through document rejection, resubmission and store-manager approval over HTTP"
+      }
+    },
+    {
+      "id": "storeGetRiderApplication",
+      "method": "GET",
+      "path": "/v1/store/rider-applications/{userId}",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "Assigned-store access is covered; further scope cases remain to be mapped."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "Operation-specific validation cases remain to be mapped."
+      },
+      "replay": { "status": "not-applicable", "reason": "Read-only operation." },
+      "success": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: enrolls a rider through document rejection, resubmission and store-manager approval over HTTP"
+      }
+    },
+    {
+      "id": "adminListRiderApplications",
+      "method": "GET",
+      "path": "/v1/admin/rider-applications",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "adminGetRiderApplication",
+      "method": "GET",
+      "path": "/v1/admin/rider-applications/{userId}",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "riderListTasks",
+      "method": "GET",
+      "path": "/v1/rider/tasks",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "riderTaskDetail",
+      "method": "GET",
+      "path": "/v1/rider/tasks/{id}",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "riderDashboard",
+      "method": "GET",
+      "path": "/v1/rider/dashboard",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "riderGetStatus",
+      "method": "GET",
+      "path": "/v1/rider/status",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "customerReferrals",
+      "method": "GET",
+      "path": "/v1/customer/referrals",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "customerCatalogCategories",
+      "method": "GET",
+      "path": "/v1/customer/catalog/categories",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "customerFavoritesList",
+      "method": "GET",
+      "path": "/v1/customer/favorites",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "customerFavoritesProducts",
+      "method": "GET",
+      "path": "/v1/customer/favorites/products",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "customerFavoriteAdd",
+      "method": "PUT",
+      "path": "/v1/customer/favorites/{id}",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "customerFavoriteRemove",
+      "method": "DELETE",
+      "path": "/v1/customer/favorites/{id}",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "customerSubscriptionOptions",
+      "method": "GET",
+      "path": "/v1/customer/subscriptions/options",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      }
+    },
+    {
+      "id": "adminSetStoreCod",
+      "method": "PATCH",
+      "path": "/v1/admin/stores/{id}/cod",
+      "authentication": {
+        "status": "covered",
+        "test": "test/e2e/foundation-journey.spec.ts: rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation"
+      },
+      "authorization": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "validation": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "replay": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
+      },
+      "success": {
+        "status": "partial",
+        "reason": "A dedicated end-to-end security test for this operation has not yet been run."
       }
     }
   ]

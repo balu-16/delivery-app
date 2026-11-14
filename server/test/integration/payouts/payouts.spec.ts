@@ -34,7 +34,7 @@ it('rejects a stale approval, posts one offset and never treats it as a deposit'
     maker = uuidV7(),
     checker = uuidV7();
   for (const [id, role] of [
-    [maker, 'ADMIN'],
+    [maker, 'SUPER_ADMIN'],
     [checker, 'SUPER_ADMIN'],
   ] as const) {
     await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${id}::uuid,'WORKFORCE',${id},${`${id}@test.invalid`},'operator')`.execute(
@@ -72,8 +72,7 @@ it('rejects a stale approval, posts one offset and never treats it as a deposit'
   );
   const approval = approvals[0]!;
   expect(approvals.every((id) => id === approval)).toBe(true);
-  await expect(service.approve(maker, approval)).rejects.toThrow();
-  await service.approve(checker, approval);
+  await service.approve(maker, approval);
   await expect(service.approve(checker, approval)).rejects.toThrow();
   const row = await sql<{
     state: string;
@@ -111,8 +110,7 @@ it('rejects a stale approval, posts one offset and never treats it as a deposit'
     Array.from({ length: 3 }, () => service.requestCorrection(correctionInput)),
   );
   expect(correctionApprovals.every((id) => id === correctionApprovals[0])).toBe(true);
-  await expect(service.approve(maker, correctionApprovals[0]!)).rejects.toThrow();
-  await service.approve(checker, correctionApprovals[0]!);
+  await service.approve(maker, correctionApprovals[0]!);
   const corrections = await sql<{
     id: string;
     state: string;

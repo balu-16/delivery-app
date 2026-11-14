@@ -101,7 +101,7 @@ export class PostgresInventoryManagement implements InventoryManagement {
     limit = 50,
     lowStock?: number,
   ): Promise<{ items: unknown[]; nextCursor: string | null }> {
-    if (!(await this.identity.hasStoreRole(actor, storeId, ['PICKER', 'STORE_MANAGER'])))
+    if (!(await this.identity.hasStoreRole(actor, storeId, ['STORE_MANAGER'])))
       throw new Error('STORE_NOT_FOUND');
     this.bound(limit);
     const scope = ['stock', storeId, search, lowStock ?? null];
@@ -125,7 +125,7 @@ export class PostgresInventoryManagement implements InventoryManagement {
     cursor?: string,
     limit = 50,
   ): Promise<{ items: unknown[]; nextCursor: string | null }> {
-    if (!(await this.identity.hasStoreRole(actor, storeId, ['PICKER', 'STORE_MANAGER'])))
+    if (!(await this.identity.hasStoreRole(actor, storeId, ['STORE_MANAGER'])))
       throw new Error('STORE_NOT_FOUND');
     this.bound(limit);
     const scope = ['expiring', storeId, days];
@@ -151,8 +151,7 @@ export class PostgresInventoryManagement implements InventoryManagement {
     const scope = ['report', storeId];
     const after = stockCursorId(cursor, scope);
     return this.db.transaction().execute(async (tx) => {
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const rows = await sql<{
         variantId: string;
       }>`SELECT i.variant_id AS "variantId",i.on_hand::text AS "onHand",i.reserved::text,a.available::text,i.version::text FROM store_inventory i JOIN inventory_saleable_availability a ON a.store_id=i.store_id AND a.variant_id=i.variant_id WHERE i.store_id=${storeId}::uuid AND (${after}::uuid IS NULL OR i.variant_id>${after}::uuid) ORDER BY i.variant_id LIMIT ${limit + 1}`.execute(
@@ -179,8 +178,7 @@ export class PostgresInventoryManagement implements InventoryManagement {
     const scope = ['ledger', storeId, variantId ?? null];
     const after = stockCursorId(cursor, scope);
     return this.db.transaction().execute(async (tx) => {
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const rows = await sql<{
         id: string;
       }>`SELECT id,reference,variant_id AS "variantId",batch_id AS "batchId",kind,on_hand_delta::text AS "onHandDelta",reserved_delta::text AS "reservedDelta",actor_id AS "actorId",created_at AS "createdAt" FROM inventory_ledger WHERE store_id=${storeId}::uuid AND (${variantId ?? null}::uuid IS NULL OR variant_id=${variantId ?? null}::uuid) AND (${after}::uuid IS NULL OR id<${after}::uuid) ORDER BY id DESC LIMIT ${limit + 1}`.execute(

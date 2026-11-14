@@ -282,7 +282,7 @@ it('manages entities, cities, stores and zones with role checks, strict bodies, 
   });
   await expectStatus('PUT', `/v1/admin/stores/${store}/staff`, 200, {
     userId: world.admin,
-    role: 'PICKER',
+    role: 'STORE_MANAGER',
     active: false,
   });
   await expectStatus('PUT', `/v1/admin/stores/${store}/hours`, 200, {
@@ -470,8 +470,14 @@ it('manages catalog names, products, variants, assortment, prices and synonyms w
 });
 
 it('enforces super-admin configuration authority and audits typed settings and flags', async () => {
-  await expectStatus('GET', '/v1/admin/config', 403);
-  await expectStatus('POST', '/v1/admin/feature-flags/wallet_enabled', 403, { enabled: true });
+  await expectStatus('GET', '/v1/admin/config', 403, undefined, support);
+  await expectStatus(
+    'POST',
+    '/v1/admin/feature-flags/wallet_enabled',
+    403,
+    { enabled: true },
+    support,
+  );
   await expectStatus(
     'POST',
     '/v1/admin/feature-flags/wallet_enabled',
@@ -479,7 +485,7 @@ it('enforces super-admin configuration authority and audits typed settings and f
     { enabled: true, unexpected: true },
     superAdmin,
   );
-  await expectStatus('POST', '/v1/admin/config/locationRetentionDays', 403, { value: 20 });
+  await expectStatus('POST', '/v1/admin/config/locationRetentionDays', 403, { value: 20 }, support);
   await expectStatus('GET', '/v1/admin/config', 200, undefined, superAdmin);
   await expectStatus(
     'POST',
@@ -538,14 +544,14 @@ it('restricts global administrative read models and validates bounded query inpu
     await expectStatus('GET', `${url}?${query ? `${query}&` : ''}limit=101`, 400);
   }
   await expectStatus('GET', '/v1/admin/ops/outbox', 200, undefined, superAdmin);
-  await expectStatus('GET', '/v1/admin/ops/outbox', 403, undefined, admin);
+  await expectStatus('GET', '/v1/admin/ops/outbox', 403, undefined, support);
   for (const url of [
     '/v1/admin/erasure-requests',
     '/v1/admin/approvals',
     '/v1/admin/fraud-signals',
   ]) {
     await expectStatus('GET', url, 200, undefined, superAdmin);
-    await expectStatus('GET', url, 403, undefined, admin);
+    await expectStatus('GET', url, 403, undefined, support);
     await expectStatus('GET', `${url}?limit=101`, 400, undefined, superAdmin);
   }
 });

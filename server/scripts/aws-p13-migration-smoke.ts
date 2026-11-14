@@ -56,8 +56,8 @@ async function main() {
     });
     test = new Pool({ ...config, max: 1, connectionTimeoutMillis: 30000 });
     const expected = (await readdir('db/migrations'))
-      .filter((name) => name.endsWith('.sql'))
-      .map((name) => name.slice(0, -4))
+      .filter((name) => /\.(sql|mjs)$/.test(name))
+      .map((name) => name.replace(/\.(sql|mjs)$/, ''))
       .sort();
     const version = await test.query<{ name: string }>(
       'SELECT name FROM pgmigrations ORDER BY name',

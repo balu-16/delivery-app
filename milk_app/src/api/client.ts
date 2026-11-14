@@ -1,4 +1,7 @@
 import type { components } from './customer.generated';
+import { developmentHost, developmentPort, resolveApiAddress } from './address';
+
+export { ApiAddressError } from './address';
 
 export type Problem = components['schemas']['ProblemDto'];
 
@@ -10,15 +13,8 @@ export class ApiError extends Error {
 }
 
 export function apiBaseUrl(): string {
-  const raw = process.env.EXPO_PUBLIC_API_URL?.trim();
-  if (!raw) throw new Error('Set EXPO_PUBLIC_API_URL to the customer backend URL.');
-  let url: URL;
-  try { url = new URL(raw); } catch { throw new Error('EXPO_PUBLIC_API_URL is not a valid URL.'); }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-    throw new Error('EXPO_PUBLIC_API_URL must be an HTTP(S) base URL without credentials or query parameters.');
-  }
-  if (!__DEV__ && url.protocol !== 'https:') throw new Error('The customer API must use HTTPS.');
-  return url.toString().replace(/\/$/, '');
+  return resolveApiAddress({ configuredUrl: process.env.EXPO_PUBLIC_API_URL, development: __DEV__,
+    developmentHost: __DEV__ ? developmentHost() : undefined, developmentPort: __DEV__ ? developmentPort() : undefined });
 }
 
 type RequestOptions = { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; token?: string; body?: unknown; idempotencyKey?: string; signal?: AbortSignal };

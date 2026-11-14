@@ -36,7 +36,9 @@ it('requires an authorized operator and private evidence before settling a manua
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${admin}::uuid,'WORKFORCE',${admin},${`${admin}@test.invalid`},'admin')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'ADMIN')`.execute(db.db);
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
   await sql`INSERT INTO private_media(id,owner_id,purpose,content_type,size_bytes,state,upload_nonce,file_key) VALUES(${media}::uuid,${admin}::uuid,'PAYOUT_EVIDENCE','application/pdf',5,'STORED',${uuidV7()}::uuid,${uuidV7()}::uuid)`.execute(
     db.db,
   );

@@ -94,7 +94,7 @@ const draft = (over: Record<string, unknown> = {}) => ({
   firstOrderOnly: false,
   ...over,
 });
-async function adminToken(role = 'ADMIN'): Promise<string> {
+async function adminToken(role = 'SUPER_ADMIN'): Promise<string> {
   counter += 1;
   const sub = `p5-adm-${counter}`;
   const user = uuidV7();

@@ -109,6 +109,19 @@ export interface InvoicingOperations {
   recordCreditNote(input: CreditNoteInput): Promise<InvoiceDocumentView | null>;
   /** Renders PENDING/FAILED documents; retries reuse the SAME number. */
   renderDue(limit: number): Promise<number>;
+  listRenderFailures(
+    limit: number,
+    cursor?: string,
+  ): Promise<{
+    items: { documentId: string; number: string; attempts: number; suspendedAt: string }[];
+    nextCursor: string | null;
+  }>;
+  retryRender(
+    actorId: string,
+    documentId: string,
+    reason: string,
+    tx: TransactionContext,
+  ): Promise<{ documentId: string; status: 'PENDING' }>;
   /** Authorized customer retrieval: owner-checked, content only when rendered. */
   invoiceForOrder(orderId: string, userId: string): Promise<InvoiceContentView>;
 }

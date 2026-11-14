@@ -1,5 +1,9 @@
 import { sql } from 'kysely';
-import { transactionWithRetry, type Database } from '../../../platform/database/database.js';
+import {
+  transactionWithRetry,
+  type Database,
+  type TransactionContext,
+} from '../../../platform/database/database.js';
 import { type CartService } from '../../cart/contracts/cart.js';
 import type { ReorderResult } from '../contracts/orders.js';
 import { PostgresOrderAggregate } from './postgres-orders.js';
@@ -112,10 +116,14 @@ export class OrderMutationsService {
       });
     });
   }
-  async reorder(orderId: string, userId: string): Promise<ReorderResult> {
-    const row = await this.aggregate.byIdRaw(orderId);
+  async reorder(
+    orderId: string,
+    userId: string,
+    outer?: TransactionContext,
+  ): Promise<ReorderResult> {
+    const row = await this.aggregate.byIdRaw(orderId, outer);
     if (!row || row.user_id !== userId) throw new Error('ORDER_NOT_FOUND');
-    const items = await this.aggregate.items(orderId);
+    const items = await this.aggregate.items(orderId, outer);
     if (!items.length) throw new Error('INVALID_INPUT');
     const snapshot = row.address_snapshot as Record<string, unknown>;
     let addressId =
@@ -129,12 +137,12 @@ export class OrderMutationsService {
       // default address so reorder always targets a bindable cart.
       const fallback = await sql<{ id: string }>`SELECT id FROM addresses
         WHERE user_id=${userId}::uuid AND deleted_at IS NULL
-        ORDER BY is_default DESC, created_at LIMIT 1`.execute(this.db);
+        ORDER BY is_default DESC, created_at LIMIT 1`.execute(outer ?? this.db);
       addressId = fallback.rows[0]?.id ?? null;
     }
     if (!addressId) throw new Error('INVALID_INPUT');
     const targetAddress = addressId;
-    return transactionWithRetry(this.db, async (tx) => {
+    const run = async (tx: TransactionContext) => {
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`cart-user:${userId}`},0))`.execute(
         tx,
       );
@@ -170,6 +178,7 @@ export class OrderMutationsService {
         }
       }
       return { cartId: cart.cartId, added, issues };
-    });
+    };
+    return outer ? run(outer) : transactionWithRetry(this.db, run);
   }
 }

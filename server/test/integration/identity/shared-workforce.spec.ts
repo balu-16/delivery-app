@@ -24,7 +24,9 @@ beforeAll(async () => {
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES (${actor}::uuid,'WORKFORCE','admin-sub','actor@example.test','Actor')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES (${actor}::uuid,'ADMIN')`.execute(db.db);
+  await sql`INSERT INTO user_roles(user_id,role) VALUES (${actor}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
 }, 120000);
 afterAll(async () => {
   await db?.close();

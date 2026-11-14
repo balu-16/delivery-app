@@ -9,23 +9,40 @@ import {
 } from "./domain";
 
 let storageWarningShown = false;
+let storagePaused = false;
+let storageUnavailable = false;
+let storageQueue: Promise<void> = Promise.resolve();
 const safeStorage = {
-  getItem: (key: string) => AsyncStorage.getItem(key),
-  setItem: async (key: string, value: string) => {
+  getItem: async (key: string) => {
+    await storageQueue;
     try {
-      await AsyncStorage.setItem(key, value);
-    } catch {
-      if (!storageWarningShown) {
-        storageWarningShown = true;
-        setTimeout(
-          () =>
-            useDemo.setState({
-              notice: "Storage unavailable. Demo changes may not be saved.",
-            }),
-          0,
-        );
-      }
+      return await AsyncStorage.getItem(key);
+    } catch (error) {
+      storageUnavailable = true;
+      throw error;
     }
+  },
+  setItem: async (key: string, value: string) => {
+    if (storagePaused || storageUnavailable) return;
+    storageQueue = storageQueue
+      .catch(() => {})
+      .then(async () => {
+        try {
+          await AsyncStorage.setItem(key, value);
+        } catch {
+          if (!storageWarningShown) {
+            storageWarningShown = true;
+            setTimeout(
+              () =>
+                useDemo.setState({
+                  notice: "Storage unavailable. Demo changes may not be saved.",
+                }),
+              0,
+            );
+          }
+        }
+      });
+    await storageQueue;
   },
   removeItem: async (key: string) => {
     try {
@@ -120,6 +137,58 @@ type Draft = {
   shortfall?: string;
   code?: string;
 };
+export type WorkPreferences = {
+  mode: "flexible" | "fixed" | "part-time";
+  start: string;
+  end: string;
+  days: number[];
+  areas: string[];
+  maxDeliveries: number;
+};
+export const defaultPreferences = (): WorkPreferences => ({
+  mode: "flexible",
+  start: "09:00",
+  end: "18:00",
+  days: [1, 2, 3, 4, 5],
+  areas: ["Central", "East"],
+  maxDeliveries: 25,
+});
+function validPreferences(value: unknown): WorkPreferences {
+  const fallback = defaultPreferences();
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return fallback;
+  const candidate = value as Partial<WorkPreferences>;
+  const validTime = (time: unknown): time is string =>
+    typeof time === "string" && /^(0[6-9]|1\d|2[0-2]):00$/.test(time);
+  const timesValid =
+    validTime(candidate.start) &&
+    validTime(candidate.end) &&
+    candidate.start < candidate.end;
+  return {
+    mode: ["flexible", "fixed", "part-time"].includes(candidate.mode ?? "")
+      ? candidate.mode!
+      : fallback.mode,
+    start: timesValid ? candidate.start! : fallback.start,
+    end: timesValid ? candidate.end! : fallback.end,
+    days:
+      Array.isArray(candidate.days) &&
+      candidate.days.every(
+        (day) => Number.isInteger(day) && day >= 0 && day <= 6,
+      )
+        ? [...new Set(candidate.days)]
+        : fallback.days,
+    areas:
+      Array.isArray(candidate.areas) &&
+      candidate.areas.every((area) =>
+        ["Central", "East", "North"].includes(area),
+      )
+        ? [...new Set(candidate.areas)]
+        : fallback.areas,
+    maxDeliveries: [10, 25, 40].includes(candidate.maxDeliveries ?? -1)
+      ? candidate.maxDeliveries!
+      : fallback.maxDeliveries,
+  };
+}
 type State = {
   events: Event[];
   drafts: Record<string, Draft>;
@@ -136,12 +205,14 @@ type State = {
   hapticsOn: boolean;
   hydrated: boolean;
   notice: string | null;
+  preferences: WorkPreferences;
   record: (event: Omit<Event, "at">) => void;
   draft: (id: string, patch: Partial<Draft>) => void;
   setLanguage: (language: string) => void;
   setOnboarded: () => void;
   setSignal: (signal: boolean) => void;
-  offer: (expiry: number | null) => void;
+  offer: (expiry: number | null, cash?: number) => void;
+  updatePreferences: (patch: Partial<WorkPreferences>) => void;
   advanceClock: () => void;
   toggleRouteOffers: () => void;
   setConflict: () => void;
@@ -181,6 +252,7 @@ export const useDemo = create<State>()(
       hapticsOn: true,
       hydrated: false,
       notice: null,
+      preferences: defaultPreferences(),
       record: (event) =>
         set((state) => {
           if (state.events.some((e) => e.id === event.id)) return state;
@@ -247,17 +319,19 @@ export const useDemo = create<State>()(
               ? state.events.map((e) => ({ ...e, pending: false }))
               : state.events,
         })),
-      offer: (offerExpiresAt) =>
+      offer: (offerExpiresAt, cash) =>
         set((state) =>
           offerExpiresAt === null
             ? { offerExpiresAt }
             : {
                 offerExpiresAt,
                 offerId: `00000000-0000-4000-8000-${String(state.offerCounter + 1).padStart(12, "0")}`,
-                offerCash: state.offerCounter % 2 === 0 ? 0 : 25000,
+                offerCash: cash ?? (state.offerCounter % 2 === 0 ? 0 : 25000),
                 offerCounter: state.offerCounter + 1,
               },
         ),
+      updatePreferences: (patch) =>
+        set((state) => ({ preferences: { ...state.preferences, ...patch } })),
       advanceClock: () =>
         set((state) => ({ clockOffset: state.clockOffset + 300000 })),
       toggleRouteOffers: () =>
@@ -290,6 +364,7 @@ export const useDemo = create<State>()(
     {
       name: "@dairydirect/partner-demo",
       version: 3,
+      skipHydration: true,
       storage: createJSONStorage(() => safeStorage),
       partialize: (s) =>
         ({
@@ -306,15 +381,18 @@ export const useDemo = create<State>()(
           offersDuringRoute: s.offersDuringRoute,
           simulateConflict: s.simulateConflict,
           hapticsOn: s.hapticsOn,
+          preferences: s.preferences,
         }) as State,
       migrate: (data, version) => migrateDemo(data, version) as State,
       merge: (saved, current) => {
         if (saved === undefined) return current;
-        if (!saved || typeof saved !== "object")
+        if (!saved || typeof saved !== "object") {
+          storageUnavailable = true;
           return {
             ...current,
             notice: "Saved demo could not be restored. Starting fresh.",
           };
+        }
         const data = saved as Partial<State>;
         if (
           !Array.isArray(data.events) ||
@@ -328,11 +406,13 @@ export const useDemo = create<State>()(
               typeof e.kind !== "string" ||
               !Number.isFinite(e.at),
           )
-        )
+        ) {
+          storageUnavailable = true;
           return {
             ...current,
             notice: "Saved demo could not be restored. Starting fresh.",
           };
+        }
         if (
           Object.values(data.drafts).some(
             (d) =>
@@ -343,11 +423,13 @@ export const useDemo = create<State>()(
               (d.code !== undefined && typeof d.code !== "string") ||
               (d.shortfall !== undefined && typeof d.shortfall !== "string"),
           )
-        )
+        ) {
+          storageUnavailable = true;
           return {
             ...current,
             notice: "Saved demo could not be restored. Starting fresh.",
           };
+        }
         return {
           ...current,
           events: data.events,
@@ -381,25 +463,92 @@ export const useDemo = create<State>()(
           offersDuringRoute: data.offersDuringRoute !== false,
           simulateConflict: data.simulateConflict === true,
           hapticsOn: data.hapticsOn !== false,
+          preferences: validPreferences(data.preferences),
           hydrated: false,
         };
       },
-      onRehydrateStorage: () => (_state, error) => {
-        setTimeout(
-          () =>
-            useDemo
-              .getState()
-              .hydrateDone(
-                error
-                  ? "Saved demo could not be restored. Starting fresh."
-                  : undefined,
-              ),
-          0,
-        );
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          storageUnavailable = true;
+          useDemo
+            .getState()
+            .hydrateDone("Saved demo could not be restored. Starting fresh.");
+        } else state?.hydrateDone();
       },
     },
   ),
 );
+
+/** Existing anonymous demo data is deliberately never imported into an account. */
+export async function activateDemoAccount(subject: string) {
+  await storageQueue;
+  storagePaused = true;
+  storageUnavailable = false;
+  const key = `@dairydirect/partner-demo/account/${encodeURIComponent(subject)}`;
+  useDemo.persist.setOptions({ name: key });
+  useDemo.setState({
+    events: [],
+    drafts: {},
+    language: "en",
+    onboarded: true,
+    signal: true,
+    offerExpiresAt: null,
+    offerId: null,
+    offerCash: 0,
+    offerCounter: 0,
+    clockOffset: 0,
+    offersDuringRoute: true,
+    simulateConflict: false,
+    hapticsOn: true,
+    hydrated: false,
+    notice: null,
+    preferences: defaultPreferences(),
+  });
+  storagePaused = false;
+  let existing: string | null = null;
+  try {
+    existing = await safeStorage.getItem(key);
+    await useDemo.persist.rehydrate();
+  } catch {
+    // Do not overwrite an account's saved data when storage cannot be read.
+    storageUnavailable = true;
+  }
+  if (!existing) {
+    const now = Date.now();
+    const startOfToday =
+      Math.floor((now + 19800000) / 86400000) * 86400000 - 19800000;
+    const history: Event[] = Array.from({ length: 9 }, (_, index) => ({
+      id: `sample-history-${index}`,
+      kind: "delivered",
+      stopId: `sample-history-${index}`,
+      at:
+        index < 2
+          ? Math.max(startOfToday, now - 3600000 * (index + 1))
+          : now - (index - 1) * 86400000,
+    }));
+    useDemo.setState({ events: history });
+  }
+  useDemo
+    .getState()
+    .hydrateDone(
+      storageUnavailable
+        ? "Storage unavailable. Demo changes may not be saved."
+        : undefined,
+    );
+}
+
+export async function clearDemoAccount() {
+  await storageQueue;
+  storagePaused = true;
+  useDemo.setState({
+    events: [],
+    drafts: {},
+    notice: null,
+    hydrated: false,
+    preferences: defaultPreferences(),
+  });
+  storagePaused = false;
+}
 export const has = (events: Event[], kind: string, stopId?: string) =>
   events.some(
     (e) => e.kind === kind && (stopId === undefined || e.stopId === stopId),

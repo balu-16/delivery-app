@@ -49,6 +49,69 @@ export class DeliveryTaskView {
   @ApiProperty({ type: String, nullable: true }) handoverCode!: string | null;
   @ApiProperty({ pattern: '^[1-9]\\d*$' }) version!: string;
 }
+export class RiderTaskStoreView {
+  @ApiProperty() name!: string;
+  @ApiProperty() lat!: number;
+  @ApiProperty() lng!: number;
+}
+export class RiderTaskDestinationView {
+  @ApiProperty({ type: String, nullable: true }) name!: string | null;
+  @ApiProperty({ type: String, nullable: true }) line1!: string | null;
+  @ApiProperty({ type: String, nullable: true }) line2!: string | null;
+  @ApiProperty({ type: String, nullable: true }) landmark!: string | null;
+  @ApiProperty({ type: String, nullable: true }) pincode!: string | null;
+  @ApiProperty({ type: Number, nullable: true }) lat!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) lng!: number | null;
+}
+export class RiderTaskItemView {
+  @ApiProperty() name!: string;
+  @ApiProperty() quantity!: string;
+}
+export class RiderActiveTaskView extends DeliveryTaskView {
+  @ApiProperty() orderNumber!: string;
+  @ApiProperty({ type: String, nullable: true }) codCollectedPaise!: string | null;
+  @ApiProperty({ type: RiderTaskStoreView }) store!: RiderTaskStoreView;
+  @ApiProperty({ type: RiderTaskDestinationView }) destination!: RiderTaskDestinationView;
+  @ApiProperty({ type: [RiderTaskItemView] }) items!: RiderTaskItemView[];
+}
+export class RiderTaskHistoryView {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid' }) orderId!: string;
+  @ApiProperty() orderNumber!: string;
+  @ApiProperty() attemptNo!: number;
+  @ApiProperty({ format: 'date-time' }) assignedAt!: string;
+  @ApiProperty() status!: string;
+  @ApiProperty({ type: String, nullable: true }) totalPaise!: string | null;
+}
+export class RiderDashboardView {
+  @ApiProperty() todayDeliveries!: number;
+  @ApiProperty() todayEarningsPaise!: string;
+}
+export class RiderStatusView {
+  @ApiProperty({ format: 'uuid' }) riderId!: string;
+  @ApiProperty() online!: boolean;
+  @ApiProperty() onBreak!: boolean;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) lastHeartbeatAt!:
+    string | null;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) lastLocationAt!:
+    string | null;
+  @ApiProperty() activeTasks!: number;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) idleSince!: string | null;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) unreachableSince!:
+    string | null;
+}
+export class RiderShiftView {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'date-time' }) startedAt!: string;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) endedAt!: string | null;
+  @ApiProperty({ type: String, nullable: true }) endReason!: string | null;
+}
+export class RiderMeView {
+  @ApiProperty({ format: 'uuid' }) riderId!: string;
+  @ApiProperty() profileStatus!: string;
+  @ApiProperty({ type: RiderStatusView }) status!: RiderStatusView;
+  @ApiProperty({ type: RiderShiftView, nullable: true }) currentShift!: RiderShiftView | null;
+}
 export class OfferView {
   @ApiProperty({ format: 'uuid' }) offerId!: string;
   @ApiProperty({ format: 'uuid' }) taskId!: string;
@@ -57,6 +120,8 @@ export class OfferView {
   @ApiProperty() attemptNo!: number;
   @ApiProperty({ format: 'date-time' }) expiresAt!: string;
   @ApiProperty({ type: String, nullable: true }) codAmountPaise!: string | null;
+  @ApiProperty() storeName!: string;
+  @ApiProperty() orderNumber!: string;
 }
 export class OfferPageView {
   @ApiProperty({ type: [OfferView] }) items!: OfferView[];

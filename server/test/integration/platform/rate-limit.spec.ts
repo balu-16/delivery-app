@@ -3,6 +3,8 @@ import { checkRateLimit, routeLimit } from '../../../src/common/http/rate-limit.
 import { readEnv } from '../../../src/config/env.schema.js';
 import { startTestServices, type TestServices } from '../../helpers/services.js';
 import { RedisRateLimiter } from '../../../src/platform/redis/rate-limiter.js';
+import { createApplication } from '../../../src/bootstrap.js';
+import { randomInt } from 'node:crypto';
 
 let services: TestServices;
 beforeAll(async () => {
@@ -26,7 +28,11 @@ it('shares counters across Redis clients, separates route classes, and sets an e
     expect((await checkRateLimit(second, actor, 'location', 2)).allowed).toBe(true);
     const env = readEnv({});
     expect(routeLimit('/v1/rider/location', env)?.name).toBe('location');
-    expect(routeLimit('/v1/webhooks/payments/razorpay', env)).toBeUndefined();
+    expect(routeLimit('/v1/customer/webhooks/payments/razorpay', env)).toEqual({
+      name: 'webhook',
+      limit: 1200,
+    });
+    expect(routeLimit('/v1/webhooks/payments/razorpay', env)?.name).toBe('default');
   } finally {
     await first.quit();
     await second.quit();
@@ -73,5 +79,43 @@ it('limits verified actors independently by audience and returns an explicit out
     }
   } finally {
     await redis.quit();
+  }
+});
+
+it('uses forwarded client addresses only from an explicitly trusted proxy', async () => {
+  const octet = randomInt(1, 255);
+  const proxy = `10.88.${octet}.1`;
+  const untrusted = `192.0.2.${octet}`;
+  const clientA = `198.51.${octet}.10`,
+    clientB = `198.51.${octet}.11`;
+  const app = await createApplication(
+    readEnv({
+      NODE_ENV: 'test',
+      APP_ROLE: 'customer',
+      LOG_LEVEL: 'silent',
+      DATABASE_URL: services.databaseUrl,
+      REDIS_URL: services.redisUrl,
+      TRUSTED_PROXY_CIDRS: `${proxy}/32`,
+      RATE_LIMIT_AUTH_PER_MIN: '1',
+    }),
+  );
+  try {
+    const send = (remoteAddress: string, forwarded: string) =>
+      app
+        .getHttpAdapter()
+        .getInstance()
+        .inject({
+          method: 'GET',
+          url: '/v1/customer/auth/not-a-route',
+          remoteAddress,
+          headers: { 'x-forwarded-for': forwarded },
+        });
+    expect((await send(proxy, clientA)).statusCode).toBe(404);
+    expect((await send(proxy, clientB)).statusCode).toBe(404);
+    expect((await send(proxy, clientA)).statusCode).toBe(429);
+    expect((await send(untrusted, clientA)).statusCode).toBe(404);
+    expect((await send(untrusted, clientB)).statusCode).toBe(429);
+  } finally {
+    await app.close();
   }
 });

@@ -75,6 +75,21 @@ class CatalogPageView {
   @ApiProperty({ type: ItemView, isArray: true }) items!: ItemView[];
   @ApiProperty({ type: String, nullable: true }) nextCursor!: string | null;
 }
+class PreviewItemView {
+  @ApiProperty({ format: 'uuid' }) productId!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() description!: string;
+  @ApiProperty({ format: 'uuid' }) categoryId!: string;
+  @ApiProperty({ format: 'uuid' }) variantId!: string;
+  @ApiProperty() variantName!: string;
+  @ApiProperty() sellingPaise!: string;
+  @ApiProperty() mrpPaise!: string;
+  @ApiProperty() discountPercent!: number;
+  @ApiProperty({ type: String, isArray: true }) images!: string[];
+}
+class CatalogPreviewView {
+  @ApiProperty({ type: PreviewItemView, isArray: true }) items!: PreviewItemView[];
+}
 class CategoryView {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() name!: string;
@@ -99,6 +114,13 @@ export class CustomerCatalogController {
     @Inject(CATALOG_QUERY) private readonly catalog: CatalogQuery,
     @Inject(SEARCH_PORT) private readonly searchPort: SearchPort,
   ) {}
+  @Get('catalog/preview')
+  @ApiOperation({ operationId: 'customerCatalogPreview' })
+  @ApiOkResponse({ type: CatalogPreviewView })
+  preview(@Res({ passthrough: true }) reply: FastifyReply) {
+    reply.header('Cache-Control', 'private, no-store');
+    return this.catalog.preview();
+  }
   private async read(
     principal: Principal,
     address: string | undefined,

@@ -7,6 +7,7 @@ import type { Json } from '../../src/platform/database/database.js';
 export interface PickingWorld {
   store: string;
   manager: string;
+  admin: string;
   picker1: string;
   picker2: string;
   category: string;
@@ -20,6 +21,7 @@ export async function seedPickingWorld(db: DatabaseHandle): Promise<PickingWorld
     city = uuidV7(),
     store = uuidV7(),
     manager = uuidV7(),
+    admin = uuidV7(),
     picker1 = uuidV7(),
     picker2 = uuidV7(),
     category = uuidV7(),
@@ -31,18 +33,26 @@ export async function seedPickingWorld(db: DatabaseHandle): Promise<PickingWorld
   await sql`INSERT INTO stores(id,legal_entity_id,city_id,name,location,status,hourly_capacity) VALUES(${store}::uuid,${entity}::uuid,${city}::uuid,'store',ST_SetSRID(ST_MakePoint(77.6,13),4326)::geography,'ONLINE',10)`.execute(
     db.db,
   );
-  const user = async (id: string, name: string, role: 'STORE_MANAGER' | 'PICKER') => {
+  const user = async (id: string, name: string) => {
     await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${id}::uuid,'WORKFORCE',${name},${`${name}@example.invalid`},${name})`.execute(
       db.db,
     );
-    await sql`INSERT INTO user_roles(user_id,role) VALUES(${id}::uuid,${role})`.execute(db.db);
-    await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${id}::uuid,${store}::uuid,${role})`.execute(
+    await sql`INSERT INTO user_roles(user_id,role) VALUES(${id}::uuid,'STORE_MANAGER')`.execute(
+      db.db,
+    );
+    await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${id}::uuid,${store}::uuid,'STORE_MANAGER')`.execute(
       db.db,
     );
   };
-  await user(manager, 'manager', 'STORE_MANAGER');
-  await user(picker1, 'picker1', 'PICKER');
-  await user(picker2, 'picker2', 'PICKER');
+  await user(manager, 'manager');
+  await user(picker1, 'picker1');
+  await user(picker2, 'picker2');
+  await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${admin}::uuid,'WORKFORCE',${admin},${`${admin}@example.invalid`},'Admin')`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
   await sql`INSERT INTO catalog_categories(id,name) VALUES(${category}::uuid,'Dairy')`.execute(
     db.db,
   );
@@ -52,6 +62,7 @@ export async function seedPickingWorld(db: DatabaseHandle): Promise<PickingWorld
   return {
     store,
     manager,
+    admin,
     picker1,
     picker2,
     category,
@@ -150,6 +161,11 @@ export function envelopeOf(event: {
 /** AdminConfig fake with auto_substitution on for substitution suites. */
 export function fakeAdmin(autoSubstitution = true) {
   return {
+    flag: async (key: string) => key === 'auto_substitution' && autoSubstitution,
+    get: (async (key: string) => {
+      if (key === 'pickingWeightToleranceBps') return 1000;
+      throw new Error(`unexpected config read: ${key}`);
+    }) as import('../../src/modules/app-config/contracts/config.js').AppConfig['get'],
     snapshot: async () => ({
       config: new Proxy({} as never, {
         get: (_t, key) => {

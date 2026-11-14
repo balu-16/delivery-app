@@ -85,6 +85,23 @@ test('FCM sends bounded multicast with stable collapse controls and maps ordered
   expect(send).toHaveBeenCalledTimes(3);
 });
 
+test('FCM limits rider-offer delivery to the remaining offer lifetime', async () => {
+  const now = Date.parse('2030-01-01T00:00:00.000Z');
+  jest.spyOn(Date, 'now').mockReturnValue(now);
+  const send = jest.fn<Promise<BatchResponse>, [MulticastMessage]>().mockResolvedValue({
+    successCount: 1,
+    failureCount: 0,
+    responses: [{ success: true, messageId: 'one' }],
+  });
+  await new FcmPush('{}', { sendEachForMulticast: send }).send(['token'], {
+    ...payload,
+    data: { ...payload.data, expiresAt: '2030-01-01T00:00:30.000Z' },
+  });
+  expect(send).toHaveBeenCalledWith(
+    expect.objectContaining({ android: expect.objectContaining({ ttl: 30000 }) }),
+  );
+});
+
 test('FCM rejects malformed credentials and wraps transport failures', async () => {
   expect(() => new FcmPush('{bad')).toThrow('INVALID_FCM_SERVICE_ACCOUNT');
   const send = jest

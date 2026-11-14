@@ -46,7 +46,7 @@ it('seeds repeatably in local mode and refuses production', async () => {
     }>(
       "SELECT (SELECT count(*)::int FROM users) AS users,(SELECT count(*)::int FROM user_roles WHERE role='SUPER_ADMIN') AS superadmins,(SELECT count(*)::int FROM stores) AS stores,(SELECT count(*)::int FROM zones) AS zones",
     );
-    expect(result.rows[0]).toEqual({ users: 8, superadmins: 2, stores: 3, zones: 3 });
+    expect(result.rows[0]).toEqual({ users: 6, superadmins: 2, stores: 3, zones: 3 });
     const catalog = await client.query(
       'SELECT (SELECT count(*)::int FROM catalog_products) AS products,(SELECT count(*)::int FROM catalog_variants) AS variants,(SELECT count(*)::int FROM catalog_prices) AS prices,(SELECT count(*)::int FROM store_inventory WHERE on_hand=0 AND reserved=0) AS zero_stock',
     );

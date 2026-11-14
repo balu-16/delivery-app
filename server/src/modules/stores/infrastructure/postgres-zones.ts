@@ -81,7 +81,7 @@ export class PostgresZones implements Zones {
     return this.db.transaction().execute(async (tx) => {
       if (
         actorId &&
-        (!this.identity || !(await this.identity.hasRole(actorId, ['ADMIN', 'SUPER_ADMIN'], tx)))
+        (!this.identity || !(await this.identity.hasRole(actorId, ['SUPER_ADMIN'], tx)))
       )
         throw new Error('FORBIDDEN');
       const { cityId, geojson } = await validateGeometry(tx, draft, area);
@@ -106,7 +106,7 @@ export class PostgresZones implements Zones {
     return this.db.transaction().execute(async (tx) => {
       if (
         actorId &&
-        (!this.identity || !(await this.identity.hasRole(actorId, ['ADMIN', 'SUPER_ADMIN'], tx)))
+        (!this.identity || !(await this.identity.hasRole(actorId, ['SUPER_ADMIN'], tx)))
       )
         throw new Error('FORBIDDEN');
       const old = await sql<{
@@ -131,7 +131,7 @@ export class PostgresZones implements Zones {
   }
   deactivate(id: string, expectedVersion: string, actorId: string): Promise<ZoneVersion> {
     return this.db.transaction().execute(async (tx) => {
-      if (!this.identity || !(await this.identity.hasRole(actorId, ['ADMIN', 'SUPER_ADMIN'], tx)))
+      if (!this.identity || !(await this.identity.hasRole(actorId, ['SUPER_ADMIN'], tx)))
         throw new Error('FORBIDDEN');
       const current = await sql<{
         store_id: string;

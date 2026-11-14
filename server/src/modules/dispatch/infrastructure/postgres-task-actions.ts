@@ -55,7 +55,7 @@ class CodMismatchError extends Error {
   }
 }
 
-type Effect = () => void;
+type Effect = () => void | Promise<void>;
 
 /**
  * Custody transitions (23.3): store arrival (geofence-flagged), verified
@@ -422,7 +422,7 @@ export class PostgresTaskActions {
           ['notifications'],
         );
         await releaseRiderTask(tx, riderId, now);
-        return { result: task.id, effects: [() => void this.dispatchNext(task.order_id)] };
+        return { result: task.id, effects: [() => this.dispatchNext(task.order_id)] };
       }
       if (
         ![

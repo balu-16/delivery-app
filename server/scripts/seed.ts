@@ -9,10 +9,8 @@ import { seedSubscriptions } from './seed-subscriptions.js';
 const users = [
   { sub: 'customer', pool: 'CUSTOMER', role: 'CUSTOMER' },
   { sub: 'rider', pool: 'WORKFORCE', role: 'RIDER' },
-  { sub: 'picker', pool: 'WORKFORCE', role: 'PICKER' },
   { sub: 'manager', pool: 'WORKFORCE', role: 'STORE_MANAGER' },
   { sub: 'support', pool: 'WORKFORCE', role: 'SUPPORT_AGENT' },
-  { sub: 'admin', pool: 'WORKFORCE', role: 'ADMIN' },
   { sub: 'super-admin-1', pool: 'WORKFORCE', role: 'SUPER_ADMIN' },
   { sub: 'super-admin-2', pool: 'WORKFORCE', role: 'SUPER_ADMIN' },
 ] as const;
@@ -84,7 +82,7 @@ const coupons = [
 ] as const;
 async function seedCoupons(client: Client): Promise<void> {
   const admin = await client.query<{ id: string }>(
-    "SELECT id FROM users WHERE pool='WORKFORCE' AND cognito_sub='admin' LIMIT 1",
+    "SELECT id FROM users WHERE pool='WORKFORCE' AND cognito_sub='super-admin-1' LIMIT 1",
   );
   const adminId = admin.rows[0]?.id;
   if (!adminId) throw new Error('Seed admin identity is required for coupons');
@@ -203,7 +201,7 @@ async function main(): Promise<void> {
           'INSERT INTO staff_profiles(user_id,employee_code) VALUES ($1,$2) ON CONFLICT DO NOTHING',
           [id, user.sub],
         );
-      if (user.role === 'PICKER' || user.role === 'STORE_MANAGER')
+      if (user.role === 'STORE_MANAGER')
         await client.query(
           'INSERT INTO store_staff(user_id,store_id,role) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
           [id, stores[0].id, user.role],

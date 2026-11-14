@@ -95,6 +95,10 @@ describe('production environment', () => {
     OLA_MAPS_BASE_URL: 'https://maps.example.com',
     METRICS_BEARER_TOKEN: 'a'.repeat(32),
     PICKING_HANDOVER_SECRET: 'h'.repeat(32),
+    // 32 base64 characters encode 24 bytes; production also demands a decodable
+    // 32-byte AES key, so use a real 44-character encoding of 32 bytes below.
+    ADMIN_SESSION_KEYS_JSON: JSON.stringify({ '1': Buffer.alloc(32, 7).toString('base64') }),
+    ADMIN_SESSION_KEY_VERSION: '1',
   };
   it('accepts a complete non-local provider configuration', () => {
     expect(readEnv(production).NODE_ENV).toBe('production');

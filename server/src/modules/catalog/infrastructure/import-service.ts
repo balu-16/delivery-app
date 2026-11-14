@@ -18,7 +18,7 @@ export class ImportService implements CatalogImports {
     factory: ApprovalFactory,
     private readonly queue?: Pick<ConcernQueues, 'enqueue'>,
   ) {
-    const action = (makerRole: 'ADMIN' | 'SUPER_ADMIN') => ({
+    const action = (makerRole: 'SUPER_ADMIN') => ({
       version: 1,
       makerRole,
       checkerRole: 'SUPER_ADMIN',
@@ -48,13 +48,12 @@ export class ImportService implements CatalogImports {
       },
     });
     this.approvals = factory.create({
-      CATALOG_IMPORT: action('ADMIN'),
+      CATALOG_IMPORT: action('SUPER_ADMIN'),
       CATALOG_IMPORT_SUPER: action('SUPER_ADMIN'),
     });
   }
   async create(owner: string, mediaId: string, storeId: string, dryRun: boolean) {
-    if (!(await this.identity.hasRole(owner, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(owner, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     const media = await sql<{
       object_key: string;
       size_bytes: string;
@@ -81,8 +80,7 @@ export class ImportService implements CatalogImports {
       .digest('hex');
     const id = uuidV7();
     const job = await this.db.transaction().execute(async (tx) => {
-      if (!(await this.identity.hasRole(owner, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(owner, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const inserted = await sql<{
         id: string;
       }>`INSERT INTO catalog_import_jobs(id,owner_id,media_id,fingerprint,dry_run,options,status) VALUES(${id}::uuid,${owner}::uuid,${mediaId}::uuid,${fingerprint},${dryRun},${JSON.stringify({ storeId })}::jsonb,'QUEUED') ON CONFLICT(fingerprint) DO UPDATE SET fingerprint=EXCLUDED.fingerprint RETURNING id`.execute(
@@ -94,8 +92,7 @@ export class ImportService implements CatalogImports {
     return job;
   }
   async get(owner: string, id: string) {
-    if (!(await this.identity.hasRole(owner, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(owner, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     const rows =
       await sql`SELECT id,status,dry_run AS "dryRun",rows_total AS "rowsTotal",checkpoint,errors,approval_id AS "approvalId",created_at AS "createdAt",updated_at AS "updatedAt" FROM catalog_import_jobs WHERE id=${id}::uuid`.execute(
         this.db,

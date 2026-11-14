@@ -62,7 +62,7 @@ class ImportView {
 @ApiResponse({ status: 503, description: 'Storage unavailable' })
 @Controller('v1/admin/catalog/imports')
 @ApiBearerAuth()
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 @UseInterceptors(DomainErrorInterceptor)
 export class AdminCatalogImportController {

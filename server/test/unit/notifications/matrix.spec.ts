@@ -144,6 +144,15 @@ describe('event matrix', () => {
     expect(
       planForEvent(event('dispatch.rider_offer_created', { userId: uuid(3), offerId: uuid(10) })),
     ).toMatchObject({ templateKey: 'rider.offer', pushPriority: 'HIGH' });
+    expect(
+      planForEvent(
+        event('rider.offer_created', {
+          userId: uuid(3),
+          offerId: uuid(10),
+          expiresAt: '2030-01-01T00:00:00.000Z',
+        }),
+      )?.data,
+    ).toMatchObject({ offerId: uuid(10), expiresAt: '2030-01-01T00:00:00.000Z' });
     expect(planForEvent(event('dispatch.offer_revoked', { userId: uuid(3) }))?.templateKey).toBe(
       'rider.offer_revoked',
     );

@@ -86,8 +86,7 @@ export class CatalogImportWorker {
     return true;
   }
   private async validate(job: Job, token: string) {
-    if (!(await this.identity.hasRole(job.owner_id, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(job.owner_id, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     const media = await sql<{
       object_key: string;
     }>`SELECT object_key FROM catalog_media WHERE id=${job.media_id}::uuid AND owner_id=${job.owner_id}::uuid AND purpose='CATALOG_IMPORT' AND state='REGISTERED'`.execute(
@@ -182,7 +181,7 @@ export class CatalogImportWorker {
     });
   }
   private async requestApproval(job: Job, token: string) {
-    const action = (await this.identity.hasRole(job.owner_id, ['ADMIN']))
+    const action = (await this.identity.hasRole(job.owner_id, ['SUPER_ADMIN']))
       ? 'CATALOG_IMPORT'
       : 'CATALOG_IMPORT_SUPER';
     const id = await this.imports.approvals.request(job.owner_id, action, {
@@ -204,7 +203,7 @@ export class CatalogImportWorker {
         tx,
       );
       if (!locked.rows[0]) throw new Error('IMPORT_LEASE_LOST');
-      if (!(await this.identity.hasRole(job.owner_id, ['ADMIN', 'SUPER_ADMIN'], tx)))
+      if (!(await this.identity.hasRole(job.owner_id, ['SUPER_ADMIN'], tx)))
         throw new Error('FORBIDDEN');
       const rows = await sql<{
         row_number: number;

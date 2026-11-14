@@ -1,4 +1,5 @@
 import { sql } from 'kysely';
+import { Logger } from '@nestjs/common';
 import {
   databaseTimeAfterLock,
   transactionWithRetry,
@@ -30,6 +31,8 @@ interface OfferRow {
   expires_at: Date;
   amount_due_paise: string | null;
   payment_method: string | null;
+  store_name: string;
+  order_number: string;
 }
 
 function mapOffer(row: OfferRow): OfferView {
@@ -41,10 +44,12 @@ function mapOffer(row: OfferRow): OfferView {
     attemptNo: row.attempt_no,
     expiresAt: row.expires_at.toISOString(),
     codAmountPaise: row.payment_method === 'COD' ? row.amount_due_paise : null,
+    storeName: row.store_name,
+    orderNumber: row.order_number,
   };
 }
 
-type Effect = () => void;
+type Effect = () => void | Promise<void>;
 export interface TaskOutcome<T> {
   result: T;
   effects?: Effect[];
@@ -69,20 +74,25 @@ export class PostgresDeliveryTasks {
     const outcome = await transactionWithRetry(this.db, fn);
     for (const effect of outcome.effects ?? [])
       try {
-        effect();
+        const pending = effect();
+        if (pending)
+          void pending.catch(() =>
+            Logger.error('Post-commit delivery effect failed', undefined, 'Dispatch'),
+          );
       } catch {
-        // emissions are best-effort; HTTP polling is the fallback
+        Logger.error('Post-commit delivery effect failed', undefined, 'Dispatch');
       }
     return outcome.result;
   }
 
   async offers(riderId: string): Promise<OfferPage> {
     const rows =
-      await sql<OfferRow>`SELECT o.id,o.task_id,t.order_id,t.store_id,o.attempt_no,o.expires_at,
+      await sql<OfferRow>`SELECT o.id,o.task_id,t.order_id,t.store_id,o.attempt_no,o.expires_at,s.name AS store_name,ord.order_number,
       COALESCE((SELECT expected_amount_paise FROM cod_collections WHERE order_id=ord.id),ord.amount_due_paise)::text AS "amount_due_paise",ord.payment_method
       FROM rider_offers o
       JOIN delivery_tasks t ON t.id=o.task_id
       JOIN orders ord ON ord.id=t.order_id
+      JOIN stores s ON s.id=t.store_id
       WHERE o.rider_id=${riderId}::uuid AND o.status='SENT' AND o.expires_at > clock_timestamp()
       ORDER BY o.sent_at, o.id LIMIT 20`.execute(this.db);
     return { items: rows.rows.map(mapOffer) };

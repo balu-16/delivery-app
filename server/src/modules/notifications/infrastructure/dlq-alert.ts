@@ -43,7 +43,7 @@ export class DlqGrowthAlert {
       return 0;
     const admins = await sql<{
       id: string;
-    }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role IN ('ADMIN','SUPER_ADMIN') AND u.status='ACTIVE' ORDER BY u.id LIMIT 500`.execute(
+    }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role IN ('SUPER_ADMIN') AND u.status='ACTIVE' ORDER BY u.id LIMIT 500`.execute(
       this.db,
     );
     if (!admins.rows.length) return 0;

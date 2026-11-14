@@ -65,7 +65,7 @@ export class OrderIntegrationService
     tx?: TransactionContext,
   ): Promise<void> {
     if (!tx) throw new Error('TRANSACTION_REQUIRED');
-    const actor: Actor = { type: 'PICKER', id: actorId };
+    const actor: Actor = { type: 'STORE_MANAGER', id: actorId };
     await this.orders.transition(
       orderId,
       'DELIVERY_FAILED',

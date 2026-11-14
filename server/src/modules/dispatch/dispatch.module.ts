@@ -15,6 +15,7 @@ import {
   BeforeApplicationShutdown,
   Inject,
   Injectable,
+  Logger,
   Module,
   OnApplicationBootstrap,
 } from '@nestjs/common';
@@ -93,6 +94,8 @@ import { DispatchRealtimeLifecycle } from './infrastructure/realtime.js';
 import { DispatchSettings } from './infrastructure/settings.js';
 import { ManualAssignment } from './infrastructure/manual-assignment.js';
 import { CanonicalDeliveryCodes } from './infrastructure/canonical-codes.js';
+import { RiderTaskReads } from './infrastructure/rider-task-reads.js';
+import { RIDER_TASK_READS } from './contracts/tasks.js';
 import { DELIVERY_ASSIGNMENT, WRONG_ADDRESS } from './contracts/tasks.js';
 
 /** Outbox consumer name: P6 routes ORDER_CONFIRMED deliveries to 'dispatch'. */
@@ -109,11 +112,18 @@ export function taskRunner(db: Database) {
     fn: (tx: TransactionContext) => Promise<TaskOutcome<T>>,
   ): Promise<T> {
     const outcome = await transactionWithRetry(db, fn);
+    const report = () =>
+      Logger.error(
+        'Post-commit dispatch effect failed; the scheduled sweep will retry',
+        undefined,
+        'Dispatch',
+      );
     for (const effect of outcome.effects ?? [])
       try {
-        effect();
+        const pending = effect();
+        if (pending) void pending.catch(report);
       } catch {
-        // emissions never break order flow; polling is the fallback
+        report();
       }
     return outcome.result;
   };
@@ -133,6 +143,13 @@ export const TASK_RUNNER = Symbol('DISPATCH_TASK_RUNNER');
     InventoryModule,
   ],
   providers: [
+    {
+      provide: RiderTaskReads,
+      inject: [PLATFORM_DATABASE, PostgresDeliveryTasks],
+      useFactory: (handle: DatabaseHandle, tasks: PostgresDeliveryTasks) =>
+        new RiderTaskReads(handle.db, tasks),
+    },
+    { provide: RIDER_TASK_READS, useExisting: RiderTaskReads },
     {
       provide: WRONG_ADDRESS,
       inject: [TASK_RUNNER, DispatchSettings, ORDER_DELIVERY, REALTIME_BROADCASTS],
@@ -306,6 +323,7 @@ export const TASK_RUNNER = Symbol('DISPATCH_TASK_RUNNER');
     DELIVERY_RETURN,
     DELIVERY_POD,
     DELIVERY_TASKS,
+    RIDER_TASK_READS,
     DELIVERY_TASK_CANCELLATION,
     DELIVERY_CODES,
     CUSTOMER_TRACKING,
@@ -338,10 +356,7 @@ class DispatchWorkerLifecycle implements OnApplicationBootstrap, BeforeApplicati
   ) {
     this.maintenance = new DispatchMaintenance(handle.db, settings, engine, broadcasts);
     this.consumer = new OrderConfirmedConsumer(config, codes);
-    this.trigger = new PickTriggerConsumer(
-      () => settings.trigger(),
-      (orderId) => engine.dispatchOne(orderId).then(() => undefined),
-    );
+    this.trigger = new PickTriggerConsumer(() => settings.trigger());
   }
   onApplicationBootstrap(): void {
     this.queue.registerHandler(DISPATCH_CONSUMER, (tx, event) =>

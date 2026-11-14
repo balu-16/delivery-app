@@ -71,6 +71,10 @@ export class FcmPush implements PushPort {
     identifierType: 'FCM_TOKEN' | 'FID' = 'FCM_TOKEN',
   ): Promise<PushTokenResult[]> {
     if (!tokens.length || tokens.length > MAX_BATCH) throw new Error('INVALID_INPUT');
+    const expiresAt = Date.parse(payload.data['expiresAt'] ?? '');
+    const ttl = Number.isFinite(expiresAt)
+      ? Math.min(2419200000, Math.max(0, expiresAt - Date.now()))
+      : undefined;
     let response: import('firebase-admin/messaging').BatchResponse;
     try {
       // firebase-admin exposes no per-call timeout; the HTTP agent timeout is
@@ -94,6 +98,7 @@ export class FcmPush implements PushPort {
           android: {
             priority: payload.priority === 'HIGH' ? 'high' : 'normal',
             collapseKey: payload.data['collapseKey'],
+            ...(ttl !== undefined ? { ttl } : {}),
             notification: { channelId: 'default' },
           },
           webpush: {

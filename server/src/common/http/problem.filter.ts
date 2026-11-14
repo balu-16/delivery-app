@@ -37,6 +37,16 @@ export function createProblem(status: number, traceId: string, supplied?: unknow
   return { type: 'about:blank', title, status, code, detail: title, traceId };
 }
 
+/** Root cause for operators only — `key=value` pairs are redacted before logging. */
+export function redactCause(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const message = error.message.replace(
+    /([A-Za-z][A-Za-z0-9_]{2,30})=(?!\s*$)[^\s;&,]+/g,
+    '$1=[redacted]',
+  );
+  return `${error.name}: ${message}`;
+}
+
 /** Stable problem response without reflecting validation or infrastructure details. */
 @Catch()
 export class ProblemFilter implements ExceptionFilter {
@@ -53,7 +63,14 @@ export class ProblemFilter implements ExceptionFilter {
     const problem = createProblem(status, request.id, supplied);
     if (status >= 500)
       this.logger?.error(
-        { traceId: request.id, method: request.method, status, code: problem.code },
+        {
+          traceId: request.id,
+          method: request.method,
+          status,
+          code: problem.code,
+          // Root cause for operators only; responses stay generic (see createProblem).
+          cause: redactCause(error),
+        },
         'HTTP request failed',
       );
     reply.status(status).type('application/problem+json').send(problem);

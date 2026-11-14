@@ -1,6 +1,7 @@
 import { Controller, Get, Headers, Inject, NotFoundException, Optional, Res } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { timingSafeEqual } from 'node:crypto';
+import { sql } from 'kysely';
 import type { FastifyReply } from 'fastify';
 import { ConfigService } from '../../config/config.service.js';
 import {
@@ -78,6 +79,16 @@ export class MetricsController {
         );
       } catch {
         /* readiness reports database unavailability */
+      }
+      try {
+        const suspended = await sql<{ count: string }>`SELECT count(*)::text AS count
+          FROM invoice_documents WHERE render_suspended_at IS NOT NULL`.execute(this.database.db);
+        lines.push(
+          '# TYPE delivery_invoice_render_suspended gauge',
+          `delivery_invoice_render_suspended ${Number(suspended.rows[0]?.count ?? 0)}`,
+        );
+      } catch {
+        /* Readiness reports database unavailability; older schemas may not have this metric yet. */
       }
     }
     if (this.concerns) {

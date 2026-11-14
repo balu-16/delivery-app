@@ -88,7 +88,7 @@ async function response<T>(work: () => Promise<T>): Promise<T> {
 @ApiResponse({ status: 403, description: 'Admin role required' })
 @ApiResponse({ status: 404, description: 'Resource not found' })
 @ApiResponse({ status: 409, description: 'Conflicting or referenced resource' })
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 export class StoreAdministrationController {
   constructor(@Inject(STORE_ADMINISTRATION) private readonly admin: StoreAdministration) {}

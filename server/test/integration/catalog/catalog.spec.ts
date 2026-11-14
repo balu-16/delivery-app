@@ -59,7 +59,7 @@ beforeAll(async () => {
     await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${id}::uuid,${pool},${sub},${sub + '@example.com'},${sub})`.execute(
       db.db,
     );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'ADMIN'),(${user}::uuid,'CUSTOMER'),(${otherUser}::uuid,'CUSTOMER'),(${superMaker}::uuid,'SUPER_ADMIN'),(${superChecker}::uuid,'SUPER_ADMIN')`.execute(
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'SUPER_ADMIN'),(${user}::uuid,'CUSTOMER'),(${otherUser}::uuid,'CUSTOMER'),(${superMaker}::uuid,'SUPER_ADMIN'),(${superChecker}::uuid,'SUPER_ADMIN')`.execute(
     db.db,
   );
   await sql`INSERT INTO legal_entities(id,name) VALUES(${entity}::uuid,'entity')`.execute(db.db);
@@ -227,7 +227,7 @@ describe('catalog using PostGIS and temporal prices', () => {
       'Apple Cheap',
     ]);
   });
-  it('requires a distinct checker for a super-admin price maker and keeps price history', async () => {
+  it('allows an audited super-admin approval and keeps price history', async () => {
     await sql`INSERT INTO catalog_prices(id,store_id,variant_id,selling_paise,mrp_paise,valid_from,created_by) VALUES(${uuidV7()}::uuid,${otherStore}::uuid,${variant}::uuid,1000,2000,clock_timestamp()-interval '1 hour',${admin}::uuid)`.execute(
       db.db,
     );
@@ -240,11 +240,8 @@ describe('catalog using PostGIS and temporal prices', () => {
       validFrom: nominal.toISOString(),
     });
     expect(result.approvalId).toBeTruthy();
-    await expect(catalog.approve(superMaker, result.approvalId!)).rejects.toThrow(
-      'APPROVAL_INVALID',
-    );
     await new Promise((resolve) => setTimeout(resolve, 700));
-    await catalog.approve(superChecker, result.approvalId!);
+    await catalog.approve(superMaker, result.approvalId!);
     const rows = await sql<{
       selling_paise: string;
       valid_to: Date | null;
@@ -573,18 +570,45 @@ describe('catalog using PostGIS and temporal prices', () => {
 });
 
 it('lists only categories with an active priced item for the owned delivery address', async () => {
-  expect(await query.categories(user, address)).toEqual([{ id: category, name: 'Dairy' }]);
-  await expect(query.categories(otherUser, address)).rejects.toThrow('ADDRESS_NOT_SERVICEABLE');
-  await sql`UPDATE catalog_prices SET valid_to=statement_timestamp() WHERE store_id=${store}::uuid AND variant_id=${variant}::uuid`.execute(
+  // The preceding expiry test closes the current price and retains history.
+  const currentPrice = uuidV7(),
+    testCategory = uuidV7(),
+    testProduct = uuidV7(),
+    testVariant = uuidV7(),
+    testPrice = uuidV7();
+  await sql`INSERT INTO catalog_prices(id,store_id,variant_id,selling_paise,mrp_paise,valid_from,created_by)
+    VALUES(${currentPrice}::uuid,${store}::uuid,${variant}::uuid,9000,10000,clock_timestamp(),${admin}::uuid)`.execute(
     db.db,
   );
-  try {
-    expect(await query.categories(user, address)).toEqual([]);
-  } finally {
-    await sql`UPDATE catalog_prices SET valid_to=NULL WHERE store_id=${store}::uuid AND variant_id=${variant}::uuid`.execute(
-      db.db,
-    );
-  }
+  await sql`INSERT INTO catalog_categories(id,name) VALUES(${testCategory}::uuid,'Category visibility')`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO catalog_products(id,category_id,name,normalized_name,hsn_code,gst_rate_bps,published)
+    VALUES(${testProduct}::uuid,${testCategory}::uuid,'Visibility item','visibility item','0401',500,true)`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO catalog_variants(id,product_id,name,sku) VALUES(${testVariant}::uuid,${testProduct}::uuid,'Unit',${testVariant})`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO store_inventory(store_id,variant_id) VALUES(${store}::uuid,${testVariant}::uuid)`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO catalog_prices(id,store_id,variant_id,selling_paise,mrp_paise,valid_from,created_by)
+    VALUES(${testPrice}::uuid,${store}::uuid,${testVariant}::uuid,100,100,clock_timestamp(),${admin}::uuid)`.execute(
+    db.db,
+  );
+  expect(await query.categories(user, address)).toContainEqual({
+    id: testCategory,
+    name: 'Category visibility',
+  });
+  await expect(query.categories(otherUser, address)).rejects.toThrow('ADDRESS_NOT_SERVICEABLE');
+  await sql`UPDATE catalog_prices SET valid_to=statement_timestamp() WHERE id=${testPrice}::uuid`.execute(
+    db.db,
+  );
+  expect(await query.categories(user, address)).not.toContainEqual({
+    id: testCategory,
+    name: 'Category visibility',
+  });
 });
 
 it('persists favorites per customer and safely repeats add and remove', async () => {

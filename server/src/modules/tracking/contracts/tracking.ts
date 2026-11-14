@@ -92,6 +92,7 @@ export interface ActiveOrderState {
 export const ACTIVE_ORDER_RESOLVER = Symbol('ACTIVE_ORDER_RESOLVER');
 export interface ActiveOrderResolver {
   activeOrderForRider(riderId: string): Promise<ActiveOrderState | null>;
+  activeOrdersForRider?(riderId: string): Promise<ActiveOrderState[]>;
 }
 
 /** Boot-time registry; dispatch registers the implementation. */

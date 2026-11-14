@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isAbsolute, resolve } from 'node:path';
+import { isIP } from 'node:net';
 
 const positiveInteger = (fallback: number) => z.coerce.number().int().positive().default(fallback);
 const optional = z.string().default('');
@@ -16,6 +17,7 @@ const envBaseSchema = z
       .default('info'),
     APP_BASE_URL: url('http://localhost:3000'),
     CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:5173'),
+    TRUSTED_PROXY_CIDRS: optional,
     SHUTDOWN_TIMEOUT_MS: positiveInteger(15000),
     HTTP_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(15000),
     HTTP_HEADERS_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
@@ -47,10 +49,15 @@ const envBaseSchema = z
     PICKING_HANDOVER_SECRET: z.string().default('picking-handover-local-dev-secret-v1'),
     PICKING_CODE_KEY_VERSION: z.coerce.number().int().positive().default(1),
     PICKING_CODE_KEYS_JSON: z.string().default('{}'),
+    ADMIN_SESSION_KEYS_JSON: z.string().default('{}'),
+    ADMIN_SESSION_KEY_VERSION: z.coerce.number().int().positive().default(1),
+    ADMIN_SESSION_IDLE_SECONDS: z.coerce.number().int().min(60).max(86400).default(28800),
+    ADMIN_SESSION_ABSOLUTE_SECONDS: z.coerce.number().int().min(300).max(2592000).default(604800),
     AWS_REGION: z.string().default('ap-south-1'),
     AWS_ACCOUNT_ID: optional,
     COGNITO_CUSTOMER_POOL_ID: optional,
     COGNITO_CUSTOMER_CLIENT_ID: optional,
+    CUSTOMER_GROUP_SYNC_QUEUE_URL: optional,
     COGNITO_WORKFORCE_POOL_ID: optional,
     COGNITO_RIDER_CLIENT_ID: optional,
     COGNITO_STORE_CLIENT_ID: optional,
@@ -63,6 +70,8 @@ const envBaseSchema = z
     AWS_S3_PROFILE: optional,
     S3_ENDPOINT: optional,
     CDN_BASE_URL: optional,
+    // A server-selected store supplies indicative prices before an address is chosen.
+    CATALOG_PREVIEW_STORE_ID: z.union([z.literal(''), z.string().uuid()]).default(''),
     SES_FROM_ADDRESS: optional,
     SMTP_URL: z.string().default('smtp://localhost:1025'),
     FCM_SERVICE_ACCOUNT_JSON_SECRET: optional,
@@ -89,6 +98,7 @@ const envBaseSchema = z
     RATE_LIMIT_AUTH_PER_MIN: positiveInteger(20),
     RATE_LIMIT_SEARCH_PER_MIN: positiveInteger(30),
     RATE_LIMIT_LOCATION_PER_MIN: positiveInteger(30),
+    RATE_LIMIT_WEBHOOK_PER_MIN: positiveInteger(1200),
     // Extras: HTTP body hard cap, bearer secret for operational metrics.
     HTTP_BODY_LIMIT_BYTES: positiveInteger(1048576),
     PRIVATE_UPLOAD_MAX_BYTES: positiveInteger(5242880),
@@ -127,6 +137,24 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
   const origins = env.CORS_ALLOWED_ORIGINS.split(',')
     .map((x) => x.trim())
     .filter(Boolean);
+  if (env.TRUSTED_PROXY_CIDRS) {
+    const networks = env.TRUSTED_PROXY_CIDRS.split(',');
+    if (
+      networks.some((network) => {
+        const [address, prefix, ...extra] = network.trim().split('/');
+        const family = address ? isIP(address) : 0;
+        return (
+          extra.length > 0 ||
+          !family ||
+          (prefix !== undefined &&
+            (!/^\d{1,3}$/.test(prefix) ||
+              Number(prefix) < 1 ||
+              Number(prefix) > (family === 4 ? 32 : 128)))
+        );
+      })
+    )
+      fail('TRUSTED_PROXY_CIDRS', 'Expected explicit trusted proxy IP addresses or CIDR ranges');
+  }
   if (!isAbsolute(env.LOCAL_PRIVATE_STORAGE_DIR))
     fail('LOCAL_PRIVATE_STORAGE_DIR', 'Expected an absolute path');
   if (!isAbsolute(env.LOCAL_CATALOG_STORAGE_DIR))
@@ -182,6 +210,29 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
     )
       fail('SQS_QUEUE_PREFIX', 'Production requires an explicit non-development SQS queue prefix');
   }
+  if (env.CUSTOMER_GROUP_SYNC_QUEUE_URL) {
+    try {
+      const queue = new URL(env.CUSTOMER_GROUP_SYNC_QUEUE_URL);
+      if (
+        env.AUTH_PROVIDER !== 'cognito' ||
+        !/^[0-9]{12}$/.test(env.AWS_ACCOUNT_ID) ||
+        queue.protocol !== 'https:' ||
+        queue.hostname !== `sqs.${env.AWS_REGION}.amazonaws.com` ||
+        queue.port ||
+        queue.username ||
+        queue.password ||
+        queue.search ||
+        queue.hash ||
+        !new RegExp(`^/${env.AWS_ACCOUNT_ID}/[a-zA-Z0-9_-]{1,80}$`).test(queue.pathname)
+      )
+        throw new Error('Invalid queue');
+    } catch {
+      fail(
+        'CUSTOMER_GROUP_SYNC_QUEUE_URL',
+        'Expected an SQS queue in the configured AWS region and account',
+      );
+    }
+  }
   if (env.DATABASE_AUTH === 'iam') {
     need(['AWS_REGION']);
     try {
@@ -225,6 +276,49 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
   } catch {
     fail('PICKING_CODE_KEYS_JSON', 'Invalid code key ring');
   }
+  try {
+    const ring: unknown = JSON.parse(env.ADMIN_SESSION_KEYS_JSON);
+    const entries =
+      ring !== null && typeof ring === 'object' && !Array.isArray(ring)
+        ? Object.entries(ring as Record<string, unknown>)
+        : null;
+    const wellFormed =
+      entries !== null &&
+      entries.every(([k, v]) => {
+        if (!/^[1-9]\d*$/.test(k) || typeof v !== 'string') return false;
+        try {
+          return Buffer.from(v, 'base64').length === 32;
+        } catch {
+          return false;
+        }
+      });
+    if (env.NODE_ENV === 'production') {
+      if (entries === null || !wellFormed || entries.length === 0)
+        fail(
+          'ADMIN_SESSION_KEYS_JSON',
+          'Required in production: positive key versions mapped to base64 32-byte AES-256 secrets',
+        );
+      else if (Object.values(ring as Record<string, string>).some((value) => value.length < 32))
+        fail(
+          'ADMIN_SESSION_KEYS_JSON',
+          'Production session secrets must be at least 32 characters',
+        );
+      else if (!Object.hasOwn(ring as object, String(env.ADMIN_SESSION_KEY_VERSION)))
+        fail('ADMIN_SESSION_KEY_VERSION', 'Current version must exist in the session key ring');
+    } else if (entries !== null && entries.length > 0) {
+      if (!wellFormed)
+        fail(
+          'ADMIN_SESSION_KEYS_JSON',
+          'Expected positive key versions mapped to base64 32-byte AES-256 secrets',
+        );
+      else if (!Object.hasOwn(ring as object, String(env.ADMIN_SESSION_KEY_VERSION)))
+        fail('ADMIN_SESSION_KEY_VERSION', 'Current version must exist in the session key ring');
+    }
+  } catch {
+    fail('ADMIN_SESSION_KEYS_JSON', 'Invalid session key ring');
+  }
+  if (env.ADMIN_SESSION_IDLE_SECONDS > env.ADMIN_SESSION_ABSOLUTE_SECONDS)
+    fail('ADMIN_SESSION_IDLE_SECONDS', 'Idle window must not exceed the absolute session window');
   if (env.PAYMENTS_PROVIDER === 'razorpay')
     need(['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET']);
   if (env.MAPS_PROVIDER === 'ola') need(['OLA_MAPS_API_KEY', 'OLA_MAPS_BASE_URL']);

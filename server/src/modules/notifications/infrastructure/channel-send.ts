@@ -104,6 +104,13 @@ export class ChannelSender {
     now: Date,
     templates: readonly TemplateRow[],
   ): Promise<'SENT' | 'SKIPPED' | 'RETRY'> {
+    const expiresAt = Date.parse(context.data['expiresAt'] ?? '');
+    if (
+      context.templateKey === 'rider.offer' &&
+      Number.isFinite(expiresAt) &&
+      expiresAt <= now.getTime()
+    )
+      return this.skip(context, 'OFFER_EXPIRED');
     if (!UUID.test(context.recipientId)) return this.skip(context, 'NO_ACTIVE_DEVICES');
     const campaignId =
       typeof context.payload['campaignId'] === 'string' && UUID.test(context.payload['campaignId'])

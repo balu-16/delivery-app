@@ -66,12 +66,7 @@ export class PostgresPacking implements PickPacking, HandoverCodes, HandoverStat
       );
       if (!task.rows[0]) throw new Error('PICK_TASK_NOT_COMPLETE');
       if (
-        !(await this.identity.hasStoreRole(
-          actorId,
-          task.rows[0].store_id,
-          ['PICKER', 'STORE_MANAGER'],
-          tx,
-        ))
+        !(await this.identity.hasStoreRole(actorId, task.rows[0].store_id, ['STORE_MANAGER'], tx))
       )
         throw new Error('RESOURCE_NOT_FOUND');
       if (!(await operation(tx, `pack:${orderId}:${reference}`, 'PACK', { orderId, input }))) {
@@ -201,14 +196,7 @@ export class PostgresPacking implements PickPacking, HandoverCodes, HandoverStat
       );
       const record_ = record.rows[0];
       if (!record_) throw new Error('HANDOVER_NOT_READY');
-      if (
-        !(await this.identity.hasStoreRole(
-          actorId,
-          record_.store_id,
-          ['PICKER', 'STORE_MANAGER'],
-          tx,
-        ))
-      )
+      if (!(await this.identity.hasStoreRole(actorId, record_.store_id, ['STORE_MANAGER'], tx)))
         throw new Error('RESOURCE_NOT_FOUND');
       const custody = await sql`SELECT id FROM delivery_tasks WHERE order_id=${input.orderId}::uuid
         AND rider_id IS NOT NULL AND (${record_.rider_id}::uuid IS NULL OR rider_id=${record_.rider_id}::uuid)

@@ -534,7 +534,9 @@ test('wrong address requires rider flag and audited admin failure after the wait
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${admin}::uuid,'WORKFORCE',${admin},${`${admin}@example.invalid`},'admin')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'ADMIN')`.execute(db.db);
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
   await sql`UPDATE orders SET status='OUT_FOR_DELIVERY' WHERE id=${order.orderId}::uuid`.execute(
     db.db,
   );

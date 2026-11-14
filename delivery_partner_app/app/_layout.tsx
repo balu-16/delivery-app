@@ -9,6 +9,7 @@ import {
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import "react-native-reanimated";
+import "../src/tracking";
 export default function Layout() {
   const [loaded, error] = useFonts({
     Poppins_400Regular,

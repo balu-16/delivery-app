@@ -11,8 +11,8 @@ export type AuthErrorCode =
   | 'INVALID_CREDENTIALS' | 'EMAIL_NOT_VERIFIED' | 'ACCOUNT_EXISTS' | 'INVALID_PASSWORD'
   | 'INVALID_CODE' | 'EXPIRED_CODE' | 'RATE_LIMITED' | 'RESET_REQUIRED' | 'INVALID_INPUT'
   | 'COGNITO_UNAVAILABLE' | 'COGNITO_UNREACHABLE' | 'AUTH_CONFIGURATION'
-  | 'BACKEND_UNREACHABLE' | 'BACKEND_CONFIGURATION' | 'UNSUPPORTED_CHALLENGE'
-  | 'CHALLENGE_EXPIRED' | 'MISSING_ATTRIBUTE' | 'UNKNOWN';
+  | 'BACKEND_UNREACHABLE' | 'BACKEND_CONFIGURATION' | 'BACKEND_DISCOVERY' | 'UNSUPPORTED_CHALLENGE'
+  | 'CHALLENGE_EXPIRED' | 'MISSING_ATTRIBUTE' | 'GROUP_PENDING' | 'UNKNOWN';
 
 const messages: Record<AuthErrorCode, string> = {
   INVALID_CREDENTIALS: 'The email or password is incorrect. Check both and try again.',
@@ -29,9 +29,11 @@ const messages: Record<AuthErrorCode, string> = {
   AUTH_CONFIGURATION: 'Sign-in is not configured correctly. Please contact support.',
   BACKEND_UNREACHABLE: 'Your email and password were accepted, but the customer server could not be reached. Check that the server is running and your phone is on the same Wi-Fi, then try signing in again.',
   BACKEND_CONFIGURATION: 'The customer server address is not configured correctly. Please contact support.',
+  BACKEND_DISCOVERY: 'Could not find the customer server from Expo. Start Expo in LAN mode on the same computer as the server, then reconnect.',
   UNSUPPORTED_CHALLENGE: 'This account needs additional verification that is not available here yet. Please contact support.',
   CHALLENGE_EXPIRED: 'Your password-change session has expired. Sign in again with your temporary password.',
   MISSING_ATTRIBUTE: 'Fill in the required account details before continuing.',
+  GROUP_PENDING: 'Your customer account is still being set up. Please try signing in again shortly.',
   UNKNOWN: 'We could not complete this request. Please try again or contact support.',
 };
 

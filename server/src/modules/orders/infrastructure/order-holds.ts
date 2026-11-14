@@ -30,7 +30,7 @@ export class OrderHoldService implements OrderHolds {
     await transactionWithRetry(this.db, async (tx) => {
       const admin = await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id
         WHERE u.id=${adminId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE'
-        AND r.role IN ('ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(tx);
+        AND r.role IN ('SUPER_ADMIN') FOR SHARE OF u,r`.execute(tx);
       if (!admin.rows.length) throw new Error('FORBIDDEN');
       const order = await sql<{
         status: string;

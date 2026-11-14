@@ -170,12 +170,33 @@ export class InvoiceIssuer implements InvoicingOperations {
   }
   /** Rendering happens after issuance; failures retry the SAME number. */
   async renderDue(limit: number): Promise<number> {
-    const due = await sql<DocumentRow>`SELECT ${sql.raw(COLUMNS)} FROM invoice_documents
-      WHERE renderer_state IN ('PENDING','FAILED') ORDER BY created_at LIMIT ${limit}`.execute(
-      this.db,
-    );
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('INVALID_PAGE');
+    // A worker that dies during its fifth attempt must still be suspended.
+    await sql`UPDATE invoice_documents SET renderer_state='FAILED',render_suspended_at=clock_timestamp(),
+      render_lease_token=NULL,render_lease_until=NULL,updated_at=clock_timestamp()
+      WHERE renderer_state IN ('PENDING','FAILED') AND render_attempts>=5 AND render_suspended_at IS NULL
+        AND (render_lease_until IS NULL OR render_lease_until<=clock_timestamp())`.execute(this.db);
     let rendered = 0;
-    for (const row of due.rows) {
+    for (let index = 0; index < limit; index++) {
+      const token = uuidV7();
+      const claimed = await this.db.transaction().execute(async (tx) => {
+        const due = await sql<DocumentRow>`SELECT ${sql.raw(COLUMNS)} FROM invoice_documents
+          WHERE renderer_state IN ('PENDING','FAILED') AND render_suspended_at IS NULL AND render_attempts<5
+            AND (render_next_attempt_at IS NULL OR render_next_attempt_at<=clock_timestamp())
+            AND (render_lease_until IS NULL OR render_lease_until<=clock_timestamp())
+          ORDER BY COALESCE(render_next_attempt_at,created_at),created_at,id FOR UPDATE SKIP LOCKED LIMIT 1`.execute(
+          tx,
+        );
+        const row = due.rows[0];
+        if (!row) return null;
+        await sql`UPDATE invoice_documents SET render_attempts=render_attempts+1,render_lease_token=${token}::uuid,
+          render_lease_until=clock_timestamp()+interval '2 minutes',updated_at=clock_timestamp() WHERE id=${row.id}::uuid`.execute(
+          tx,
+        );
+        return row;
+      });
+      if (!claimed) break;
+      const row = claimed;
       try {
         const body = await this.renderer.render(row.payload, row.number);
         const bytes = Buffer.from(body, 'utf8'),
@@ -197,15 +218,69 @@ export class InvoiceIssuer implements InvoicingOperations {
           )
             throw error;
         }
-        await sql`UPDATE invoice_documents SET renderer_state='RENDERED',rendered_at=clock_timestamp(),updated_at=clock_timestamp()
-          WHERE id=${row.id}::uuid`.execute(this.db);
-        rendered += 1;
+        const saved =
+          await sql`UPDATE invoice_documents SET renderer_state='RENDERED',rendered_at=clock_timestamp(),
+          render_lease_token=NULL,render_lease_until=NULL,render_next_attempt_at=NULL,updated_at=clock_timestamp()
+          WHERE id=${row.id}::uuid AND render_lease_token=${token}::uuid AND renderer_state<>'RENDERED'`.execute(
+            this.db,
+          );
+        if (saved.numAffectedRows) rendered += 1;
       } catch {
-        await sql`UPDATE invoice_documents SET renderer_state='FAILED',updated_at=clock_timestamp()
-          WHERE id=${row.id}::uuid AND renderer_state <> 'RENDERED'`.execute(this.db);
+        await sql`UPDATE invoice_documents SET renderer_state='FAILED',render_lease_token=NULL,render_lease_until=NULL,
+          render_suspended_at=CASE WHEN render_attempts>=5 THEN clock_timestamp() ELSE NULL END,
+          render_next_attempt_at=CASE WHEN render_attempts>=5 THEN NULL ELSE clock_timestamp()+
+            (LEAST(3600,60*power(2,LEAST(render_attempts-1,6)))+random())*interval '1 second' END,
+          updated_at=clock_timestamp() WHERE id=${row.id}::uuid AND render_lease_token=${token}::uuid
+            AND renderer_state <> 'RENDERED'`.execute(this.db);
       }
     }
     return rendered;
+  }
+  async listRenderFailures(limit: number, cursor?: string) {
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 100 ||
+      (cursor && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cursor))
+    )
+      throw new Error('INVALID_PAGE');
+    const result = await sql<{
+      id: string;
+      number: string;
+      render_attempts: number;
+      render_suspended_at: Date;
+    }>`
+      SELECT id::text,number,render_attempts,render_suspended_at FROM invoice_documents
+      WHERE render_suspended_at IS NOT NULL AND (${cursor ?? null}::uuid IS NULL OR id<${cursor ?? null}::uuid)
+      ORDER BY id DESC LIMIT ${limit + 1}`.execute(this.db);
+    const page = result.rows.slice(0, limit);
+    return {
+      items: page.map((row) => ({
+        documentId: row.id,
+        number: row.number,
+        attempts: row.render_attempts,
+        suspendedAt: row.render_suspended_at.toISOString(),
+      })),
+      nextCursor: result.rows.length > limit ? page.at(-1)!.id : null,
+    };
+  }
+  async retryRender(actorId: string, documentId: string, reason: string, tx: TransactionContext) {
+    if (!reason.trim() || reason.length > 300) throw new Error('INVALID_INPUT');
+    const actor = await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id
+      WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE'
+        AND r.role IN ('SUPER_ADMIN') FOR SHARE OF u,r`.execute(tx);
+    if (!actor.rows.length) throw new Error('FORBIDDEN');
+    const changed =
+      await sql`UPDATE invoice_documents SET renderer_state='PENDING',render_attempts=0,
+      render_next_attempt_at=NULL,render_suspended_at=NULL,render_lease_token=NULL,render_lease_until=NULL,
+      updated_at=clock_timestamp() WHERE id=${documentId}::uuid AND render_suspended_at IS NOT NULL
+        AND renderer_state<>'RENDERED' RETURNING id`.execute(tx);
+    if (!changed.rows.length) throw new Error('INVOICE_RENDER_NOT_SUSPENDED');
+    await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details)
+      VALUES(${uuidV7()}::uuid,${actorId}::uuid,'INVOICE_RENDER_RETRY','invoice',${documentId},${JSON.stringify({ reason: reason.trim() })}::jsonb)`.execute(
+      tx,
+    );
+    return { documentId, status: 'PENDING' as const };
   }
   async invoiceForOrder(
     orderId: string,

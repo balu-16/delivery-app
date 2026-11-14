@@ -86,9 +86,7 @@ export class PostgresPickActions {
     );
     const task = await loadTask(tx, taskId, true);
     if (!task) throw new Error('RESOURCE_NOT_FOUND');
-    if (
-      !(await this.identity.hasStoreRole(actorId, task.store_id, ['PICKER', 'STORE_MANAGER'], tx))
-    )
+    if (!(await this.identity.hasStoreRole(actorId, task.store_id, ['STORE_MANAGER'], tx)))
       throw new Error('RESOURCE_NOT_FOUND');
     const items = await loadItems(tx, [taskId], true);
     const item = (id: string) => items.find((row) => row.id === id) ?? null;
@@ -260,14 +258,14 @@ export class PostgresPickActions {
         throw new Error(
           row.status === 'SUBSTITUTED' ? 'ITEM_ALREADY_RESOLVED' : 'SUBSTITUTION_STATE_INVALID',
         );
-      const { flags } = await this.admin.snapshot();
+      const autoSubstitution = await this.admin.flag('auto_substitution', tx);
       const candidates = await sql<{
         candidate_variant_id: string;
       }>`SELECT candidate_variant_id FROM substitute_candidates WHERE variant_id=${row.variant_id}::uuid`.execute(
         tx,
       );
       assertSubstitutionAllowed(
-        flags.auto_substitution,
+        autoSubstitution,
         row.variant_id,
         input.candidateVariantId,
         candidates.rows.map((c) => ({
@@ -339,7 +337,7 @@ export class PostgresPickActions {
         tx,
       );
       if (weighted.rows.length) {
-        const tolerance = (await this.admin.snapshot()).config.pickingWeightToleranceBps;
+        const tolerance = await this.admin.get('pickingWeightToleranceBps', tx);
         for (const item of rows)
           if (
             weighted.rows.some((row) => row.id === item.variant_id) &&

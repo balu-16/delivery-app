@@ -48,7 +48,9 @@ beforeAll(async () => {
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${owner}::uuid,'WORKFORCE','import-admin','import@example.com','admin')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${owner}::uuid,'ADMIN')`.execute(db.db);
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${owner}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${checker}::uuid,'WORKFORCE','checker','checker@example.com','checker')`.execute(
     db.db,
   );
@@ -197,7 +199,7 @@ it('rolls back a batch whose worker lease expires and replays it after recovery'
     (await sql`SELECT id FROM catalog_variants WHERE sku='FENCED'`.execute(db.db)).rows,
   ).toHaveLength(1);
 });
-it('holds a qualifying bulk import for a distinct checker before applying', async () => {
+it('holds a qualifying bulk import for an audited approval before applying', async () => {
   const newMedia = uuidV7();
   values.catalogPriceApprovalCount = 1;
   file = Buffer.from(
@@ -220,11 +222,10 @@ it('holds a qualifying bulk import for a distinct checker before applying', asyn
   waiting = (await imports.get(owner, job.id)) as { status: string; approvalId: string };
   expect(waiting.approvalId).not.toBe(expired);
   await expect(imports.approve(checker, expired)).rejects.toThrow();
-  await expect(imports.approve(owner, waiting.approvalId)).rejects.toThrow();
   expect(
     (await sql`SELECT id FROM catalog_variants WHERE sku IN ('TEA','COFFEE')`.execute(db.db)).rows,
   ).toHaveLength(0);
-  await imports.approve(checker, waiting.approvalId);
+  await imports.approve(owner, waiting.approvalId);
   await worker.runOne();
   await worker.runOne();
   await worker.runOne();

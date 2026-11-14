@@ -59,7 +59,7 @@ for (const kind of kinds) {
     ids.add(item.id);
     if (!statuses.has(item.status)) errors.push(`${label}: invalid status`);
     requireString(item.sourceSection, `${label}.sourceSection`);
-    if (typeof item.phase !== 'string' || !/^P(?:[0-9]|1[0-3])$/.test(item.phase))
+    if (typeof item.phase !== 'string' || !/^P(?:[0-9]|1[0-4])$/.test(item.phase))
       errors.push(`${label}: invalid phase`);
     if (['requirements', 'operations', 'adapters', 'invariants'].includes(kind))
       validateTestFiles(item, label);

@@ -47,7 +47,7 @@ class ResolveWrongAddressDto {
 @ApiBearerAuth()
 @DeliveryApiErrors()
 @UseGuards(IdentityGuard)
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseInterceptors(DomainErrorInterceptor, DeliveryErrorInterceptor)
 export class AdminDispatchController {
   constructor(
@@ -63,7 +63,8 @@ export class AdminDispatchController {
     @Body() body: AssignDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    if (!key || key.length > 150) throw new HttpException('IDEMPOTENCY_KEY_REQUIRED', 400);
+    if (!key || key.length > 150)
+      throw new HttpException({ code: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
     return this.assignment.assign(orderId, body.riderId, p.userId, body.reason, key);
   }
   @Post(':orderId/wrong-address/resolve')
@@ -76,7 +77,8 @@ export class AdminDispatchController {
     @Body() body: ResolveWrongAddressDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    if (!key || key.length > 150) throw new HttpException('IDEMPOTENCY_KEY_REQUIRED', 400);
+    if (!key || key.length > 150)
+      throw new HttpException({ code: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
     return this.wrongAddress.resolve(p.userId, orderId, body.reason, key);
   }
 }

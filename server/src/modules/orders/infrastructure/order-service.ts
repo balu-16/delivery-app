@@ -141,8 +141,12 @@ export class OrderService implements OrderOperations {
     const row = await this.aggregate.byIdRaw(orderId);
     return viewOf(row, await this.aggregate.items(orderId));
   }
-  async reorder(orderId: string, userId: string): Promise<ReorderResult> {
-    return this.mutations.reorder(orderId, userId);
+  async reorder(
+    orderId: string,
+    userId: string,
+    opts?: { tx?: TransactionContext },
+  ): Promise<ReorderResult> {
+    return this.mutations.reorder(orderId, userId, opts?.tx);
   }
   async expireDue(limit: number): Promise<number> {
     const due = await sql<{ id: string }>`SELECT id FROM orders

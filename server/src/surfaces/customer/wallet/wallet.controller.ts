@@ -20,7 +20,11 @@ import {
 import { Type } from 'class-transformer';
 import { IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import type { Json } from '../../../platform/database/database.js';
-import { IdempotencyStore, hashRequest } from '../../../common/idempotency/idempotency.js';
+import {
+  IdempotencyStore,
+  hashCanonical,
+  hashRequest,
+} from '../../../common/idempotency/idempotency.js';
 import { DomainErrorInterceptor } from '../../domain-errors.js';
 import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
@@ -104,34 +108,42 @@ export class CustomerWalletController {
         key,
       },
       hash,
+      120,
+      hashCanonical(['POST', '/v1/customer/wallet/topups', dto]),
     );
-    if (claim.kind === 'replay') return claim.body as unknown as WalletTopupIntent;
+    if (claim.kind === 'replay') {
+      if (claim.status >= 400)
+        throw new HttpException(claim.body as Record<string, unknown>, claim.status);
+      return claim.body as unknown as WalletTopupIntent;
+    }
     if (claim.kind === 'in_progress') throw new HttpException({ code: 'REQUEST_IN_PROGRESS' }, 409);
     if (claim.kind !== 'claimed') throw new HttpException({ code: 'IDEMPOTENCY_KEY_REUSED' }, 409);
-    try {
-      // The gateway call runs outside the idempotency transaction; the intent
-      // id derives from the idempotency operation so a retry after a crash
-      // resumes the same durable attempt instead of creating a second order.
-      const intent = await this.topups.create(p.userId, dto.amountPaise, {
-        intentId: claim.owner.operationId,
-      });
-      await this.idempotency.execute(claim.owner, async () => ({
-        status: 200,
-        body: intent as unknown as Json,
-      }));
-      return intent;
-    } catch (error: unknown) {
-      const code = error instanceof Error ? error.message : '';
-      if (code === 'ExternalServiceUnavailable' || code === 'ExternalServiceTimeout') {
-        await this.idempotency
-          .execute(claim.owner, async () => ({
-            status: 503,
-            body: { code: 'ExternalServiceUnavailable' } as unknown as Json,
-          }))
-          .catch(() => undefined);
-        throw new HttpException({ code: 'ExternalServiceUnavailable' }, 503);
+    return this.idempotency.withRenewal(claim.owner, async () => {
+      try {
+        // The gateway call runs outside the idempotency transaction; the intent
+        // id derives from the idempotency operation so a retry after a crash
+        // resumes the same durable attempt instead of creating a second order.
+        const intent = await this.topups.create(p.userId, dto.amountPaise, {
+          intentId: claim.owner.operationId,
+        });
+        await this.idempotency.execute(claim.owner, async () => ({
+          status: 201,
+          body: intent as unknown as Json,
+        }));
+        return intent;
+      } catch (error: unknown) {
+        const code = error instanceof Error ? error.message : '';
+        if (code === 'ExternalServiceUnavailable' || code === 'ExternalServiceTimeout') {
+          await this.idempotency
+            .execute(claim.owner, async () => ({
+              status: 503,
+              body: { code: 'ExternalServiceUnavailable' } as unknown as Json,
+            }))
+            .catch(() => undefined);
+          throw new HttpException({ code: 'ExternalServiceUnavailable' }, 503);
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
   }
 }

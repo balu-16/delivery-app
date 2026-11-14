@@ -49,6 +49,29 @@ test('Cognito sign in bootstraps the backend before storing the access session',
   await signOut();
 });
 
+test('customer sign-in refreshes its token until the customer group is ready', async () => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://192.168.1.10:3000';
+  process.env.EXPO_PUBLIC_AUTH_MODE = 'cognito';
+  process.env.EXPO_PUBLIC_COGNITO_REGION = 'ap-southeast-2';
+  process.env.EXPO_PUBLIC_COGNITO_CLIENT_ID = 'publicclient123';
+  globalThis.fetch = fetchMock; fetchMock.mockReset();
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ AuthenticationResult: { IdToken: 'id', AccessToken: 'old', RefreshToken: 'refresh' } }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ userId: 'customer' }), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ code: 'FORBIDDEN' }), { status: 403 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ AuthenticationResult: { AccessToken: 'grouped' } }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ userId: 'customer' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+  jest.useFakeTimers();
+  try {
+    const pending = login('person@example.com', 'test-password');
+    await jest.advanceTimersByTimeAsync(1500);
+    await pending;
+    expect(await accessToken()).toBe('grouped');
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body).AuthFlow).toBe('REFRESH_TOKEN_AUTH');
+    await signOut();
+  } finally { jest.useRealTimers(); }
+});
+
 test('Cognito password challenge completes before backend bootstrap', async () => {
   process.env.EXPO_PUBLIC_API_URL = 'http://192.168.1.10:3000';
   process.env.EXPO_PUBLIC_AUTH_MODE = 'cognito';

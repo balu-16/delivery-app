@@ -5,6 +5,8 @@ export default tseslint.config(
   {
     ignores: [
       'dist/**',
+      '.local/**',
+      'store_manager_web/dist/**',
       'coverage/**',
       'node_modules/**',
       'openapi/**',

@@ -28,8 +28,7 @@ export class CatalogMediaService implements CatalogMedia {
     type: string,
     size: number,
   ) {
-    if (!(await this.identity.hasRole(owner, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(owner, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     const max = await this.config.get('catalogImportMaxBytes');
     if (
       !Number.isSafeInteger(size) ||
@@ -43,8 +42,7 @@ export class CatalogMediaService implements CatalogMedia {
     const id = uuidV7(),
       key = `staging/${id}/${uuidV7()}`;
     await this.db.transaction().execute(async (tx) => {
-      if (!(await this.identity.hasRole(owner, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(owner, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       await sql`INSERT INTO catalog_media(id,owner_id,purpose,object_key,content_type,size_bytes,state,expires_at) VALUES(${id}::uuid,${owner}::uuid,${purpose},${key},${type},${size},'PENDING',clock_timestamp()+${this.uploadTtl}*interval '1 second')`.execute(
         tx,
       );
@@ -56,8 +54,7 @@ export class CatalogMediaService implements CatalogMedia {
     return { mediaId: id, ...target };
   }
   async register(owner: string, id: string, productId?: string) {
-    if (!(await this.identity.hasRole(owner, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(owner, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     const found =
       await sql<MediaRow>`SELECT owner_id,purpose,object_key,content_type,size_bytes::text,state,expires_at FROM catalog_media WHERE id=${id}::uuid AND owner_id=${owner}::uuid AND state='PENDING' AND expires_at>clock_timestamp()`.execute(
         this.db,
@@ -84,7 +81,7 @@ export class CatalogMediaService implements CatalogMedia {
         if (!validMediaMagic(media.content_type, first)) throw new Error('INVALID_MEDIA');
       }
       await this.db.transaction().execute(async (tx) => {
-        if (!(await this.identity.hasRole(owner, ['ADMIN', 'SUPER_ADMIN'], tx)))
+        if (!(await this.identity.hasRole(owner, ['SUPER_ADMIN'], tx)))
           throw new Error('FORBIDDEN');
         if (productId) {
           const p =

@@ -40,7 +40,13 @@ it('logs unexpected failures with correlation metadata without vendor or request
   new ProblemFilter(logger).catch(new Error('SQL password=vendor-secret'), host);
   expect(logged).toEqual([
     [
-      { traceId: 'trace-500', method: 'POST', status: 500, code: 'INTERNAL_ERROR' },
+      {
+        traceId: 'trace-500',
+        method: 'POST',
+        status: 500,
+        code: 'INTERNAL_ERROR',
+        cause: 'Error: SQL password=[redacted]',
+      },
       'HTTP request failed',
     ],
   ]);

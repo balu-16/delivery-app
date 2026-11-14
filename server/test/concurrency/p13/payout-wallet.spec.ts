@@ -43,7 +43,7 @@ it('concurrent payout drafting and mark-paid replay claim one earning and create
     checker = uuidV7(),
     evidence = uuidV7();
   for (const [id, role] of [
-    [maker, 'ADMIN'],
+    [maker, 'SUPER_ADMIN'],
     [checker, 'SUPER_ADMIN'],
   ] as const) {
     await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${id}::uuid,'WORKFORCE',${id},${`${id}@example.invalid`},'operator')`.execute(

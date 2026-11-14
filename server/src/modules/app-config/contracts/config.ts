@@ -134,8 +134,12 @@ export const FEATURE_FLAG_KEYS = [
   'surge_enabled',
 ] as const;
 export type FeatureFlagKey = (typeof FEATURE_FLAG_KEYS)[number];
-export interface AdminConfig {
+export interface AdminConfig extends AppConfig {
   snapshot(): Promise<{ config: ConfigValues; flags: Record<FeatureFlagKey, boolean> }>;
+  flag(
+    key: FeatureFlagKey,
+    tx?: import('../../../platform/database/database.js').TransactionContext,
+  ): Promise<boolean>;
   update(actorId: string, key: ConfigKey, value: unknown): Promise<void>;
   setFlag(actorId: string, key: FeatureFlagKey, enabled: boolean): Promise<void>;
 }

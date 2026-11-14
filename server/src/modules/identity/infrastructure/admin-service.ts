@@ -33,7 +33,7 @@ export class IdentityAdminService {
       throw new Error('INVALID_SEARCH');
     const actor = await sql<{
       ok: boolean;
-    }>`SELECT EXISTS(SELECT 1 FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('ADMIN','SUPER_ADMIN')) AS ok`.execute(
+    }>`SELECT EXISTS(SELECT 1 FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('SUPER_ADMIN')) AS ok`.execute(
       this.db,
     );
     if (!actor.rows[0]?.ok) throw new Error('FORBIDDEN');
@@ -70,10 +70,10 @@ export class IdentityAdminService {
     actorId: string,
     userId: string,
     storeId: string,
-    role: 'PICKER' | 'STORE_MANAGER',
+    role: 'STORE_MANAGER',
     grant: boolean,
   ): Promise<void> {
-    if (role !== 'PICKER' && role !== 'STORE_MANAGER') throw new Error('ROLE_NOT_MANAGED');
+    if (role !== 'STORE_MANAGER') throw new Error('ROLE_NOT_MANAGED');
     await this.db.transaction().execute(async (tx) => {
       await this.lockAndAuthorize(tx, actorId, userId);
       const target = await sql<{
@@ -127,18 +127,29 @@ export class IdentityAdminService {
       pool: string;
     }>`SELECT pool FROM users WHERE id=${userId}::uuid`.execute(tx);
     if (target.rows[0]?.pool !== 'WORKFORCE') throw new Error('ROLE_NOT_MANAGED');
-    if (!grant && role === 'SUPER_ADMIN') await this.preventLastSuperAdmin(tx, userId);
+    const existing = await sql<{
+      role: Role;
+    }>`SELECT role FROM user_roles WHERE user_id=${userId}::uuid FOR UPDATE`.execute(tx);
+    if (existing.rows.length > 1) throw new Error('ROLE_CONFLICT');
+    const previous = existing.rows[0]?.role;
+    if (!grant && previous === role) throw new Error('ROLE_REPLACEMENT_REQUIRED');
+    if (grant && previous && previous !== role) {
+      if (previous === 'SUPER_ADMIN') await this.preventLastSuperAdmin(tx, userId);
+      await sql`DELETE FROM store_staff WHERE user_id=${userId}::uuid`.execute(tx);
+      await sql`DELETE FROM user_roles WHERE user_id=${userId}::uuid`.execute(tx);
+      await sql`UPDATE users SET auth_version=auth_version+1,updated_at=clock_timestamp() WHERE id=${userId}::uuid`.execute(
+        tx,
+      );
+      await this.audit(tx, actorId, userId, 'ROLE_REMOVED', { role: previous });
+      await this.recordChange(tx, actorId, userId, 'ROLE_REMOVED', {
+        role: previous,
+        grant: false,
+      });
+    }
     if (grant)
       await sql`INSERT INTO user_roles(user_id,role) VALUES (${userId}::uuid,${role}) ON CONFLICT DO NOTHING`.execute(
         tx,
       );
-    else {
-      await sql`DELETE FROM user_roles WHERE user_id=${userId}::uuid AND role=${role}`.execute(tx);
-      if (role === 'PICKER' || role === 'STORE_MANAGER')
-        await sql`DELETE FROM store_staff WHERE user_id=${userId}::uuid AND role=${role}`.execute(
-          tx,
-        );
-    }
     await sql`UPDATE users SET auth_version=auth_version+1,updated_at=clock_timestamp() WHERE id=${userId}::uuid`.execute(
       tx,
     );

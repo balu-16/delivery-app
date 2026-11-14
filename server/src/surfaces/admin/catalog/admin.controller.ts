@@ -42,6 +42,7 @@ import {
   VariantView,
   SynonymPageDto,
   SynonymPageView,
+  VariantsPageDto,
 } from './catalog.dto.js';
 export class IdView {
   @ApiProperty({ format: 'uuid' }) id!: string;
@@ -53,7 +54,7 @@ export class IdView {
 @ApiResponse({ status: 409, description: 'Conflict or approval required' })
 @Controller('v1/admin/catalog')
 @ApiBearerAuth()
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 @UseInterceptors(DomainErrorInterceptor)
 export class AdminCatalogController {
@@ -175,8 +176,8 @@ export class AdminCatalogController {
   @Get('variants')
   @ApiOperation({ operationId: 'adminListVariants' })
   @ApiOkResponse({ type: VariantPageView })
-  variants(@CurrentPrincipal() p: Principal, @Query() q: PageDto) {
-    return this.catalog.list(p.userId, 'variants', q.limit ?? 50, q.cursor);
+  variants(@CurrentPrincipal() p: Principal, @Query() q: VariantsPageDto) {
+    return this.catalog.list(p.userId, 'variants', q.limit ?? 50, q.cursor, undefined, q.productId);
   }
   @Get('variants/:id')
   @ApiOperation({ operationId: 'adminGetVariant' })

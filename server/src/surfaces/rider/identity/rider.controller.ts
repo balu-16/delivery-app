@@ -7,13 +7,17 @@ import {
   Get,
   Inject,
   Post,
+  Req,
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiProperty, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiProperty, ApiResponse } from '@nestjs/swagger';
 import {
   ProblemDto,
   RiderResponseDto,
+  RiderBootstrapResponseDto,
+  RiderApplicationDto,
+  RiderOnboardingStoreDto,
   UploadTargetResponseDto,
 } from '../../../modules/identity/contracts/swagger.js';
 import { IsInt, IsString, IsUUID, Length, Min } from 'class-validator';
@@ -22,7 +26,15 @@ import {
   type RiderDocuments,
 } from '../../../modules/identity/contracts/uploads.js';
 
-import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
+import {
+  AuthPolicy,
+  CurrentPrincipal,
+  type AuthenticatedRequest,
+} from '../../../modules/identity/contracts/http.js';
+import {
+  RIDER_APPLICATIONS,
+  type RiderApplications,
+} from '../../../modules/identity/contracts/rider-applications.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
 import {
   RIDER_PROFILE_ONBOARDING,
@@ -46,6 +58,9 @@ class RiderProfileDto {
   @ApiProperty({ minLength: 1, maxLength: 40 }) @IsString() @Length(1, 40) vehicleType!: string;
   @ApiProperty({ minLength: 1, maxLength: 40 }) @IsString() @Length(1, 40) vehicleNo!: string;
 }
+class SelectStoreDto {
+  @ApiProperty({ format: 'uuid' }) @IsUUID() storeId!: string;
+}
 @ApiBearerAuth()
 @ApiResponse({ status: 400, type: ProblemDto, description: 'Invalid request' })
 @ApiResponse({ status: 401, type: ProblemDto, description: 'Missing or invalid token' })
@@ -60,7 +75,52 @@ export class RiderIdentityController {
     @Inject(USER_PROFILES) private readonly profiles: UserProfiles,
     @Inject(RIDER_PROFILE_ONBOARDING) private readonly onboarding: RiderProfileOnboarding,
     @Inject(RIDER_DOCUMENTS) private readonly documents: RiderDocuments | null,
+    @Inject(RIDER_APPLICATIONS) private readonly applications: RiderApplications,
   ) {}
+  @Post('auth/bootstrap')
+  @ApiOperation({ operationId: 'riderBootstrap' })
+  @ApiResponse({ status: 201, type: RiderBootstrapResponseDto })
+  @AuthPolicy({ audience: 'rider', tokenUse: 'id', bootstrap: true })
+  async bootstrap(@Req() request: AuthenticatedRequest) {
+    try {
+      return await this.applications.bootstrap(request.identity!);
+    } catch (error: unknown) {
+      const code = error instanceof Error ? error.message : '';
+      if (code === 'INVALID_BOOTSTRAP_IDENTITY' || code === 'INVALID_EMAIL')
+        throw new BadRequestException({ code });
+      if (code === 'EMAIL_NOT_VERIFIED' || code === 'ACCOUNT_DISABLED' || code === 'ROLE_CONFLICT')
+        throw new ForbiddenException({ code });
+      if (code === 'RIDER_ENROLLMENT_REQUIRES_REVIEW') throw new ConflictException({ code });
+      throw error;
+    }
+  }
+  @Get('onboarding')
+  @ApiOperation({ operationId: 'riderGetOnboarding' })
+  @ApiResponse({ status: 200, type: RiderApplicationDto })
+  onboardingStatus(@CurrentPrincipal() principal: Principal) {
+    return this.applications.get(principal.userId);
+  }
+  @Get('onboarding/stores')
+  @ApiOperation({ operationId: 'riderListOnboardingStores' })
+  @ApiResponse({ status: 200, type: [RiderOnboardingStoreDto] })
+  stores() {
+    return this.applications.stores();
+  }
+  @Post('onboarding/store')
+  @ApiOperation({ operationId: 'riderSelectOnboardingStore' })
+  @ApiResponse({ status: 201, description: 'Store selected' })
+  async selectStore(@CurrentPrincipal() principal: Principal, @Body() body: SelectStoreDto) {
+    try {
+      await this.applications.selectStore(principal.userId, body.storeId);
+      return { updated: true };
+    } catch (error: unknown) {
+      const code = error instanceof Error ? error.message : '';
+      if (code === 'STORE_NOT_FOUND' || code === 'INVALID_INPUT')
+        throw new BadRequestException({ code });
+      if (code === 'RIDER_STATE_INVALID') throw new ConflictException({ code });
+      throw error;
+    }
+  }
   @Get('me') @ApiResponse({ status: 200, type: RiderResponseDto }) async me(
     @CurrentPrincipal() principal: Principal,
   ) {

@@ -229,7 +229,7 @@ export async function assertStoreRole(
   },
   userId: string,
   storeId: string,
-  roles: readonly ('PICKER' | 'STORE_MANAGER')[],
+  roles: readonly 'STORE_MANAGER'[],
   tx?: TransactionContext,
 ): Promise<void> {
   if (!(await identity.hasStoreRole(userId, storeId, roles, tx)))

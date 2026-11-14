@@ -52,17 +52,23 @@ export class PostgresCoupons implements CouponValidation {
       AND (global_limit IS NULL OR redeemed_count < global_limit)
       ORDER BY code LIMIT 100`.execute(this.db);
     const firstOrder = await this.firstOrder.isFirstOrder(userId);
+    const quotaIds = found.rows.filter((row) => row.per_user_limit !== null).map((row) => row.id);
+    const quotaRows = quotaIds.length
+      ? await sql<{
+          coupon_id: string;
+          used: number;
+        }>`SELECT coupon_id::text,reserved_count + committed_count AS used
+          FROM coupon_user_quota WHERE coupon_id=ANY(${quotaIds}::uuid[]) AND user_id=${userId}::uuid`.execute(
+          this.db,
+        )
+      : { rows: [] };
+    const quotas = new Map(quotaRows.rows.map((row) => [row.coupon_id, row.used]));
     const result: CouponPublic[] = [];
     for (const row of found.rows) {
       if (!withinWindow(row, now)) continue;
       if (row.first_order_only && !firstOrder) continue;
       if (row.per_user_limit !== null) {
-        const quota = await sql<{
-          used: number;
-        }>`SELECT reserved_count + committed_count AS used FROM coupon_user_quota WHERE coupon_id=${row.id}::uuid AND user_id=${userId}::uuid`.execute(
-          this.db,
-        );
-        if ((quota.rows[0]?.used ?? 0) >= row.per_user_limit) continue;
+        if ((quotas.get(row.id) ?? 0) >= row.per_user_limit) continue;
       }
       result.push(toPublic(row));
     }

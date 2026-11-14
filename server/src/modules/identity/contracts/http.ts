@@ -11,11 +11,18 @@ export const AUTH_POLICY = 'delivery.identity.route-policy';
 export const AuthPolicy = (policy: RoutePolicy): MethodDecorator & ClassDecorator =>
   SetMetadata(AUTH_POLICY, policy);
 export interface AuthenticatedRequest {
-  headers: { authorization?: string };
+  headers: {
+    authorization?: string;
+    cookie?: string;
+    origin?: string;
+    referer?: string;
+  };
   url?: string;
   principal?: Principal;
   identity?: VerifiedIdentity;
   ip?: string;
+  protocol?: string;
+  hostname?: string;
 }
 export const CurrentPrincipal = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): Principal => {

@@ -1,7 +1,6 @@
 import { sql } from 'kysely';
 import { uuidV7 } from '../../../common/ids/ids.js';
 import type { Database } from '../../../platform/database/database.js';
-import { appendEvent } from '../../../platform/outbox/outbox.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 /** Configurable, bounded, advisory scans: they never alter account or order state. */
 export class FraudReviewScanner {
@@ -57,42 +56,38 @@ export class FraudReviewScanner {
     ];
     for (let index = 0; index < scans.length; index++) {
       const result = await scans[index]!.execute(this.db);
-      for (const row of result.rows) await this.record(kinds[index]!, row.user_id, row.n);
+      for (let offset = 0; offset < result.rows.length; offset += 100)
+        await this.recordBatch(kinds[index]!, result.rows.slice(offset, offset + 100));
     }
   }
-  private async record(kind: string, userId: string, n: string): Promise<void> {
+  private async recordBatch(kind: string, rows: { user_id: string; n: string }[]): Promise<void> {
+    if (!rows.length) return;
     await this.db.transaction().execute(async (tx) => {
-      const ref = `${kind}:${userId}`;
-      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`fraud:${ref}`},0))`.execute(tx);
-      const open =
-        await sql`SELECT 1 FROM fraud_signals WHERE kind=${kind} AND user_id=${userId}::uuid AND status='OPEN'`.execute(
+      const ordered = [...rows].sort((a, b) => a.user_id.localeCompare(b.user_id));
+      const input = ordered.map((row) => ({ id: uuidV7(), user_id: row.user_id, count: row.n }));
+      // All scanners use the same sorted lock order, including across replicas.
+      for (const row of ordered)
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`fraud:${kind}:${row.user_id}`},0))`.execute(
           tx,
         );
-      if (open.rows.length) return;
-      const recent =
-        await sql`SELECT 1 FROM fraud_signals WHERE kind=${kind} AND user_id=${userId}::uuid AND created_at>clock_timestamp()-interval '1 day'`.execute(
-          tx,
-        );
-      if (recent.rows.length) return;
-      const id = uuidV7();
-      await sql`INSERT INTO fraud_signals(id,user_id,kind,severity,reference,details) VALUES (${id}::uuid,${userId}::uuid,${kind},'WARN',${ref},${JSON.stringify({ count: n })}::jsonb)`.execute(
+      const inserted = await sql<{ id: string }>`WITH input AS (
+        SELECT * FROM jsonb_to_recordset(${JSON.stringify(input)}::jsonb) AS x(id uuid,user_id uuid,count text)
+      ) INSERT INTO fraud_signals(id,user_id,kind,severity,reference,details)
+        SELECT i.id,i.user_id,${kind},'WARN',${kind}||':'||i.user_id::text,jsonb_build_object('count',i.count)
+        FROM input i WHERE NOT EXISTS (SELECT 1 FROM fraud_signals f WHERE f.kind=${kind} AND f.user_id=i.user_id
+          AND (f.status='OPEN' OR f.created_at>clock_timestamp()-interval '1 day')) RETURNING id::text`.execute(
         tx,
       );
-      await appendEvent(
+      if (!inserted.rows.length) return;
+      const events = inserted.rows.map((row) => ({ event_id: uuidV7(), signal_id: row.id }));
+      await sql`WITH input AS (
+        SELECT * FROM jsonb_to_recordset(${JSON.stringify(events)}::jsonb) AS x(event_id uuid,signal_id uuid)
+      ), created AS (
+        INSERT INTO outbox_events(id,event_type,schema_version,aggregate_type,aggregate_id,aggregate_version,occurred_at,correlation_id,payload)
+        SELECT event_id,'ops.anomaly',1,'fraud_signal',signal_id,1,clock_timestamp(),signal_id::text,
+          jsonb_build_object('kind',${kind}::text,'signalId',signal_id::text) FROM input RETURNING id
+      ) INSERT INTO outbox_deliveries(event_id,consumer) SELECT id,'notifications' FROM created`.execute(
         tx,
-        {
-          eventId: uuidV7(),
-          eventType: 'ops.anomaly',
-          schemaVersion: 1,
-          aggregateType: 'fraud_signal',
-          aggregateId: id,
-          aggregateVersion: '1',
-          occurredAt: new Date().toISOString(),
-          correlationId: id,
-          causationId: null,
-          payload: { kind, signalId: id },
-        },
-        ['notifications'],
       );
     });
   }

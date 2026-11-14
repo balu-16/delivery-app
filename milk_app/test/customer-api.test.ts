@@ -26,9 +26,7 @@ it('exposes safe server problem codes without leaking error details', async () =
   await expect(customerRequest('/v1/customer/cart', { token: 'token' })).rejects.toMatchObject({ status: 409, code: 'CONCURRENT_MODIFICATION', traceId: 'trace-1', message: 'CONCURRENT_MODIFICATION' } as Partial<ApiError>);
 });
 
-it('requires a configured safe base URL and rejects cross-origin paths', async () => {
-  process.env.EXPO_PUBLIC_API_URL = '';
-  expect(() => apiBaseUrl()).toThrow('Set EXPO_PUBLIC_API_URL');
+it('rejects unsafe configured URLs and cross-origin paths', async () => {
   process.env.EXPO_PUBLIC_API_URL = 'https://user:password@example.com';
   expect(() => apiBaseUrl()).toThrow('without credentials');
   await expect(customerRequest('//evil.test/path')).rejects.toThrow('Invalid API path');

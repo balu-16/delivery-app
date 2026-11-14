@@ -37,7 +37,9 @@ it('requires an authorized audited reset before a locked delivery code can be ve
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${adminId}::uuid,'WORKFORCE',${adminId},'reset-admin@example.invalid','admin')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${adminId}::uuid,'ADMIN')`.execute(db.db);
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${adminId}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
   await sql`UPDATE orders SET status='OUT_FOR_DELIVERY' WHERE id=${orderId}::uuid`.execute(db.db);
   await sql`INSERT INTO delivery_tasks(id,order_id,store_id,customer_user_id,status,rider_id,arrived_store_at,pickup_at)
     VALUES(${uuidV7()}::uuid,${orderId}::uuid,${world.store}::uuid,${world.customer}::uuid,'PICKED_UP',${world.rider1}::uuid,clock_timestamp(),clock_timestamp())`.execute(

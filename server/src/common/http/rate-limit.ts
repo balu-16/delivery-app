@@ -11,12 +11,15 @@ export interface RateLimitDecision {
   retryAfter: number;
 }
 export function routeLimit(path: string, env: Env): { name: string; limit: number } | undefined {
-  // Health and signed provider webhooks must remain reachable during Redis outages.
-  if (
-    ['/healthz', '/readyz', '/metrics'].includes(path) ||
-    /^\/v1\/webhooks\/payments\/[^/]+$/.test(path)
-  )
-    return undefined;
+  if (['/healthz', '/readyz', '/metrics'].includes(path)) return undefined;
+  // A separate generous limit protects ingress while provider deliveries remain
+  // reachable during Redis outages under the normal fail-open policy.
+  if (/^\/v1\/customer\/webhooks\/payments\/(?:fake|razorpay)$/.test(path))
+    return { name: 'webhook', limit: env.RATE_LIMIT_WEBHOOK_PER_MIN };
+  // Admin portal authentication is anonymous until a session exists; keep its
+  // counters separate from the staff bearer routes under the same per-IP cap.
+  if (/^\/v1\/admin\/auth(?:\/|$)/.test(path))
+    return { name: 'admin-auth', limit: env.RATE_LIMIT_AUTH_PER_MIN };
   if (/\/(?:auth|places)(?:\/|$)/.test(path))
     return { name: 'auth', limit: env.RATE_LIMIT_AUTH_PER_MIN };
   if (/\/search(?:\/|$)/.test(path))

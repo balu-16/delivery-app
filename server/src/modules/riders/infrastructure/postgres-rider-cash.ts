@@ -113,7 +113,7 @@ export class PostgresRiderCash implements RiderCash, CodCollections {
     return this.run(async (tx) => {
       const authorized = await sql<{
         ok: boolean;
-      }>`SELECT EXISTS(SELECT 1 FROM users u WHERE u.id=${input.actorId}::uuid AND u.status='ACTIVE' AND (EXISTS(SELECT 1 FROM user_roles r WHERE r.user_id=u.id AND r.role IN ('ADMIN','SUPER_ADMIN')) OR (${input.storeId ?? null}::uuid IS NOT NULL AND EXISTS(SELECT 1 FROM store_staff s WHERE s.user_id=u.id AND s.store_id=${input.storeId ?? null}::uuid AND s.role='STORE_MANAGER')))) AS ok`.execute(
+      }>`SELECT EXISTS(SELECT 1 FROM users u WHERE u.id=${input.actorId}::uuid AND u.status='ACTIVE' AND (EXISTS(SELECT 1 FROM user_roles r WHERE r.user_id=u.id AND r.role IN ('SUPER_ADMIN')) OR (${input.storeId ?? null}::uuid IS NOT NULL AND EXISTS(SELECT 1 FROM store_staff s WHERE s.user_id=u.id AND s.store_id=${input.storeId ?? null}::uuid AND s.role='STORE_MANAGER')))) AS ok`.execute(
         tx,
       );
       if (!authorized.rows[0]?.ok) throw new Error('FORBIDDEN');

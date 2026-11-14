@@ -45,7 +45,7 @@ import {
 @Controller('v1/admin')
 @ApiBearerAuth()
 @UseInterceptors(DomainErrorInterceptor)
-@AuthPolicy({ audience: 'admin', roles: ['SUPPORT_AGENT', 'ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPPORT_AGENT', 'SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 export class AdminP11Controller {
   constructor(
@@ -130,7 +130,7 @@ export class AdminP11Controller {
     const orderId = await this.support.orderForStaff(p.userId, id);
     const input = { amountPaise: body.amountPaise, reason: body.reason };
     const reference = `${id}:${body.idempotencyKey}`;
-    const approvalId = p.roles.includes('ADMIN')
+    const approvalId = p.roles.includes('SUPER_ADMIN')
       ? await this.orderAdmin.requestTicketAdminRefund(p.userId, orderId, input, reference)
       : await this.orderAdmin.requestSupportRefund(p.userId, orderId, input, reference);
     return approvalId.startsWith('direct:')

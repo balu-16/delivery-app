@@ -1027,9 +1027,8 @@ it('approved order repair restricts states and compensates stock without duplica
   );
   const key = uuidV7();
   const request = await administration.requestRepair(world.admin, orderId, input, key);
-  await expect(administration.approve(world.admin, request)).rejects.toThrow('APPROVAL_INVALID');
   expect((await orders.byId(orderId))?.status).toBe('PENDING_PAYMENT');
-  await administration.approve(checker, request);
+  await administration.approve(world.admin, request);
   expect((await orders.byId(orderId))?.status).toBe('EXPIRED');
   const replay = await administration.requestRepair(world.admin, orderId, input, key);
   await administration.approve(checker, replay);
@@ -1045,7 +1044,7 @@ it('approved order repair restricts states and compensates stock without duplica
     orders.forceState(orderId, 'DELIVERED', 'arbitrary repair', checker),
   ).rejects.toThrow('ILLEGAL_STATE_TRANSITION');
 });
-it('approved manual refunds enforce separate identities, stable effects, and the paid source cap', async () => {
+it('approved manual refunds have stable effects and enforce the paid source cap', async () => {
   const { result } = await placed(),
     orderId = result.order.orderId,
     payment = result.payment!;
@@ -1061,8 +1060,7 @@ it('approved manual refunds enforce separate identities, stable effects, and the
   const key = uuidV7(),
     input = { amountPaise: '1000', reason: 'approved adjustment' },
     request = await administration.requestRefund(world.admin, orderId, input, key);
-  await expect(administration.approve(world.admin, request)).rejects.toThrow('APPROVAL_INVALID');
-  await administration.approve(checker, request);
+  await administration.approve(world.admin, request);
   const replay = await administration.requestRefund(world.admin, orderId, input, key);
   await administration.approve(checker, replay);
   const refunds = app.get<PaymentRefundOperations>(PAYMENT_REFUNDS);

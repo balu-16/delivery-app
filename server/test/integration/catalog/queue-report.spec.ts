@@ -66,7 +66,9 @@ beforeAll(async () => {
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${owner}::uuid,'WORKFORCE','queue-admin','queue@example.invalid','admin')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${owner}::uuid,'ADMIN')`.execute(db.db);
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${owner}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
   await sql`INSERT INTO legal_entities(id,name) VALUES(${entity}::uuid,'entity')`.execute(db.db);
   await sql`INSERT INTO cities(id,name,bounds) VALUES(${city}::uuid,'city',ST_GeomFromText('POLYGON((77 12,78 12,78 14,77 14,77 12))',4326))`.execute(
     db.db,

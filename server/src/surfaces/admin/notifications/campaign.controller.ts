@@ -80,7 +80,7 @@ class CreateDto extends PreviewDto {
 }
 @Controller('v1/admin/push-campaigns')
 @ApiBearerAuth()
-@AuthPolicy({ audience: 'admin', roles: ['ADMIN', 'SUPER_ADMIN'] })
+@AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
 @UseGuards(IdentityGuard)
 @UseInterceptors(DomainErrorInterceptor)
 export class PushCampaignController {

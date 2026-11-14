@@ -37,7 +37,7 @@ export class RiderProfileService implements RiderProfileOnboarding {
         tx,
       );
       if (documentsReady(required, documents.rows)) {
-        await sql`UPDATE rider_profiles SET status='UNDER_REVIEW' WHERE user_id=${userId}::uuid`.execute(
+        await sql`UPDATE rider_profiles SET status='UNDER_REVIEW' WHERE user_id=${userId}::uuid AND home_store_id IS NOT NULL`.execute(
           tx,
         );
       }

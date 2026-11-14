@@ -36,8 +36,7 @@ export class PostgresStoreAdministration implements StoreAdministration {
     work: (tx: Tx) => Promise<T>,
   ): Promise<T> {
     return this.db.transaction().execute(async (tx) => {
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const result = await work(tx);
       await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()},${actor},${action},'store_management',${subject},'{}'::jsonb)`.execute(
         tx,
@@ -51,8 +50,7 @@ export class PostgresStoreAdministration implements StoreAdministration {
     limit: number,
     cursor?: string,
   ): Promise<{ items: unknown[]; nextCursor: string | null }> {
-    if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INVALID_PAGE');
     const after = cursor ?? null;
     const result =
@@ -87,8 +85,7 @@ export class PostgresStoreAdministration implements StoreAdministration {
     storeId: string,
     page: { limit: number; holidayCursor?: string; staffCursor?: string },
   ): Promise<unknown> {
-    if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'])))
-      throw new Error('FORBIDDEN');
+    if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     if (!Number.isInteger(page.limit) || page.limit < 1 || page.limit > 100)
       throw new Error('INVALID_PAGE');
     const store = await sql`SELECT id FROM stores WHERE id=${storeId}`.execute(this.db);
@@ -203,8 +200,7 @@ export class PostgresStoreAdministration implements StoreAdministration {
     if (typeof enabled !== 'boolean' || !/^[1-9]\d{0,18}$/.test(version))
       throw new Error('INVALID_INPUT');
     return this.db.transaction().execute(async (tx) => {
-      if (!(await this.identity.hasRole(actor, ['ADMIN', 'SUPER_ADMIN'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const found = await sql<{
         accepts_cod: boolean;
         version: string;
@@ -295,7 +291,7 @@ export class PostgresStoreAdministration implements StoreAdministration {
     actor: string,
     storeId: string,
     userId: string,
-    role: 'PICKER' | 'STORE_MANAGER',
+    role: 'STORE_MANAGER',
     active: boolean,
   ): Promise<void> {
     await this.mutate(actor, 'STORE_ASSIGNMENT_CHANGED', storeId, async (tx) => {

@@ -85,7 +85,7 @@ it('runs the seeded customer, store and admin journey through real HTTP adapters
   const customer = await token('CUSTOMER', 'customer', 'customer');
   const customerId = await token('CUSTOMER', 'customer', 'customer', 'id');
   const manager = await token('WORKFORCE', 'manager', 'store');
-  const admin = await token('WORKFORCE', 'admin', 'admin');
+  const admin = await token('WORKFORCE', 'super-admin-1', 'admin');
   const headers = { authorization: `Bearer ${customer}` };
   const bootstrap = await http.inject({
     method: 'POST',
@@ -198,6 +198,22 @@ it('runs the seeded customer, store and admin journey through real HTTP adapters
   });
   expect(invalidLocation.statusCode).toBe(400);
   expect(invalidLocation.body).not.toContain('canary');
+  const offlineLocation = await http.inject({
+    method: 'POST',
+    url: '/v1/rider/location',
+    headers: locationHeaders,
+    payload: { points: [point] },
+  });
+  expect(offlineLocation.statusCode).toBe(409);
+  expect(
+    (
+      await http.inject({
+        method: 'POST',
+        url: '/v1/rider/status/online',
+        headers: locationHeaders,
+      })
+    ).statusCode,
+  ).toBe(201);
   const validLocation = await http.inject({
     method: 'POST',
     url: '/v1/rider/location',
@@ -232,12 +248,168 @@ it('runs the seeded customer, store and admin journey through real HTTP adapters
   }
 });
 
+it('enrolls a rider through document rejection, resubmission and store-manager approval over HTTP', async () => {
+  const http = app.getHttpAdapter().getInstance();
+  const client = new Client({ connectionString: services.databaseUrl });
+  await client.connect();
+  try {
+    const sub = uuidV7();
+    await client.query(
+      "INSERT INTO local_identity_directory(pool,username,sub,email,name,email_verified) VALUES('WORKFORCE',$1,$1,$2,'Test Rider',true)",
+      [sub, `${sub}@example.test`],
+    );
+    const idToken = await token('WORKFORCE', sub, 'rider', 'id');
+    const bootstrap = await http.inject({
+      method: 'POST',
+      url: '/v1/rider/auth/bootstrap',
+      headers: { authorization: `Bearer ${idToken}` },
+    });
+    expect(bootstrap.statusCode).toBe(201);
+    const userId = bootstrap.json().userId as string;
+    expect(bootstrap.json().status).toBe('PENDING');
+    const accessToken = await token('WORKFORCE', sub, 'rider');
+    const headers = { authorization: `Bearer ${accessToken}` };
+    expect(
+      (await http.inject({ method: 'GET', url: '/v1/rider/status', headers })).statusCode,
+    ).toBe(403);
+    const storeId = '01800000-0000-7000-8000-000000000011';
+    const stores = await http.inject({
+      method: 'GET',
+      url: '/v1/rider/onboarding/stores',
+      headers,
+    });
+    expect(stores.statusCode).toBe(200);
+    expect(stores.json().some((store: { id: string }) => store.id === storeId)).toBe(true);
+    expect(
+      (
+        await http.inject({
+          method: 'POST',
+          url: '/v1/rider/onboarding/store',
+          headers,
+          payload: { storeId },
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await http.inject({
+          method: 'POST',
+          url: '/v1/rider/onboarding/profile',
+          headers,
+          payload: { vehicleType: 'bike', vehicleNo: 'TEST-123' },
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
+    async function upload(type: string) {
+      const target = await http.inject({
+        method: 'POST',
+        url: '/v1/rider/onboarding/documents/upload-url',
+        headers,
+        payload: { contentType: 'image/png', size: png.length },
+      });
+      expect(target.statusCode).toBe(201);
+      const destination = target.json() as {
+        mediaId: string;
+        url: string;
+        fields: { authorization: string };
+      };
+      const bytes = await http.inject({
+        method: 'PUT',
+        url: destination.url,
+        headers: {
+          authorization: destination.fields.authorization,
+          'content-type': 'application/octet-stream',
+        },
+        payload: png,
+      });
+      expect(bytes.statusCode).toBe(200);
+      const registered = await http.inject({
+        method: 'POST',
+        url: '/v1/rider/onboarding/documents',
+        headers,
+        payload: { documentType: type, mediaId: destination.mediaId },
+      });
+      expect(registered.statusCode).toBe(201);
+    }
+    for (const type of ['licence', 'vehicle_rc', 'id_proof', 'bank_proof']) await upload(type);
+    const managerToken = await token('WORKFORCE', 'manager', 'store');
+    const managerHeaders = { authorization: `Bearer ${managerToken}` };
+    const queue = await http.inject({
+      method: 'GET',
+      url: `/v1/store/rider-applications?storeId=${storeId}&status=UNDER_REVIEW`,
+      headers: managerHeaders,
+    });
+    expect(queue.statusCode).toBe(200);
+    expect(queue.json().items.some((item: { userId: string }) => item.userId === userId)).toBe(
+      true,
+    );
+    let detail = await http.inject({
+      method: 'GET',
+      url: `/v1/store/rider-applications/${userId}`,
+      headers: managerHeaders,
+    });
+    let documents = detail.json().documents as { id: string; type: string; status: string }[];
+    expect(
+      (
+        await http.inject({
+          method: 'GET',
+          url: `/v1/store/rider-documents/${documents[0]!.id}/read-url`,
+          headers: managerHeaders,
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await http.inject({
+          method: 'POST',
+          url: `/v1/store/rider-documents/${documents[0]!.id}/review`,
+          headers: managerHeaders,
+          payload: { approved: false, reason: 'Please upload a clearer image' },
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(
+      (await http.inject({ method: 'GET', url: '/v1/rider/onboarding', headers })).json().status,
+    ).toBe('REJECTED');
+    await upload(documents[0]!.type);
+    detail = await http.inject({
+      method: 'GET',
+      url: `/v1/store/rider-applications/${userId}`,
+      headers: managerHeaders,
+    });
+    documents = detail.json().documents as typeof documents;
+    for (const document of documents) {
+      const review = await http.inject({
+        method: 'POST',
+        url: `/v1/store/rider-documents/${document.id}/review`,
+        headers: managerHeaders,
+        payload: { approved: true, reason: '' },
+      });
+      expect(review.statusCode).toBe(201);
+    }
+    expect(
+      (await http.inject({ method: 'GET', url: '/v1/rider/onboarding', headers })).json().status,
+    ).toBe('APPROVED');
+    expect(
+      (await http.inject({ method: 'GET', url: '/v1/rider/status', headers })).statusCode,
+    ).toBe(200);
+    expect(
+      (await http.inject({ method: 'GET', url: '/v1/rider/tasks?scope=active', headers })).json()
+        .items,
+    ).toEqual([]);
+  } finally {
+    await client.end();
+  }
+});
+
 it('rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation', async () => {
   const http = app.getHttpAdapter().getInstance();
   let operationCount = 0;
   const covered = new Set<string>();
   const customerToken = await token('CUSTOMER', 'customer', 'customer');
-  const workforceToken = await token('WORKFORCE', 'admin', 'admin');
+  const workforceToken = await token('WORKFORCE', 'super-admin-1', 'admin');
   const riderToken = await token('WORKFORCE', 'rider', 'rider');
   const wrongRoleTokens = {
     admin: await token('WORKFORCE', 'rider', 'admin'),
@@ -250,6 +422,13 @@ it('rejects missing, expired, wrong-audience and wrong-role credentials for ever
     .setIssuer('local:CUSTOMER')
     .setAudience('customer')
     .setSubject('customer')
+    .setExpirationTime(Math.floor(Date.now() / 1000) - 120)
+    .sign(secret);
+  const expiredRiderId = await new SignJWT({ token_use: 'id' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuer('local:WORKFORCE')
+    .setAudience('rider')
+    .setSubject('rider')
     .setExpirationTime(Math.floor(Date.now() / 1000) - 120)
     .sign(secret);
   const expiredTokens = Object.fromEntries(
@@ -283,7 +462,7 @@ it('rejects missing, expired, wrong-audience and wrong-role credentials for ever
           method: requestMethod,
           url: requestUrl,
           headers: {
-            authorization: `Bearer ${route === '/v1/customer/auth/bootstrap' ? expiredCustomerId : expiredTokens[audience]}`,
+            authorization: `Bearer ${route === '/v1/customer/auth/bootstrap' ? expiredCustomerId : route === '/v1/rider/auth/bootstrap' ? expiredRiderId : expiredTokens[audience]}`,
           },
         });
         expect({ method, route, status: expired.statusCode }).toEqual({
@@ -300,7 +479,7 @@ it('rejects missing, expired, wrong-audience and wrong-role credentials for ever
           expect({ method, route, status: wrongRole.statusCode }).toEqual({
             method,
             route,
-            status: 403,
+            status: route === '/v1/rider/auth/bootstrap' ? 401 : 403,
           });
         }
         const response = await http.inject({
@@ -434,6 +613,7 @@ it('enforces default anonymous authentication and authenticated request limits w
     const issued = await http.inject({
       method: 'POST',
       url: '/dev/auth/token',
+      remoteAddress: `11.${randomInt(256)}.${randomInt(256)}.${randomInt(256)}`,
       payload: { pool: 'CUSTOMER', sub, audience: 'customer', tokenUse: 'access' },
     });
     expect(issued.statusCode).toBe(201);

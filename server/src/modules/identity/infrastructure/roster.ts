@@ -2,7 +2,7 @@ import { sql } from 'kysely';
 import type { Database } from '../../../platform/database/database.js';
 import type { IdentityRoster, StaffMember } from '../contracts/roster.js';
 
-type Row = { user_id: string; name: string; role: 'PICKER' | 'STORE_MANAGER' };
+type Row = { user_id: string; name: string; role: 'STORE_MANAGER' };
 
 export class PostgresIdentityRoster implements IdentityRoster {
   constructor(private readonly db: Database) {}

@@ -76,7 +76,6 @@ export class MakerChecker implements ApprovalExecutor {
         !row ||
         row.status !== 'PENDING' ||
         row.expires_at <= now ||
-        row.maker_id === checkerId ||
         row.payload_hash !== approvalPayloadHash(row.payload)
       )
         throw new Error('APPROVAL_INVALID');
@@ -88,13 +87,20 @@ export class MakerChecker implements ApprovalExecutor {
         !action.validate(row.payload)
       )
         throw new Error('APPROVAL_POLICY_CHANGED');
+      const singlePerson = row.maker_id === checkerId;
+      if (
+        singlePerson &&
+        (action.makerRole !== action.checkerRole ||
+          !['SUPER_ADMIN', 'STORE_MANAGER'].includes(action.checkerRole))
+      )
+        throw new Error('APPROVAL_INVALID');
       await this.authorize(tx, row.maker_id, action.makerRole);
       await this.authorize(tx, checkerId, action.checkerRole);
       await action.execute(tx, row.payload, row.execution_key, checkerId);
       await sql`UPDATE maker_checker_requests SET status='EXECUTED',checker_id=${checkerId}::uuid,executed_at=clock_timestamp() WHERE id=${requestId}::uuid`.execute(
         tx,
       );
-      await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id) VALUES (${uuidV7()}::uuid,${checkerId}::uuid,'APPROVAL_EXECUTED','approval',${requestId})`.execute(
+      await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES (${uuidV7()}::uuid,${checkerId}::uuid,'APPROVAL_EXECUTED','approval',${requestId},${JSON.stringify({ singlePerson })}::jsonb)`.execute(
         tx,
       );
     });

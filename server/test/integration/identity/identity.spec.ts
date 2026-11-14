@@ -72,18 +72,19 @@ test('bootstrap is idempotent for the same verified pool and subject, and reject
   await expect(service.bootstrap(identity)).rejects.toThrow('ACCOUNT_DISABLED');
 });
 
-test('unverified email may bootstrap but remains unverified for checkout policy', async () => {
+test('an unverified email cannot bootstrap a customer account', async () => {
   const service = new IdentityService(db.db, new DatabaseIdentityAccess(db.db));
-  const principal = await service.bootstrap({
-    pool: 'CUSTOMER',
-    sub: 'unverified',
-    tokenUse: 'id',
-    groups: [],
-    email: 'pending@example.test',
-    emailVerified: false,
-    expiresAt: 9999999999,
-  });
-  expect(principal.emailVerified).toBe(false);
+  await expect(
+    service.bootstrap({
+      pool: 'CUSTOMER',
+      sub: 'unverified',
+      tokenUse: 'id',
+      groups: [],
+      email: 'pending@example.test',
+      emailVerified: false,
+      expiresAt: 9999999999,
+    }),
+  ).rejects.toThrow('EMAIL_NOT_VERIFIED');
 });
 
 test('workforce creation recovers a lost provider response without duplicate users', async () => {
@@ -94,7 +95,9 @@ test('workforce creation recovers a lost provider response without duplicate use
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES (${adminId}::uuid,'WORKFORCE','provision-admin','provision-admin@example.test','Admin')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES (${adminId}::uuid,'ADMIN')`.execute(db.db);
+  await sql`INSERT INTO user_roles(user_id,role) VALUES (${adminId}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
   const directory = new LocalIdentityAdmin(db.db);
   let loseResponse = true;
   const faulty = {
@@ -138,6 +141,7 @@ test('identity provider synchronization survives failures and preserves per-user
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES (${id}::uuid,'WORKFORCE',${username},'sync-user@example.test','Sync')`.execute(
     db.db,
   );
+  await sql`INSERT INTO user_roles(user_id,role) VALUES (${id}::uuid,'RIDER')`.execute(db.db);
   await sql`INSERT INTO local_identity_directory(pool,username,sub,email,name) VALUES ('WORKFORCE',${username},${username},'sync-user@example.test','Sync')`.execute(
     db.db,
   );
@@ -198,7 +202,9 @@ test('failed local provisioning leaves recoverable compensation and retries dele
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES (${actor}::uuid,'WORKFORCE','saga-recovery-admin','saga-recovery-admin@test.invalid','Admin'),(${conflict}::uuid,'WORKFORCE','existing-conflict','saga-conflict@test.invalid','Conflict')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES (${actor}::uuid,'ADMIN')`.execute(db.db);
+  await sql`INSERT INTO user_roles(user_id,role) VALUES (${actor}::uuid,'SUPER_ADMIN')`.execute(
+    db.db,
+  );
   const local = new LocalIdentityAdmin(db.db);
   let failDelete = true;
   const provider = {
@@ -251,14 +257,27 @@ test('rider review serializes concurrent approvals and accepts profile after doc
   const { RiderProfileService } =
     await import('../../../src/modules/identity/infrastructure/rider-profile.js');
   const rider = uuidV7(),
-    reviewer = uuidV7();
+    reviewer = uuidV7(),
+    entity = uuidV7(),
+    city = uuidV7(),
+    store = uuidV7();
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES (${rider}::uuid,'WORKFORCE','review-rider','review-rider@test.invalid','Rider'),(${reviewer}::uuid,'WORKFORCE','review-admin','review-admin@test.invalid','Admin')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES (${rider}::uuid,'RIDER'),(${reviewer}::uuid,'ADMIN')`.execute(
+  await sql`INSERT INTO user_roles(user_id,role) VALUES (${rider}::uuid,'RIDER'),(${reviewer}::uuid,'STORE_MANAGER')`.execute(
     db.db,
   );
-  await sql`INSERT INTO rider_profiles(user_id,status) VALUES (${rider}::uuid,'PENDING')`.execute(
+  await sql`INSERT INTO legal_entities(id,name) VALUES(${entity}::uuid,'Entity')`.execute(db.db);
+  await sql`INSERT INTO cities(id,name,bounds) VALUES(${city}::uuid,'City',ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))',4326))`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO stores(id,legal_entity_id,city_id,name,location,status,hourly_capacity) VALUES(${store}::uuid,${entity}::uuid,${city}::uuid,'Store',ST_GeogFromText('POINT(0.5 0.5)'),'ONLINE',100)`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${reviewer}::uuid,${store}::uuid,'STORE_MANAGER')`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO rider_profiles(user_id,status,home_store_id) VALUES (${rider}::uuid,'PENDING',${store}::uuid)`.execute(
     db.db,
   );
   const { ConfigService } =
@@ -301,7 +320,7 @@ test('store role revocation removes assignments and password reset is queued for
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES (${actor}::uuid,'WORKFORCE','assign-admin','assign-admin@test.invalid','Admin'),(${staff}::uuid,'WORKFORCE','assign-staff','assign-staff@test.invalid','Staff')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES (${actor}::uuid,'SUPER_ADMIN'),(${staff}::uuid,'PICKER')`.execute(
+  await sql`INSERT INTO user_roles(user_id,role) VALUES (${actor}::uuid,'SUPER_ADMIN'),(${staff}::uuid,'STORE_MANAGER')`.execute(
     db.db,
   );
   await sql`INSERT INTO legal_entities(id,name) VALUES (${entity}::uuid,'Entity')`.execute(db.db);
@@ -312,17 +331,19 @@ test('store role revocation removes assignments and password reset is queued for
     db.db,
   );
   const admin = new IdentityAdminService(db.db);
-  await admin.setStoreAssignment(actor, staff, store, 'PICKER', true);
-  expect(await new DatabaseIdentityAccess(db.db).hasStoreRole(staff, store, ['PICKER'])).toBe(true);
+  await admin.setStoreAssignment(actor, staff, store, 'STORE_MANAGER', true);
+  expect(
+    await new DatabaseIdentityAccess(db.db).hasStoreRole(staff, store, ['STORE_MANAGER']),
+  ).toBe(true);
   await db.db
     .transaction()
-    .execute((tx) => admin.setRoleInTransaction(tx, actor, staff, 'PICKER', false));
+    .execute((tx) => admin.setRoleInTransaction(tx, actor, staff, 'SUPPORT_AGENT', true));
   await db.db
     .transaction()
-    .execute((tx) => admin.setRoleInTransaction(tx, actor, staff, 'PICKER', true));
-  expect(await new DatabaseIdentityAccess(db.db).hasStoreRole(staff, store, ['PICKER'])).toBe(
-    false,
-  );
+    .execute((tx) => admin.setRoleInTransaction(tx, actor, staff, 'STORE_MANAGER', true));
+  expect(
+    await new DatabaseIdentityAccess(db.db).hasStoreRole(staff, store, ['STORE_MANAGER']),
+  ).toBe(false);
   expect((await admin.listUsers(actor, 'assign-staff')).users.map((user) => user.userId)).toEqual([
     staff,
   ]);
@@ -333,6 +354,8 @@ test('store role revocation removes assignments and password reset is queued for
     db.db,
   );
   expect(queued.rows.map((row) => row.action)).toEqual([
+    'ROLE_REMOVED',
+    'ROLE_GRANTED',
     'ROLE_REMOVED',
     'ROLE_GRANTED',
     'PASSWORD_RESET_REQUESTED',
@@ -352,7 +375,7 @@ test('store role revocation removes assignments and password reset is queued for
     },
   };
   const worker = new IdentitySyncWorker(db.db, { CUSTOMER: local, WORKFORCE: workforce });
-  for (let i = 0; i < 3; i++) expect(await worker.runOne()).toBe(true);
+  for (let i = 0; i < 5; i++) expect(await worker.runOne()).toBe(true);
   expect(reset).toBe('assign-staff');
 });
 

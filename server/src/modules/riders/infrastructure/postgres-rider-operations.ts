@@ -18,6 +18,7 @@ import { assertCanGoOnline } from '../domain/policy.js';
 interface StatusRow {
   rider_id: string;
   online: boolean;
+  on_break?: boolean;
   last_heartbeat_at: Date | null;
   last_location_at: Date | null;
   active_tasks: number;
@@ -29,6 +30,7 @@ export function mapStatus(row: StatusRow): RiderStatusView {
   return {
     riderId: row.rider_id,
     online: row.online,
+    onBreak: row.on_break ?? false,
     lastHeartbeatAt: row.last_heartbeat_at?.toISOString() ?? null,
     lastLocationAt: row.last_location_at?.toISOString() ?? null,
     activeTasks: row.active_tasks,
@@ -64,7 +66,7 @@ export class PostgresRiderOperations implements RiderOperations {
       await ensureRow(tx, riderId);
       const locked = await sql<
         StatusRow & { profile_status: string }
-      >`SELECT s.rider_id,s.online,s.last_heartbeat_at,s.last_location_at,s.active_tasks,s.idle_since,s.unreachable_since,p.status AS profile_status
+      >`SELECT s.rider_id,s.online,s.on_break,s.last_heartbeat_at,s.last_location_at,s.active_tasks,s.idle_since,s.unreachable_since,p.status AS profile_status
         FROM rider_status s JOIN rider_profiles p ON p.user_id=s.rider_id
         WHERE s.rider_id=${riderId}::uuid FOR UPDATE OF s`.execute(tx);
       const row = locked.rows[0];
@@ -72,7 +74,7 @@ export class PostgresRiderOperations implements RiderOperations {
       assertCanGoOnline(row.profile_status);
       const now = await databaseTimeAfterLock(tx);
       if (!row.online) {
-        await sql`UPDATE rider_status SET online=true,unreachable_since=NULL,idle_since=CASE WHEN active_tasks=0 THEN clock_timestamp() ELSE idle_since END,version=version+1 WHERE rider_id=${riderId}::uuid`.execute(
+        await sql`UPDATE rider_status SET online=true,on_break=false,unreachable_since=NULL,idle_since=CASE WHEN active_tasks=0 THEN clock_timestamp() ELSE idle_since END,version=version+1 WHERE rider_id=${riderId}::uuid`.execute(
           tx,
         );
       }
@@ -85,7 +87,7 @@ export class PostgresRiderOperations implements RiderOperations {
         await sql`INSERT INTO rider_shifts(id,rider_id,started_at) VALUES(${uuidV7()}::uuid,${riderId}::uuid,${now.toISOString()}::timestamptz)`.execute(
           tx,
         );
-      return mapStatus({ ...row, online: true });
+      return mapStatus({ ...row, online: true, on_break: row.online ? row.on_break : false });
     });
   }
 
@@ -93,7 +95,7 @@ export class PostgresRiderOperations implements RiderOperations {
     return this.run(async (tx) => {
       await ensureRow(tx, riderId);
       const locked =
-        await sql<StatusRow>`SELECT rider_id,online,last_heartbeat_at,last_location_at,active_tasks,idle_since,unreachable_since
+        await sql<StatusRow>`SELECT rider_id,online,on_break,last_heartbeat_at,last_location_at,active_tasks,idle_since,unreachable_since
         FROM rider_status WHERE rider_id=${riderId}::uuid FOR UPDATE`.execute(tx);
       const row = locked.rows[0];
       if (!row) throw new Error('RESOURCE_NOT_FOUND');
@@ -103,11 +105,11 @@ export class PostgresRiderOperations implements RiderOperations {
         await sql`UPDATE rider_shifts SET ended_at=${now.toISOString()}::timestamptz,end_reason=${reason} WHERE rider_id=${riderId}::uuid AND ended_at IS NULL`.execute(
           tx,
         );
-        await sql`UPDATE rider_status SET online=false,idle_since=CASE WHEN active_tasks=0 THEN ${now.toISOString()}::timestamptz ELSE NULL END,version=version+1 WHERE rider_id=${riderId}::uuid`.execute(
+        await sql`UPDATE rider_status SET online=false,on_break=false,idle_since=CASE WHEN active_tasks=0 THEN ${now.toISOString()}::timestamptz ELSE NULL END,version=version+1 WHERE rider_id=${riderId}::uuid`.execute(
           tx,
         );
       }
-      return mapStatus({ ...row, online: false });
+      return mapStatus({ ...row, online: false, on_break: false });
     });
   }
 
@@ -115,7 +117,7 @@ export class PostgresRiderOperations implements RiderOperations {
     return this.run(async (tx) => {
       await ensureRow(tx, riderId);
       const locked =
-        await sql<StatusRow>`SELECT rider_id,online,last_heartbeat_at,last_location_at,active_tasks,idle_since,unreachable_since
+        await sql<StatusRow>`SELECT rider_id,online,on_break,last_heartbeat_at,last_location_at,active_tasks,idle_since,unreachable_since
         FROM rider_status WHERE rider_id=${riderId}::uuid FOR UPDATE`.execute(tx);
       const row = locked.rows[0];
       if (!row) throw new Error('RESOURCE_NOT_FOUND');
@@ -125,7 +127,7 @@ export class PostgresRiderOperations implements RiderOperations {
         tx,
       );
       const fresh =
-        await sql<StatusRow>`SELECT rider_id,online,last_heartbeat_at,last_location_at,active_tasks,idle_since,unreachable_since
+        await sql<StatusRow>`SELECT rider_id,online,on_break,last_heartbeat_at,last_location_at,active_tasks,idle_since,unreachable_since
         FROM rider_status WHERE rider_id=${riderId}::uuid`.execute(tx);
       return mapStatus(fresh.rows[0]!);
     });
@@ -136,7 +138,7 @@ export class PostgresRiderOperations implements RiderOperations {
       await ensureRow(tx, riderId);
       const rows = await sql<
         StatusRow & { profile_status: string }
-      >`SELECT s.rider_id,s.online,s.last_heartbeat_at,s.last_location_at,s.active_tasks,s.idle_since,s.unreachable_since,p.status AS profile_status
+      >`SELECT s.rider_id,s.online,s.on_break,s.last_heartbeat_at,s.last_location_at,s.active_tasks,s.idle_since,s.unreachable_since,p.status AS profile_status
         FROM rider_status s JOIN rider_profiles p ON p.user_id=s.rider_id
         WHERE s.rider_id=${riderId}::uuid`.execute(tx);
       const row = rows.rows[0];

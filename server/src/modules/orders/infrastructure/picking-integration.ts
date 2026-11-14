@@ -51,7 +51,7 @@ export class OrderPickingIntegration {
       'CONFIRMED',
       'PICKING',
       'PICKING_STARTED',
-      { type: 'PICKER', id: actorId },
+      { type: 'STORE_MANAGER', id: actorId },
       { tx },
     );
   }
@@ -61,7 +61,7 @@ export class OrderPickingIntegration {
       'PICKING',
       'PACKED',
       'ORDER_PACKED',
-      { type: 'PICKER', id: actorId },
+      { type: 'STORE_MANAGER', id: actorId },
       { tx },
     );
   }

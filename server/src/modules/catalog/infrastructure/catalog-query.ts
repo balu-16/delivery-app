@@ -6,7 +6,12 @@ import type { Redis } from 'ioredis';
 import type { Database } from '../../../platform/database/database.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import type { SearchPort } from '../contracts/search.js';
-import type { CatalogQuery, CatalogReadResult, CatalogPageOptions } from '../contracts/catalog.js';
+import type {
+  CatalogQuery,
+  CatalogReadResult,
+  CatalogPageOptions,
+  CatalogPreviewItem,
+} from '../contracts/catalog.js';
 import { cursorScope, decodeCursor, encodeCursor, type CursorRow } from './catalog-cursor.js';
 import {
   availability,
@@ -37,7 +42,58 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
     private readonly config: AppConfig,
     private readonly cdnBase?: string,
     private readonly redis?: Redis,
+    private readonly previewStoreId = '',
   ) {}
+  async preview(): Promise<{ items: CatalogPreviewItem[] }> {
+    // The store is selected by server configuration, never by the caller.
+    if (!this.previewStoreId) return { items: [] };
+    const result = await sql<{
+      product_id: string;
+      name: string;
+      description: string;
+      category_id: string;
+      variant_id: string;
+      variant_name: string;
+      selling_paise: string;
+      mrp_paise: string;
+      images: Array<{ id: string; key: string }>;
+    }>`SELECT p.id::text AS product_id,p.name,p.description,p.category_id::text,
+        v.id::text AS variant_id,v.name AS variant_name,price.selling_paise::text,price.mrp_paise::text,
+        COALESCE((SELECT json_agg(json_build_object('id',m.id,'key',m.object_key) ORDER BY im.position,m.id)
+          FROM catalog_product_images im JOIN catalog_media m ON m.id=im.media_id
+          WHERE im.product_id=p.id AND m.state='REGISTERED' AND m.purpose='PRODUCT_IMAGE'),'[]'::json) AS images
+      FROM catalog_products p JOIN catalog_categories c ON c.id=p.category_id AND c.deleted_at IS NULL
+      LEFT JOIN catalog_brands b ON b.id=p.brand_id
+      JOIN catalog_variants v ON v.product_id=p.id AND v.deleted_at IS NULL
+      JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${this.previewStoreId}::uuid
+      JOIN LATERAL (SELECT selling_paise,mrp_paise FROM catalog_prices cp
+        WHERE cp.store_id=i.store_id AND cp.variant_id=i.variant_id
+          AND cp.valid_from<=statement_timestamp() AND (cp.valid_to IS NULL OR cp.valid_to>statement_timestamp()) LIMIT 1) price ON true
+      WHERE p.published AND p.deleted_at IS NULL AND (p.brand_id IS NULL OR b.deleted_at IS NULL)
+      ORDER BY p.normalized_name,p.id,v.id LIMIT 10`.execute(this.db);
+    return {
+      items: result.rows.map((row) => ({
+        productId: row.product_id,
+        name: row.name,
+        description: row.description,
+        categoryId: row.category_id,
+        variantId: row.variant_id,
+        variantName: row.variant_name,
+        sellingPaise: row.selling_paise,
+        mrpPaise: row.mrp_paise,
+        discountPercent:
+          BigInt(row.mrp_paise) === 0n
+            ? 0
+            : Number(
+                ((BigInt(row.mrp_paise) - BigInt(row.selling_paise)) * 100n) /
+                  BigInt(row.mrp_paise),
+              ),
+        images: row.images.map((image) =>
+          this.cdnBase ? `${this.cdnBase.replace(/\/$/, '')}/${image.key}` : `/media/${image.id}`,
+        ),
+      })),
+    };
+  }
   async favorites(user: string, cursor?: string) {
     if (cursor && !/^[0-9a-f-]{36}$/i.test(cursor)) throw new Error('INVALID_PAGE');
     const rows = await sql<{
@@ -157,7 +213,7 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
     let cacheKey: string | undefined,
       cacheSeconds = 0;
     const cacheStarted = performance.now();
-    if (options.suggest && this.redis) {
+    if (options.suggest && !options.favorites && this.redis) {
       const ttl = await this.config.get('catalogSuggestCacheSeconds');
       const metadata = await sql<{
         revision: string;

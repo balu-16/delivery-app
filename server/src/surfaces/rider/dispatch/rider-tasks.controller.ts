@@ -7,11 +7,13 @@ import {
 import { IsInt } from 'class-validator';
 import {
   Body,
+  BadRequestException,
   Controller,
   Get,
   Headers,
   Inject,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   UseGuards,
@@ -20,10 +22,13 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
   ApiProperty,
   ApiPropertyOptional,
+  ApiQuery,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { IsNumber, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -36,8 +41,16 @@ import {
   DeliveryIdempotencyHeader,
   DeliveryTaskView,
   WrongAddressFlagView,
+  RiderActiveTaskView,
+  RiderTaskHistoryView,
+  RiderDashboardView,
 } from '../../../modules/dispatch/contracts/swagger.js';
-import { DELIVERY_TASKS, type DeliveryTasks } from '../../../modules/dispatch/contracts/tasks.js';
+import {
+  DELIVERY_TASKS,
+  RIDER_TASK_READS,
+  type DeliveryTasks,
+  type RiderTaskReadPort,
+} from '../../../modules/dispatch/contracts/tasks.js';
 import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
 import type { Principal } from '../../../modules/identity/contracts/identity.js';
@@ -49,18 +62,20 @@ class PodUploadDto {
 }
 
 class PointDto {
-  @ApiProperty({ minimum: -90, maximum: 90 })
+  @ApiPropertyOptional({ minimum: -90, maximum: 90 })
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(-90)
   @Max(90)
-  lat!: number;
-  @ApiProperty({ minimum: -180, maximum: 180 })
+  lat?: number;
+  @ApiPropertyOptional({ minimum: -180, maximum: 180 })
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(-180)
   @Max(180)
-  lng!: number;
+  lng?: number;
 }
 
 class DeliverDto {
@@ -89,11 +104,15 @@ class CodCollectDto {
 }
 
 function readPoint(raw: PointDto | undefined): { lat: number; lng: number } | undefined {
-  return raw ? { lat: raw.lat, lng: raw.lng } : undefined;
+  if (!raw || (raw.lat === undefined && raw.lng === undefined)) return undefined;
+  if (raw.lat === undefined || raw.lng === undefined)
+    throw new BadRequestException({ code: 'INVALID_INPUT' });
+  return { lat: raw.lat, lng: raw.lng };
 }
 
 @Controller('v1/rider')
 @ApiBearerAuth()
+@ApiExtraModels(RiderActiveTaskView, RiderTaskHistoryView)
 @DeliveryApiErrors()
 @UseInterceptors(DomainErrorInterceptor, DeliveryErrorInterceptor)
 @AuthPolicy({ audience: 'rider', roles: ['RIDER'] })
@@ -103,7 +122,53 @@ export class RiderTasksController {
     @Inject(DELIVERY_TASKS) private readonly tasks: DeliveryTasks,
     @Inject(DELIVERY_POD) private readonly pod: DeliveryPod,
     @Inject(WRONG_ADDRESS) private readonly wrongAddress: WrongAddress,
+    @Inject(RIDER_TASK_READS) private readonly reads: RiderTaskReadPort,
   ) {}
+
+  @Get('tasks')
+  @ApiOperation({ operationId: 'riderListTasks' })
+  @ApiQuery({ name: 'scope', required: false, enum: ['active', 'history'] })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      required: ['items', 'nextCursor'],
+      properties: {
+        items: {
+          type: 'array',
+          items: {
+            oneOf: [
+              { $ref: getSchemaPath(RiderActiveTaskView) },
+              { $ref: getSchemaPath(RiderTaskHistoryView) },
+            ],
+          },
+        },
+        nextCursor: { type: 'string', nullable: true },
+      },
+    },
+  })
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Query('scope') scope?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    if (scope && !['active', 'history'].includes(scope)) throw new Error('INVALID_PAGE');
+    return scope === 'history' ? this.reads.history(p.userId, cursor) : this.reads.active(p.userId);
+  }
+
+  @Get('tasks/:id')
+  @ApiOperation({ operationId: 'riderTaskDetail' })
+  @ApiOkResponse({ type: RiderActiveTaskView })
+  detail(@CurrentPrincipal() p: Principal, @Param('id', ParseUUIDPipe) id: string) {
+    return this.reads.detail(p.userId, id);
+  }
+
+  @Get('dashboard')
+  @ApiOperation({ operationId: 'riderDashboard' })
+  @ApiOkResponse({ type: RiderDashboardView })
+  dashboard(@CurrentPrincipal() p: Principal) {
+    return this.reads.dashboard(p.userId);
+  }
 
   @Post('tasks/:id/pod')
   @ApiOperation({ operationId: 'riderPodUploadTarget' })

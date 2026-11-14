@@ -8,6 +8,8 @@ export type NewCustomerAddress = components['schemas']['CustomerAddressDto'];
 export type AddressResult = components['schemas']['AddressWriteView'];
 export type CatalogPage = components['schemas']['CatalogPageView'];
 export type CatalogItem = components['schemas']['ItemView'];
+export type CatalogPreviewItem = components['schemas']['PreviewItemView'];
+export type CatalogPreview = components['schemas']['CatalogPreviewView'];
 export type Serviceability = components['schemas']['ServiceabilityView'];
 type PutItem = components['schemas']['PutItemDto'];
 
@@ -35,6 +37,7 @@ export const customerApi = {
   createAddress: (token: string, body: NewCustomerAddress) => customerRequest<AddressResult>('/v1/customer/addresses', { method: 'POST', token, body }),
   selectDefaultAddress: (token: string, id: string) => customerRequest<void>(`/v1/customer/addresses/${encodeURIComponent(id)}/default`, { method: 'POST', token }),
   serviceability: (token: string, lat: number, lng: number) => customerRequest<Serviceability>(`/v1/customer/serviceability?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, { token }),
+  catalogPreview: (token: string) => customerRequest<CatalogPreview>('/v1/customer/catalog/preview', { token }),
   catalog: (token: string, addressId: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/catalog/home?${new URLSearchParams({ addressId, limit: '50', ...(cursor ? { cursor } : {}) })}`, { token }),
   categories: (token: string, addressId: string) => customerRequest<{items:{id:string; name:string}[]}>(`/v1/customer/catalog/categories?${new URLSearchParams({addressId})}`, {token}),
   category: (token: string, addressId: string, category: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/catalog/categories/${encodeURIComponent(category)}/products?${new URLSearchParams({addressId,limit:'50',...(cursor ? {cursor} : {})})}`, {token}),

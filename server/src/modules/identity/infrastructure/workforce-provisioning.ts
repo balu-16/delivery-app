@@ -32,7 +32,7 @@ export class WorkforceProvisioning {
     const created = await this.db.transaction().execute(async (tx) => {
       const actor = await sql<{
         id: string;
-      }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(
+      }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('SUPER_ADMIN') FOR SHARE OF u,r`.execute(
         tx,
       );
       if (!actor.rows[0]) throw new Error('FORBIDDEN');
@@ -121,7 +121,7 @@ export class WorkforceProvisioning {
       return await this.db.transaction().execute(async (tx) => {
         const actor = await sql<{
           id: string;
-        }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(
+        }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role IN ('SUPER_ADMIN') FOR SHARE OF u,r`.execute(
           tx,
         );
         if (!actor.rows[0]) throw new Error('FORBIDDEN');

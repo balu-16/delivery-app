@@ -27,7 +27,7 @@ it('rejects a tampered approval payload without executing or auditing approval',
   const service = new MakerChecker(world.db.db, {
     test: {
       version: 1,
-      makerRole: 'ADMIN',
+      makerRole: 'SUPER_ADMIN',
       checkerRole: 'SUPER_ADMIN',
       ttlSeconds: 300,
       validate: (payload) => typeof payload === 'object' && payload !== null,

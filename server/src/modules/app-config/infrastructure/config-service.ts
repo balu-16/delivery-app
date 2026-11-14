@@ -329,11 +329,7 @@ export class ConfigService implements AppConfig, AdminConfig {
     this.invalidate();
   }
   async snapshot(): Promise<{ config: ConfigValues; flags: Record<FeatureFlagKey, boolean> }> {
-    const config = Object.fromEntries(
-      await Promise.all(
-        (Object.keys(definitions) as ConfigKey[]).map(async (key) => [key, await this.get(key)]),
-      ),
-    ) as unknown as ConfigValues;
+    const config = await this.getMany(Object.keys(definitions) as ConfigKey[]);
     const rows = await sql<{
       key: FeatureFlagKey;
       enabled: boolean;
@@ -345,6 +341,13 @@ export class ConfigService implements AppConfig, AdminConfig {
       ]),
     ) as Record<FeatureFlagKey, boolean>;
     return { config, flags };
+  }
+  async flag(key: FeatureFlagKey, tx?: TransactionContext): Promise<boolean> {
+    if (!(FEATURE_FLAG_KEYS as readonly string[]).includes(key)) throw new Error('INVALID_FLAG');
+    const result = await sql<{
+      enabled: boolean;
+    }>`SELECT enabled FROM feature_flags WHERE key=${key}`.execute(tx ?? this.db);
+    return result.rows[0]?.enabled === true;
   }
   async setFlag(actorId: string, key: FeatureFlagKey, enabled: boolean): Promise<void> {
     if (!(FEATURE_FLAG_KEYS as readonly string[]).includes(key) || typeof enabled !== 'boolean')

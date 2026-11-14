@@ -24,7 +24,7 @@ import type {
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import { parseMoney } from '../../../common/money/money.js';
 import type { CheckoutPlaceRequest } from '../contracts/checkout.js';
-import { evaluateCod } from '../contracts/checkout.js';
+import { codEligibility } from './cod-eligibility.js';
 
 export interface PlaceDependencies {
   readonly db: Database;
@@ -61,12 +61,12 @@ interface AddressContext {
 export class PlaceOrderSaga {
   constructor(private readonly deps: PlaceDependencies) {}
   /** Resumes the order previously placed under the same idempotency operation. */
-  async findResumable(operationId: string): Promise<OrderView | null> {
+  async findResumable(operationId: string, tx?: TransactionContext): Promise<OrderView | null> {
     const rows = await sql<{ id: string }>`SELECT id::text AS id FROM orders
       WHERE metadata->>'checkoutOperationId' = ${operationId}
-      ORDER BY placed_at LIMIT 1`.execute(this.deps.db);
+      ORDER BY placed_at LIMIT 1`.execute(tx ?? this.deps.db);
     const id = rows.rows[0]?.id;
-    return id ? await this.deps.orders.byId(id) : null;
+    return id ? await this.deps.orders.byId(id, { tx }) : null;
   }
   async place(
     userId: string,
@@ -296,29 +296,14 @@ export class PlaceOrderSaga {
     userId: string,
     quote: QuoteSnapshot,
   ): Promise<{ allowed: true } | { allowed: false; code: string }> {
-    const [codEnabled, maxCodPaise, eligibility] = await Promise.all([
-      this.flag(tx, 'cod_enabled'),
-      this.deps.config.get('maxCodPaise', tx),
-      this.deps.config.get('codEligibility', tx),
-    ]);
-    const store = await sql<{ accepts_cod: boolean }>`SELECT accepts_cod FROM stores
-      WHERE id=${quote.storeId}::uuid`.execute(tx);
-    const completed = await sql<{ n: string }>`SELECT count(*)::text AS n FROM orders
-      WHERE user_id=${userId}::uuid AND status='DELIVERED' AND payment_status='PAID'
-      AND payment_method IN ('GATEWAY','WALLET','ZERO_DUE')`.execute(tx);
-    return evaluateCod({
-      codEnabled,
-      storeAcceptsCod: store.rows[0]?.accepts_cod === true,
-      amountDuePaise: quote.amountDuePaise,
-      maxCodPaise,
-      completedPrepaidOrders: Number(completed.rows[0]?.n ?? '0'),
-      minCompletedPrepaidOrders: eligibility.minCompletedPrepaidOrders,
-    });
-  }
-  private async flag(tx: TransactionContext, key: string): Promise<boolean> {
-    const rows = await sql<{ enabled: boolean }>`SELECT enabled FROM feature_flags
-      WHERE key=${key}`.execute(tx);
-    return rows.rows[0]?.enabled === true;
+    return codEligibility(
+      this.deps.db,
+      this.deps.config,
+      userId,
+      quote.storeId,
+      quote.amountDuePaise,
+      tx,
+    );
   }
   private async addressContext(
     tx: TransactionContext,

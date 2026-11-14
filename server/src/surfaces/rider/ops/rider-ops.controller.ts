@@ -8,7 +8,13 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
 import {
   IsBoolean,
   IsInt,
@@ -28,6 +34,7 @@ import { DomainErrorInterceptor } from '../../domain-errors.js';
 import {
   DeliveryApiErrors,
   DeliveryErrorInterceptor,
+  RiderMeView,
 } from '../../../modules/dispatch/contracts/swagger.js';
 import {
   RIDER_CASH,
@@ -119,6 +126,13 @@ export class RiderOpsController {
     @Inject(RIDER_EARNINGS) private readonly earnings: RiderEarnings,
     @Inject(RIDER_CASH) private readonly cash: RiderCash,
   ) {}
+
+  @Get('status')
+  @ApiOperation({ operationId: 'riderGetStatus' })
+  @ApiOkResponse({ type: RiderMeView })
+  status(@CurrentPrincipal() p: Principal) {
+    return this.riders.me(p.userId);
+  }
 
   @Post('status/online')
   @ApiOperation({ operationId: 'riderGoOnline' })

@@ -136,7 +136,7 @@ export class PostgresPushCampaigns implements PushCampaigns {
         return { id: old.rows[0].id, replay: true };
       }
       const allowed =
-        await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actor}::uuid AND u.status='ACTIVE' AND r.role IN ('ADMIN','SUPER_ADMIN') LIMIT 1`.execute(
+        await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actor}::uuid AND u.status='ACTIVE' AND r.role IN ('SUPER_ADMIN') LIMIT 1`.execute(
           tx,
         );
       if (!allowed.rows.length) throw new Error('FORBIDDEN');

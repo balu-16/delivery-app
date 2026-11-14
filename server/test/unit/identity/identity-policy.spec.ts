@@ -12,7 +12,7 @@ const identity: VerifiedIdentity = {
   pool: 'WORKFORCE',
   sub: 'subject',
   tokenUse: 'access',
-  groups: ['RIDER', 'ADMIN'],
+  groups: ['RIDER'],
   expiresAt: 9999999999,
 };
 const principal: Principal = {
@@ -37,6 +37,12 @@ test('authorization intersects current roles with token groups and honors pendin
   expect(() => authorizeIdentity({ ...identity, groups: [] }, principal, 'rider', true)).toThrow(
     'FORBIDDEN',
   );
+  expect(() =>
+    authorizeIdentity({ ...identity, groups: ['RIDER', 'SUPER_ADMIN'] }, principal, 'rider', true),
+  ).toThrow('FORBIDDEN');
+  expect(() =>
+    authorizeIdentity({ ...identity, groups: ['RIDER', 'ADMIN'] }, principal, 'rider', true),
+  ).toThrow('FORBIDDEN');
   expect(() => authorizeIdentity(identity, null, 'rider', true)).toThrow('PROFILE_NOT_INITIALIZED');
   expect(() => authorizeIdentity(identity, { ...principal, sub: 'other' }, 'rider', true)).toThrow(
     'FORBIDDEN',
@@ -44,6 +50,22 @@ test('authorization intersects current roles with token groups and honors pendin
   expect(
     authorizeIdentity(identity, { ...principal, riderStatus: 'APPROVED' }, 'rider', false).userId,
   ).toBe('user');
+});
+test('customers also need exactly the matching customer group', () => {
+  const customer = { ...identity, pool: 'CUSTOMER' as const, groups: ['CUSTOMER'] };
+  const account = {
+    ...principal,
+    pool: 'CUSTOMER' as const,
+    roles: ['CUSTOMER' as const],
+    riderStatus: null,
+  };
+  expect(authorizeIdentity(customer, account, 'customer', false).roles).toEqual(['CUSTOMER']);
+  expect(() => authorizeIdentity({ ...customer, groups: [] }, account, 'customer', false)).toThrow(
+    'FORBIDDEN',
+  );
+  expect(() =>
+    authorizeIdentity({ ...customer, groups: ['CUSTOMER', 'RIDER'] }, account, 'customer', false),
+  ).toThrow('FORBIDDEN');
 });
 test('required documents must all be present and approved, with no empty policy bypass', () => {
   const docs = [

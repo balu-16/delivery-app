@@ -101,8 +101,7 @@ export class HolidayDto {
 }
 export class StaffDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() userId!: string;
-  @ApiProperty({ enum: ['PICKER', 'STORE_MANAGER'] }) @IsIn(['PICKER', 'STORE_MANAGER']) role!:
-    'PICKER' | 'STORE_MANAGER';
+  @ApiProperty({ enum: ['STORE_MANAGER'] }) @IsIn(['STORE_MANAGER']) role!: 'STORE_MANAGER';
   @ApiProperty({ type: Boolean }) @IsBoolean() active!: boolean;
 }
 export class PageQuery {
@@ -130,11 +129,11 @@ export class OperationsQuery {
   holidayCursor?: string;
   @ApiPropertyOptional({
     description: 'User UUID and role separated by a colon',
-    pattern: '^[0-9a-fA-F-]{36}:(PICKER|STORE_MANAGER)$',
+    pattern: '^[0-9a-fA-F-]{36}:STORE_MANAGER$',
   })
   @IsOptional()
   @Matches(
-    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}:(PICKER|STORE_MANAGER)$/,
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}:STORE_MANAGER$/,
   )
   staffCursor?: string;
 }

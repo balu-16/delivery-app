@@ -113,7 +113,7 @@ export async function createP5World(): Promise<P5World> {
       await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${id}::uuid,${pool},${sub},${sub + '@example.invalid'},${sub})`.execute(
         db.db,
       );
-    await sql`INSERT INTO user_roles(user_id,role) VALUES(${customer}::uuid,'CUSTOMER'),(${otherCustomer}::uuid,'CUSTOMER'),(${thirdCustomer}::uuid,'CUSTOMER'),(${admin}::uuid,'ADMIN')`.execute(
+    await sql`INSERT INTO user_roles(user_id,role) VALUES(${customer}::uuid,'CUSTOMER'),(${otherCustomer}::uuid,'CUSTOMER'),(${thirdCustomer}::uuid,'CUSTOMER'),(${admin}::uuid,'SUPER_ADMIN')`.execute(
       db.db,
     );
     await sql`INSERT INTO legal_entities(id,name) VALUES(${entity}::uuid,'entity')`.execute(db.db);

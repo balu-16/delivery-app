@@ -27,7 +27,11 @@ import { IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min } from 'cl
 import type { Json } from '../../../platform/database/database.js';
 import type { TransactionContext } from '../../../platform/database/database.js';
 import { DomainErrorInterceptor } from '../../domain-errors.js';
-import { IdempotencyStore, hashRequest } from '../../../common/idempotency/idempotency.js';
+import {
+  canonical,
+  IdempotencyStore,
+  hashRequest,
+} from '../../../common/idempotency/idempotency.js';
 import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
 import type { Principal } from '../../../modules/identity/contracts/identity.js';
@@ -67,18 +71,6 @@ class ValidateDto {
 }
 class AvailableQuery {
   @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() addressId?: string;
-}
-/** Canonical JSON so the same logical request always hashes identically. */
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === 'object')
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([, v]) => v !== undefined)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([k, v]) => [k, canonical(v)]),
-    );
-  return value;
 }
 @Controller('v1/customer')
 @ApiBearerAuth()

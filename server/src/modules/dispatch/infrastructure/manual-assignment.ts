@@ -25,7 +25,7 @@ export class ManualAssignment implements DeliveryAssignment {
     if (!reason.trim() || reason.length > 300) throw new Error('INVALID_INPUT');
     const id = await this.tasks.run(async (tx) => {
       const allowed = await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id
-     WHERE u.id=${actorId}::uuid AND u.status='ACTIVE' AND r.role IN ('ADMIN','SUPER_ADMIN') FOR SHARE OF u,r`.execute(
+     WHERE u.id=${actorId}::uuid AND u.status='ACTIVE' AND r.role IN ('SUPER_ADMIN') FOR SHARE OF u,r`.execute(
         tx,
       );
       if (!allowed.rows.length) throw new Error('FORBIDDEN');

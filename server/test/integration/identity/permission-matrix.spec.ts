@@ -71,8 +71,8 @@ test('each identity operation rejects missing credentials, the wrong pool, and i
     { method: 'GET', url: '/v1/admin/config', audience: 'admin' },
     { method: 'POST', url: '/v1/admin/config/termsVersion', audience: 'admin' },
     { method: 'POST', url: '/v1/admin/feature-flags/wallet_enabled', audience: 'admin' },
-    { method: 'GET', url: `/v1/admin/rider-documents/${id}/read-url`, audience: 'admin' },
-    { method: 'POST', url: `/v1/admin/rider-documents/${id}/review`, audience: 'admin' },
+    { method: 'GET', url: `/v1/store/rider-documents/${id}/read-url`, audience: 'store' },
+    { method: 'POST', url: `/v1/store/rider-documents/${id}/review`, audience: 'store' },
     { method: 'POST', url: '/v1/admin/users/workforce', audience: 'admin' },
     { method: 'POST', url: `/v1/admin/users/${id}/block`, audience: 'admin' },
     { method: 'POST', url: `/v1/admin/users/${id}/password-reset`, audience: 'admin' },
@@ -110,13 +110,13 @@ test('each identity operation rejects missing credentials, the wrong pool, and i
         url: '/v1/admin/stores',
         headers: { authorization: `Bearer ${currentToken}` },
       });
-    await sql`INSERT INTO user_roles(user_id,role) VALUES (${support}::uuid,'ADMIN')`.execute(
+    await sql`UPDATE user_roles SET role='SUPER_ADMIN' WHERE user_id=${support}::uuid`.execute(
       db.db,
     );
     expect((await currentRoleRequest()).statusCode).toBe(403);
     currentToken = await tokens.issue('WORKFORCE', 'matrix-support', 'admin', 'access');
     expect((await currentRoleRequest()).statusCode).toBe(200);
-    await sql`DELETE FROM user_roles WHERE user_id=${support}::uuid AND role='ADMIN'`.execute(
+    await sql`UPDATE user_roles SET role='SUPPORT_AGENT' WHERE user_id=${support}::uuid`.execute(
       db.db,
     );
     expect((await currentRoleRequest()).statusCode).toBe(403);

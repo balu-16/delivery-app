@@ -55,10 +55,47 @@ export interface OfferView {
   attemptNo: number;
   expiresAt: string;
   codAmountPaise: string | null;
+  storeName: string;
+  orderNumber: string;
 }
 
 export interface OfferPage {
   items: OfferView[];
+}
+
+export interface RiderActiveTask extends DeliveryTaskView {
+  orderNumber: string;
+  codCollectedPaise: string | null;
+  store: { name: string; lat: number; lng: number };
+  destination: {
+    name: string | null;
+    line1: string | null;
+    line2: string | null;
+    landmark: string | null;
+    pincode: string | null;
+    lat: number | null;
+    lng: number | null;
+  };
+  items: Array<{ name: string; quantity: string }>;
+}
+export interface RiderTaskHistoryItem {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  attemptNo: number;
+  assignedAt: string;
+  status: string;
+  totalPaise: string | null;
+}
+export const RIDER_TASK_READS = Symbol('RIDER_TASK_READS');
+export interface RiderTaskReadPort {
+  active(riderId: string): Promise<{ items: RiderActiveTask[]; nextCursor: null }>;
+  detail(riderId: string, taskId: string): Promise<RiderActiveTask>;
+  history(
+    riderId: string,
+    before?: string,
+  ): Promise<{ items: RiderTaskHistoryItem[]; nextCursor: string | null }>;
+  dashboard(riderId: string): Promise<{ todayDeliveries: number; todayEarningsPaise: string }>;
 }
 
 export interface DeliverInput {

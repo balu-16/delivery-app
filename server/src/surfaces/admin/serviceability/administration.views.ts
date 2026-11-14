@@ -65,7 +65,7 @@ export class HolidayHoursView {
 }
 export class StaffView {
   @ApiProperty({ format: 'uuid' }) user_id!: string;
-  @ApiProperty({ enum: ['PICKER', 'STORE_MANAGER'] }) role!: string;
+  @ApiProperty({ enum: ['STORE_MANAGER'] }) role!: string;
 }
 export class StoreOperationsView {
   @ApiProperty({ type: [HoursView] }) hours!: HoursView[];

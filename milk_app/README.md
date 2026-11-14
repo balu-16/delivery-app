@@ -10,32 +10,31 @@ An Expo/React Native customer app. The customer API runs on your computer and us
    ```sh
    cd server
    pnpm install --frozen-lockfile
-   # Replace this with your computer's Wi-Fi address.
-   LAN_IP=192.168.1.100
-   APP_ROLE=customer PORT=13080 APP_BASE_URL="http://${LAN_IP}:13080" \
+   APP_ROLE=customer \
      READINESS_TIMEOUT_MS=15000 DB_ACQUIRE_TIMEOUT_MS=30000 HTTP_REQUEST_TIMEOUT_MS=30000 HTTP_HEADERS_TIMEOUT_MS=30000 \
      pnpm dlx node@26.13.0 --env-file=.env dist/main.js
    ```
 
-   Keep this terminal open. If `dist/main.js` is absent or older than the server source, obtain permission before compiling it; the existing artifact can be used for the initial sign-in test when it contains the current bootstrap implementation. Check `http://localhost:13080/healthz` and `http://localhost:13080/readyz`. The first checks the process; the second checks its configured dependencies. This customer role does not run background workers or consume shared queues. Fulfilment, dispatch, scheduled subscriptions and notifications require the appropriate backend worker processes to be running separately.
+   Keep this terminal open. If `dist/main.js` is absent or older than the server source, obtain permission before compiling it; the existing artifact can be used for the initial sign-in test when it contains the current bootstrap implementation. Check `/healthz` and `/readyz` on the port set in `server/.env` (13080 in the example). The first checks the process; the second checks its configured dependencies. This customer role does not run background workers or consume shared queues. Fulfilment, dispatch, scheduled subscriptions and notifications require the appropriate backend worker processes to be running separately.
 
 ## Start on a phone
 
-1. Install Expo Go compatible with Expo SDK 58 on your Android or iOS phone. Put your phone and computer on the same network. Find your computer's LAN IPv4 address, for example using `ip -4 addr` on Linux.
-2. In `milk_app`, copy `.env.example` to `.env.local`. Set `EXPO_PUBLIC_API_URL` to `http://<computer-LAN-IP>:13080`; `localhost` on a phone means the phone itself. Set the public Cognito region and customer app-client ID to match the server. Public Expo variables are included in the app bundle and must not contain secrets. Restart Metro after changing them.
+1. Install Expo Go compatible with Expo SDK 58 on your Android or iOS phone. Put your phone and computer on the same network.
+2. In `milk_app`, copy `.env.example` to `.env.local` if it does not exist. Leave `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_API_PORT` empty for local development. Expo supplies the computer's current LAN address, and the app reads the port configured in `server/.env` when Metro starts. Set the public Cognito region and customer app-client ID to match the server. Public Expo variables are included in the app bundle and must not contain secrets.
 3. Run:
 
    ```sh
    cd milk_app
    pnpm install --frozen-lockfile
-   # Replace this with the same Wi-Fi address used in .env.local.
-   REACT_NATIVE_PACKAGER_HOSTNAME=192.168.1.100 pnpm start --go --lan
+   pnpm start --go --lan
    ```
 
-4. Open the QR code with Expo Go on Android, or with the iPhone camera. If it cannot connect, check the LAN IP, firewall access to the Metro and API ports, VPN routing, and that both terminals are running. The phone location permission is used when you choose **Use current location** for an address.
-5. Run `pnpm phone:check` in `milk_app` to check the configured LAN address, API health and readiness, and Metro. A 503 readiness result means at least one configured dependency did not respond within the server's deadline; retry and investigate the AWS connection if it persists.
+4. Open the QR code with Expo Go on Android, or with the iPhone camera. After changing networks, restart Metro and reconnect to the new QR code; no IP address needs editing. If it cannot connect, check firewall access to the Metro and API ports, VPN routing, and that both terminals are running. The phone location permission is used when you choose **Use current location** for an address.
+5. Run `pnpm phone:check` in `milk_app` to check the discovered LAN address, API health and readiness, and Metro. A 503 readiness result means at least one configured dependency did not respond within the server's deadline; retry and investigate the AWS connection if it persists.
 
-Creating an account contacts Cognito directly. Signing in additionally requires the customer API above; an Expo Go screen can load even when that API is stopped. Cognito accounts appear under **Users** even before they belong to a group. The backend creates a customer profile on the first successful sign-in. For an account with a temporary password, enter that password at sign-in and then choose a new one when prompted.
+Automatic discovery assumes Metro and the backend run on the same computer. Restart Metro after changing the backend's `PORT`. If the backend is elsewhere, set `EXPO_PUBLIC_API_URL` to its reachable address; releases require HTTPS. If you override the backend's port on the command line instead of using `server/.env`, set `EXPO_PUBLIC_API_PORT` to the same port before starting Metro. An Expo tunnel only reaches Metro, so a separate reachable API URL is required with `--tunnel`.
+
+Creating an account contacts Cognito directly. Signing in additionally requires the customer API above; an Expo Go screen can load even when that API is stopped. Verified customers are assigned the `CUSTOMER` Cognito group; a new account can appear briefly under **Users** while the group is being assigned. Protected requests require both that group and the matching database customer profile, which is created during bootstrap. For an account with a temporary password, enter that password at sign-in and then choose a new one when prompted.
 
 ## Current integration and checks
 
@@ -43,14 +42,14 @@ The app uses Cognito sign-in and the customer API for address selection, catalog
 
 Online payment and maps are marked as in progress. To add a delivery address, use the phone-location button while at the address and enter the remaining details. Availability depends on the configured service zones and stores. There is no wallet top-up flow.
 
-In the configured AWS development database, the wallet and cash-on-delivery flags are disabled and the three stores have COD disabled. An active workforce **SUPER_ADMIN** can enable the wallet, enable COD at each store, then enable the global COD flag with the audited admin API. With an up-to-date compiled server, the following helper performs those changes through the authenticated admin API. It prompts for the workforce email, password and, if requested, a verification code; do not share those credentials in chat:
+Wallet and cash-on-delivery availability depend on the feature flags and each store's COD setting. An active workforce **SUPER_ADMIN** can enable the wallet, enable COD at each store, then enable the global COD flag with the audited admin API. With an up-to-date compiled server, the following helper performs those changes through the authenticated admin API. It prompts for the workforce email, password and, if requested, a verification code; do not share those credentials in chat:
 
 ```sh
 cd server
 pnpm dlx node@26.13.0 --env-file=.env scripts/enable-customer-features.mjs
 ```
 
-The command requires a real Cognito-backed workforce account with `SUPER_ADMIN` in the database. The existing development super-admin rows are demo identities. No supported first-admin bootstrap procedure is currently provided, so the account owner must establish one before this command can succeed. It leaves subscription settings unchanged. COD remains subject to store availability, order value and backend eligibility rules. Referral rewards require the wallet flag.
+The command requires a real Cognito-backed workforce account with the matching `SUPER_ADMIN` Cognito group and database role. It leaves subscription settings unchanged. COD remains subject to store availability, order value and backend eligibility rules. Referral rewards require the wallet flag.
 
 ## Android push notifications
 
