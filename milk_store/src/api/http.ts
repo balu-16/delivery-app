@@ -27,6 +27,17 @@ export function getCsrfToken(): string | null {
   return csrfToken
 }
 
+/**
+ * Re-authentication hook: registered by the auth layer so a stale CSRF token
+ * (module reload, HMR, or an expired session) can be repaired transparently.
+ * Mutating requests that fail with 401 SESSION_EXPIRED / 403 CSRF_TOKEN_INVALID
+ * re-bootstrap the cookie session once and retry.
+ */
+let reauthHook: (() => Promise<void>) | null = null
+export function setReauthHook(fn: (() => Promise<void>) | null): void {
+  reauthHook = fn
+}
+
 export function newIdempotencyKey(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -39,7 +50,7 @@ export interface RequestInitLite {
   timeoutMs?: number
 }
 
-async function request<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, init?: RequestInitLite): Promise<T> {
+async function requestOnce<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, init?: RequestInitLite): Promise<T> {
   const headers: Record<string, string> = { accept: 'application/json' }
   if (init?.body !== undefined) headers['content-type'] = 'application/json'
   if (csrfToken && method !== 'GET') headers['x-store-csrf'] = csrfToken
@@ -72,6 +83,26 @@ async function request<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: str
     )
   }
   return (payload ?? undefined) as T
+}
+
+/** Mutating request with one transparent re-auth + retry on stale credentials. */
+async function request<T>(
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  path: string,
+  init?: RequestInitLite,
+  retried = false,
+): Promise<T> {
+  try {
+    return await requestOnce<T>(method, path, init)
+  } catch (error) {
+    const status = (error as ApiError).status
+    const code = (error as ApiError).code
+    const stale = retried === false && method !== 'GET' && reauthHook !== null &&
+      ((status === 403 && code === 'CSRF_TOKEN_INVALID') || (status === 401 && code === 'SESSION_EXPIRED'))
+    if (!stale) throw error
+    await reauthHook!()
+    return requestOnce<T>(method, path, init)
+  }
 }
 
 export function apiGet<T>(path: string, timeoutMs?: number): Promise<T> {

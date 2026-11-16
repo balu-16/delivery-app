@@ -64,6 +64,14 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except Exception:
+    except subprocess.CalledProcessError as error:
+        # Surface the real AWS rejection (policy/rate/permission) so ops can fix it.
+        detail = (error.stderr or '').strip()
         print('Unable to obtain the restricted delivery AWS session', file=sys.stderr)
+        if detail:
+            print(detail, file=sys.stderr)
+        sys.exit(1)
+    except Exception as error:
+        print('Unable to obtain the restricted delivery AWS session', file=sys.stderr)
+        print(f'{type(error).__name__}: {error}', file=sys.stderr)
         sys.exit(1)

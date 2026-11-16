@@ -326,7 +326,14 @@ export function mapTask(view: BackendPickTaskView, order?: BackendStoreOrder): P
     batchExpiry: item.batchExpiresAt ?? item.fefoSuggestions[0]?.expiresAt ?? '',
     substitutionVariantId: item.substituteVariantId ?? undefined,
     unavailableReason: item.shortReason ?? undefined,
-    resolved: item.status !== 'PENDING',
+    // A line is only "resolved" when its decision is final: shorted,
+    // substituted, or picked to the full expected quantity. A partial pick
+    // (the backend allows re-picking up to the expected qty) must keep its
+    // stepper so the manager can top it up.
+    resolved:
+      item.status === 'SHORT' ||
+      item.status === 'SUBSTITUTED' ||
+      (item.status === 'PICKED' && num(item.pickedQty) >= num(item.expectedQty)),
     substitutionCandidates: (item.substitutionCandidates ?? []).map((candidate) => ({
       variantId: candidate.variantId,
       name: candidate.name,

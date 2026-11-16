@@ -358,6 +358,9 @@ async function main(): Promise<void> {
     VALUES(${store1}::uuid,1,'OFFLINE','ONLINE',NULL,${managerA}::uuid),
       (${store1}::uuid,2,'ONLINE','PAUSED','Seeded test pause',${managerA}::uuid),
       (${store1}::uuid,3,'PAUSED','ONLINE',NULL,${managerA}::uuid)`.execute(db.db);
+  // stores.version must stay in lockstep with the history versions, or the
+  // next setStatus computes a colliding history primary key.
+  await sql`UPDATE stores SET version=3 WHERE id=${store1}::uuid AND version < 3`.execute(db.db);
   const notifications: [string, boolean][] = [
     ['store_order_arrived', false],
     ['picking_sla_warning', false],

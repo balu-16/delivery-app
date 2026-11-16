@@ -125,14 +125,15 @@ function RecordReturnDialog({ open, onOpenChange, orders, storeId }: {
   const items = detail?.items ?? []
   const valid = !!orderId && !detailQ.isError && !detailQ.isLoading && reason.trim().length > 0 && items.length > 0
 
-  const submit = () => {
+  const submit = async () => {
     if (!valid) return
-    void returns.record(
+    // Close only on success so a failed submission keeps the entered data.
+    const done = await returns.record(
       orderId,
       reason.trim(),
       items.map((item) => ({ variantId: item.variantId, quantity: item.quantity, expiresAt: item.expiresAt })),
     )
-    onOpenChange(false)
+    if (done !== null) onOpenChange(false)
   }
 
   return (
@@ -198,7 +199,7 @@ function RecordReturnDialog({ open, onOpenChange, orders, storeId }: {
           <div className="flex items-center justify-end gap-2">
             <Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Tip tip={!orderId ? 'Pick an order first' : !reason.trim() ? 'Each return needs a reason' : undefined}>
-              <Button disabled={!valid} onClick={submit}><Undo2 className="h-4 w-4" /> Record Return</Button>
+              <Button disabled={!valid} onClick={() => void submit()}><Undo2 className="h-4 w-4" /> Record Return</Button>
             </Tip>
           </div>
         </div>

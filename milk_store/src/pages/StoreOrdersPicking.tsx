@@ -510,11 +510,12 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
             <div className="flex items-center gap-2 rounded-xl border border-destructive/40 bg-destructive-soft px-4 py-4 text-[13px] font-bold text-destructive">
               <XCircle className="h-5 w-5 shrink-0" /> Code locked — contact admin
             </div>
-          ) : verified || !task.handover ? (
+          ) : verified ? (
             <div className="rounded-xl border border-success/30 bg-success-soft px-4 py-3 text-[13px] font-semibold text-success">
               Handover verified at {task.handover?.verifiedAt ? fmtTime(task.handover.verifiedAt) : '—'}
             </div>
           ) : (
+            /* No handover record yet: the rider's code entry is the default state. */
             <div className="rounded-xl border border-border/70 px-4 py-4">
               <Label required>Enter the rider&apos;s handover code</Label>
               <div className="flex items-center gap-2">

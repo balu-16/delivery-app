@@ -287,13 +287,13 @@ export class PostgresStorePortalReads implements StorePortalReads {
         variant_id: string;
         variant_name: string;
         quantity: string;
-        expires_at: Date | null;
+        expiresAt: string | null;
       }>`SELECT COALESCE(oi.fulfillment_snapshot->>'variantId',oi.variant_id::text) AS variant_id,
           COALESCE(cv.name, p.name, '') AS variant_name, sum(oi.fulfilled_qty)::text AS quantity,
-          (SELECT min(b.expires_at) FROM inventory_ledger l JOIN inventory_batches b ON b.id=l.batch_id
+          (SELECT min(b.expires_at)::text FROM inventory_ledger l JOIN inventory_batches b ON b.id=l.batch_id
             WHERE l.store_id=o.store_id AND l.variant_id=COALESCE(oi.fulfillment_snapshot->>'variantId',oi.variant_id::text)::uuid
               AND l.kind='RESERVE_COMMIT_PICK'
-              AND (l.reference='pick:'||oi.order_id::text OR l.reference LIKE 'pick:'||oi.order_id::text||':g%')) AS expires_at
+              AND (l.reference='pick:'||oi.order_id::text OR l.reference LIKE 'pick:'||oi.order_id::text||':g%')) AS "expiresAt"
         FROM order_items oi
         JOIN orders o ON o.id=oi.order_id
         JOIN catalog_variants v ON v.id=oi.variant_id
@@ -329,7 +329,7 @@ export class PostgresStorePortalReads implements StorePortalReads {
           variantId: row.variant_id,
           variantName: row.variant_name,
           quantity: row.quantity,
-          expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : null,
+          expiresAt: row.expiresAt ? new Date(row.expiresAt).toISOString() : null,
         })),
         returns: returns.rows.map((row) => ({
           returnId: row.id,

@@ -9,6 +9,12 @@ import {
   type ManagerPayload,
   type StoreAuthUser,
 } from './authApi'
+import { setReauthHook } from '../api/http'
+
+// The HTTP client can transparently repair a stale CSRF token / session.
+setReauthHook(async () => {
+  await bootstrapSession()
+})
 
 /**
  * Store-web auth store. The credential is the server's HttpOnly

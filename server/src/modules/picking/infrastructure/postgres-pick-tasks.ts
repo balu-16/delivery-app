@@ -117,12 +117,17 @@ export class PostgresPickTasks implements PickTasks {
         await assertStoreRole(this.identity, actorId, input.storeId, ['STORE_MANAGER'], tx);
       const cursor = input.cursor ? decodeCursor(input.cursor) : null;
       if (input.cursor && !cursor) throw new Error('INVALID_CURSOR');
+      // A COMPLETED task whose order has not been handed over yet is still
+      // live store work (pack + handover); it must stay visible to the
+      // manager board instead of disappearing from every scope.
+      const packable = sql`(status='COMPLETED' AND EXISTS (SELECT 1 FROM orders o
+        WHERE o.id=pick_tasks.order_id AND o.status IN ('PICKING','PACKED')))`;
       const filter =
         input.scope === 'QUEUE'
           ? sql`status='PENDING'`
           : input.scope === 'MINE'
-            ? sql`assigned_to=${actorId}::uuid AND status IN ('ASSIGNED','IN_PROGRESS')`
-            : sql`status NOT IN ('COMPLETED','CANCELLED')`;
+            ? sql`assigned_to=${actorId}::uuid AND (status IN ('ASSIGNED','IN_PROGRESS') OR ${packable})`
+            : sql`(status IN ('PENDING','ASSIGNED','IN_PROGRESS') OR ${packable})`;
       const rows = await sql<{
         id: string;
       }>`SELECT id FROM pick_tasks WHERE store_id=${input.storeId}::uuid AND available_at <= clock_timestamp() AND ${filter} AND (${cursor ? sql`(sla_due_at,id) > (${cursor.slaDueAt}::timestamptz,${cursor.id}::uuid)` : sql`true`}) ORDER BY sla_due_at,id LIMIT ${limit + 1}`.execute(
