@@ -1,3 +1,4 @@
+import { firstFailedQuery, PageLoadError } from '@/components/PageLoadError'
 // §3 Inventory — batch-level stock table, receive stock, low-stock/expiring views,
 // persistent multi-line count sessions and versioned manual adjustments.
 import { useEffect, useMemo, useState } from 'react'
@@ -13,7 +14,7 @@ import {
   useCountSessions, useBinLocations,
 } from '@/api/storeQueries'
 import { useStoreInventoryActions } from '@/api/storeMutations'
-import type { StockRow } from '@/api/storeApi'
+import { exportInventory, type StockRow } from '@/api/storeApi'
 import { downloadCsv } from '@dairydirect/shared/services/exports'
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Skeleton, Badge } from '@dairydirect/shared/ui/base'
 import { ConfirmDialog, Dialog, DialogContent, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownItem } from '@dairydirect/shared/ui/overlays'
@@ -22,7 +23,6 @@ import { PageHeader, TabPills, SearchInput, StatusPill, EmptyState } from '@dair
 import { KpiCard } from '@dairydirect/shared/ui/KpiCard'
 import { DataTable, Pagination, type Column } from '@dairydirect/shared/ui/DataTable'
 import { ProductTile } from '@dairydirect/shared/assets/productIcons'
-import { InventoryScene } from '@dairydirect/shared/assets/scenes'
 import { cn, fmtDate, fmtDateTime } from '@dairydirect/shared/lib/utils'
 import { toast } from '@dairydirect/shared/lib/toast'
 import type { ProductIcon, StockAdjustment } from '@dairydirect/shared/types'
@@ -280,14 +280,15 @@ export function StoreInventory() {
   }
 
   const exportCsv = () => {
-    void downloadCsv(
-      allStock.map((r) => ({
-        Product: r.variantName, SKU: r.sku, Batch: r.batchCode, Expiry: r.batch.expiryDate,
-        Bin: r.batch.binLocation, 'Qty On Hand': r.onHand, Available: r.available, Status: r.status,
-      })),
-      `inventory-stock-${new Date().toISOString().slice(0, 10)}.csv`,
-    )
-    toast.success('Stock exported as CSV')
+    if (!storeId) return
+    void exportInventory(storeId, debSearch).then(async (result) => {
+      await downloadCsv(
+        result.items.map((row) => ({ ...row })),
+        `inventory-stock-${new Date().toISOString().slice(0, 10)}.csv`,
+      )
+      if (result.truncated) toast.warning('Export includes the first 2000 matching rows')
+      else toast.success('Stock exported as CSV')
+    }).catch(() => toast.error('Could not export stock'))
   }
 
   /* ── shared table column builders ── */
@@ -359,12 +360,15 @@ export function StoreInventory() {
   const showing = (rows: number, size: number) =>
     rows ? `Showing ${(page - 1) * size + 1} – ${Math.min(page * size, rows)} of ${rows} items` : undefined
 
+  const loadFailure = firstFailedQuery([stockQ, lowQ, expQ, adjQ, sessionsQ, binsQ])
+  if (loadFailure) return <PageLoadError title="Inventory" artwork="inventory" query={loadFailure} />
+
   return (
     <motion.div variants={container.container} initial="hidden" animate="show" className="space-y-5">
       <PageHeader
         title="Inventory"
         subtitle="Manage store stock, receive items, track expiry and record adjustments."
-        illustration={<InventoryScene />}
+        artwork="inventory"
         breadcrumb={['Inventory']}
       />
 

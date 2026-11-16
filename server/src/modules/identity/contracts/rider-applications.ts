@@ -10,6 +10,10 @@ export interface RiderApplicationDocument {
 
 export interface RiderApplicationView {
   userId: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  appliedAt: string;
   status: string;
   vehicleType: string | null;
   vehicleNo: string | null;
@@ -33,7 +37,16 @@ export interface RiderApplications {
     before?: string,
     status?: string,
   ): Promise<{
-    items: Array<{ userId: string; name: string; email: string; status: string }>;
+    items: Array<{
+      userId: string;
+      name: string;
+      email: string;
+      phone: string | null;
+      appliedAt: string;
+      status: string;
+      vehicleType: string | null;
+      vehicleNo: string | null;
+    }>;
     nextCursor: string | null;
   }>;
   list(

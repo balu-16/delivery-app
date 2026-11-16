@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Keep all navigation reachable on short screens and in landscape. */
+@media (max-height: 720px) {
+  .sidebar-artwork {
+    display: none;
+  }
+}
+
 /* ── Self-hosted Poppins (latin subset, woff2, swap) — 3 weights only ── */
 @font-face {
   font-family: 'Poppins';

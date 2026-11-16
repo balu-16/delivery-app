@@ -186,8 +186,10 @@ function RiderApplicationDrawer({ userId, onClose }: { userId: string | null; on
   const app: RiderApplicationDetail | null = appQ.data ?? null
   return (
     <Drawer open onOpenChange={(v) => { if (!v) onClose() }} width="md" title="Rider application" subtitle={userId ? shortId(userId) : ''}>
-      {appQ.isLoading || !app ? (
-        <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-12 w-full rounded-xl" />)}</div>
+      {appQ.isLoading || appQ.isPlaceholderData ? (
+        <div className="space-y-2" role="status" aria-label="Loading rider application">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-12 w-full rounded-xl" />)}</div>
+      ) : !app ? (
+        <div role="alert" className="space-y-3 text-sm text-muted-foreground"><p>Could not load this application.</p><Button size="sm" variant="secondary" onClick={() => void appQ.refetch()}>Try again</Button></div>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -317,7 +319,9 @@ export function People() {
               <DataTable
                 keyId={(u) => u.userId}
                 rows={customers}
-                loading={customersQ.isLoading}
+                loading={customersQ.isLoading || customersQ.isPlaceholderData}
+                error={customersQ.isError && !customersQ.data}
+                onRetry={() => void customersQ.refetch()}
                 empty={<EmptyState icon={Info} title="No customers match" body="Try a different search term." />}
                 columns={[
                   {
@@ -355,7 +359,7 @@ export function People() {
                 onNext={() => pageNext(customersQ.data, setCustCursor, setCustStack)}
                 hasPrev={custStack.length > 1}
                 hasNext={!!customersQ.data?.nextCursor}
-                loading={customersQ.isLoading}
+                loading={customersQ.isLoading || customersQ.isPlaceholderData}
                 label={`Page ${custStack.length} · customer feed`}
               />
             </Card>
@@ -381,7 +385,9 @@ export function People() {
               <DataTable
                 keyId={(a) => a.userId}
                 rows={apps}
-                loading={appsQ.isLoading}
+                loading={appsQ.isLoading || appsQ.isPlaceholderData}
+                error={appsQ.isError && !appsQ.data}
+                onRetry={() => void appsQ.refetch()}
                 empty={<EmptyState icon={Info} title="No applications in this state" body="Try a different status filter." />}
                 columns={[
                   {
@@ -417,7 +423,7 @@ export function People() {
                 onNext={() => pageNext(appsQ.data, setAppCursor, setAppStack)}
                 hasPrev={appStack.length > 1}
                 hasNext={!!appsQ.data?.nextCursor}
-                loading={appsQ.isLoading}
+                loading={appsQ.isLoading || appsQ.isPlaceholderData}
                 label={`Page ${appStack.length} · application feed`}
               />
             </Card>
@@ -435,7 +441,9 @@ export function People() {
               <DataTable
                 keyId={(w) => w.userId}
                 rows={workforce}
-                loading={workforceQ.isLoading}
+                loading={workforceQ.isLoading || workforceQ.isPlaceholderData}
+                error={workforceQ.isError && !workforceQ.data}
+                onRetry={() => void workforceQ.refetch()}
                 empty={<EmptyState icon={Info} title="No workforce accounts match" body="Try a different search term." />}
                 columns={[
                   {
@@ -488,7 +496,7 @@ export function People() {
                 onNext={() => pageNext(workforceQ.data, setWfCursor, setWfStack)}
                 hasPrev={wfStack.length > 1}
                 hasNext={!!workforceQ.data?.nextCursor}
-                loading={workforceQ.isLoading}
+                loading={workforceQ.isLoading || workforceQ.isPlaceholderData}
                 label={`Page ${wfStack.length} · workforce feed`}
               />
             </Card>

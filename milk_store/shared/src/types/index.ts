@@ -657,6 +657,8 @@ export interface HandoverDetails {
   locked: boolean
   verifiedAt?: string
   deliveryStatus: string | null
+  /** Present only on leftover demo fixtures. The live UI never displays it. */
+  code?: string
 }
 export interface PickingTask {
   id: string
@@ -701,7 +703,7 @@ export interface ReturnParcel {
 export type RiderAppStatus = 'pending' | 'under_review' | 'approved' | 'rejected'
 export type RiderDocType = 'license' | 'vehicle_rc' | 'aadhaar' | 'insurance'
 export type RiderDocStatus = 'pending' | 'approved' | 'rejected'
-export interface RiderApplicationDoc { type: RiderDocType; label: string; number: string; status: RiderDocStatus; decidedAt?: string; reason?: string }
+export interface RiderApplicationDoc { id: string; type: RiderDocType; label: string; number: string; status: RiderDocStatus; decidedAt?: string; reason?: string }
 export interface RiderApplication {
   id: string
   storeId: string

@@ -2,7 +2,10 @@ import type { ExecutionContext } from '@nestjs/common';
 import { HttpException } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { IdentityGuard } from '../../../src/modules/identity/contracts/identity-guard.js';
-import type { AdminSessionAuthenticator } from '../../../src/modules/identity/contracts/admin-auth.js';
+import type {
+  AdminSessionAuthenticator,
+  AdminSessions,
+} from '../../../src/modules/identity/contracts/admin-auth.js';
 import type {
   IdentityAuthorizer,
   Principal,
@@ -71,6 +74,9 @@ function setup(bootstrap: boolean, decision: AuthenticatedLimitDecision) {
       throw new Error('SESSION_EXPIRED');
     },
   } as unknown as AdminSessionAuthenticator;
+  const storeRecords = {
+    verifyCsrf: async () => true,
+  } as unknown as AdminSessions;
   return {
     guard: new IdentityGuard(
       reflector,
@@ -79,6 +85,7 @@ function setup(bootstrap: boolean, decision: AuthenticatedLimitDecision) {
       limiter,
       adminSessions,
       storeSessions,
+      storeRecords,
     ),
     context,
     calls,
@@ -97,6 +104,49 @@ it('returns 429 with Retry-After for a limited actor', async () => {
   const s = setup(false, { kind: 'limited', retryAfter: 12 });
   await expect(s.guard.canActivate(s.context)).rejects.toMatchObject({ status: 429 });
   expect(s.headers['Retry-After']).toBe('12');
+});
+it('rejects a store cookie mutation without a CSRF token', async () => {
+  const request = {
+    method: 'POST',
+    headers: { cookie: 'store_session=abc' },
+    url: '/v1/store/status',
+  };
+  const context = {
+    getHandler: () => ({}),
+    getClass: () => ({}),
+    switchToHttp: () => ({
+      getRequest: () => request,
+      getResponse: () => ({ header: () => undefined }),
+    }),
+  } as unknown as ExecutionContext;
+  const reflector = {
+    getAllAndOverride: () => ({ audience: 'store', roles: ['STORE_MANAGER'] }),
+  } as unknown as Reflector;
+  const storePrincipal = { ...principal, roles: ['STORE_MANAGER'] };
+  const guard = new IdentityGuard(
+    reflector,
+    { verify: async () => identity } as TokenVerifier,
+    { authorize: async () => storePrincipal } as unknown as IdentityAuthorizer,
+    { checkAuthenticated: async () => ({ kind: 'allowed' }) } as RateLimiter,
+    {
+      authenticate: async () => {
+        throw new Error('unused');
+      },
+    } as unknown as AdminSessionAuthenticator,
+    {
+      authenticate: async () => ({
+        identity,
+        principal: storePrincipal,
+        sessionId: 'abc',
+        csrfToken: 'token',
+        rotation: null,
+      }),
+    } as unknown as AdminSessionAuthenticator,
+    { verifyCsrf: async () => false } as unknown as AdminSessions,
+  );
+  await expect(guard.canActivate(context)).rejects.toMatchObject({
+    response: { code: 'CSRF_TOKEN_INVALID' },
+  });
 });
 it('handles limiter outages according to fail-closed policy', async () => {
   const open = setup(false, { kind: 'unavailable', failClosed: false });

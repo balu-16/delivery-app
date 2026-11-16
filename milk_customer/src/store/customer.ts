@@ -15,6 +15,11 @@ export type SubscriptionActionRequest = {id:string; action:'cancel' | 'resume' |
 type PendingSubscriptionAction = SubscriptionActionRequest & {userId:string; key:string};
 let cartQueue: Promise<unknown> = Promise.resolve();
 let epoch = 0;
+let catalogRequest = 0, activityRequest = 0, accountRequest = 0;
+
+export type LoadState = 'idle' | 'loading' | 'success' | 'error';
+const beginLoad = (state: LoadState): LoadState => state === 'success' ? 'success' : 'loading';
+const failedLoad = (state: LoadState): LoadState => state === 'success' ? 'success' : 'error';
 
 function readable(error: unknown) {
   if (error instanceof ApiError) {
@@ -50,6 +55,9 @@ type CustomerState = {
   pendingSubscriptionAction: PendingSubscriptionAction | null;
   favorites: string[]; favoritesLoaded: boolean; favoriteBusy: string[];
   notifications: Notification[]; wallet: WalletBalances | null; ledger: WalletEntry[];
+  catalogLoad: { addressId: string | null; state: LoadState };
+  activityLoad: { orders: LoadState; subscriptions: LoadState };
+  accountLoad: { wallet: LoadState; ledger: LoadState; notifications: LoadState };
   initialize: () => Promise<void>; load: () => Promise<void>; logout: () => Promise<void>;
   chooseAddress: (id: string) => Promise<void>; addAddress: (value: NewCustomerAddress) => Promise<{needsConfirmation:boolean; degraded:boolean; temporarilyUnavailable:boolean}>;
   loadCatalog: (cursor?: string) => Promise<void>; updateCart: (id: string, delta: number) => Promise<void>;
@@ -62,7 +70,9 @@ type CustomerState = {
   loadFavorites: () => Promise<void>; toggleFavorite: (id:string) => Promise<void>;
 };
 
-const blank = { profile: null, addresses: [], selectedAddress: null, products: [], cursor: null, cart: null, quote: null, pendingPlacement: null, pendingSubscription: null, pendingSubscriptionAction:null, favorites: [], favoritesLoaded:false, favoriteBusy:[], orders: [], subscriptions: [], notifications: [], wallet: null, ledger: [] };
+const blank = { profile: null, addresses: [], selectedAddress: null, products: [], cursor: null, cart: null, quote: null, pendingPlacement: null, pendingSubscription: null, pendingSubscriptionAction:null, favorites: [], favoritesLoaded:false, favoriteBusy:[], orders: [], subscriptions: [], notifications: [], wallet: null, ledger: [],
+  catalogLoad: { addressId: null, state: 'idle' as LoadState }, activityLoad: { orders: 'idle' as LoadState, subscriptions: 'idle' as LoadState },
+  accountLoad: { wallet: 'idle' as LoadState, ledger: 'idle' as LoadState, notifications: 'idle' as LoadState } };
 export const useCustomer = create<CustomerState>((set, get) => ({
   ...blank, status: 'loading', error: null, busy: false, cartBusy: false,
   clearError: () => set({ error: null }),
@@ -156,8 +166,16 @@ export const useCustomer = create<CustomerState>((set, get) => ({
   loadCatalog: async cursor => {
     const addressId = get().selectedAddress; const generation = epoch;
     if (!addressId) return;
-    try { const page = await customerApi.catalog(await accessToken(), addressId, cursor); if (generation === epoch && addressId === get().selectedAddress) set({ products: cursor ? [...get().products, ...page.items.filter(x => !get().products.some(y => y.variantId === x.variantId))] : page.items, cursor: page.nextCursor }); }
-    catch (error) { if (generation === epoch) set({ error: readable(error) }); }
+    const request = ++catalogRequest;
+    const previous = get().catalogLoad;
+    set({ catalogLoad: { addressId, state: previous.addressId === addressId ? beginLoad(previous.state) : 'loading' } });
+    const current = () => generation === epoch && request === catalogRequest && addressId === get().selectedAddress;
+    try {
+      const page = await customerApi.catalog(await accessToken(), addressId, cursor);
+      if (current()) set({ products: cursor ? [...get().products, ...page.items.filter(x => !get().products.some(y => y.variantId === x.variantId))] : page.items, cursor: page.nextCursor, catalogLoad: { addressId, state: 'success' } });
+    } catch (error) {
+      if (current()) set({ error: readable(error), catalogLoad: { addressId, state: failedLoad(get().catalogLoad.state) } });
+    }
   },
   refreshCart: async () => { const generation = epoch; try { const cart = await safeCart(await accessToken()); if (generation === epoch) set({ cart, quote: null }); } catch (error) { if (generation === epoch) set({ error: readable(error) }); } },
   updateCart: async (id, delta) => {
@@ -337,27 +355,36 @@ export const useCustomer = create<CustomerState>((set, get) => ({
     finally {if (generation === epoch) set({favoriteBusy:get().favoriteBusy.filter(item => item !== id)});}
   },
   loadActivity: async () => {
-    const generation = epoch;
+    const generation = epoch, request = ++activityRequest;
+    const current = () => generation === epoch && request === activityRequest;
+    set(state => ({ activityLoad: { orders: beginLoad(state.activityLoad.orders), subscriptions: beginLoad(state.activityLoad.subscriptions) } }));
     try {
       const token = await accessToken();
-      const [orders, subscriptions] = await Promise.allSettled([customerDetailsApi.orders(token), customerDetailsApi.subscriptions(token)]);
-      if (generation !== epoch) return;
-      if (orders.status === 'fulfilled') set({ orders: orders.value.items });
-      if (subscriptions.status === 'fulfilled') set({ subscriptions: subscriptions.value.items });
-      if (orders.status === 'rejected' || subscriptions.status === 'rejected') set({ error: 'Some activity could not be loaded. Please refresh.' });
-    } catch (error) { if (generation === epoch) set({ error: readable(error) }); }
+      if (!current()) return;
+      await Promise.all([
+        customerDetailsApi.orders(token).then(result => { if (current()) set(state => ({ orders: result.items, activityLoad: { ...state.activityLoad, orders: 'success' } })); })
+          .catch(() => { if (current()) set(state => ({ error: 'Some activity could not be loaded. Please refresh.', activityLoad: { ...state.activityLoad, orders: failedLoad(state.activityLoad.orders) } })); }),
+        customerDetailsApi.subscriptions(token).then(result => { if (current()) set(state => ({ subscriptions: result.items, activityLoad: { ...state.activityLoad, subscriptions: 'success' } })); })
+          .catch(() => { if (current()) set(state => ({ error: 'Some activity could not be loaded. Please refresh.', activityLoad: { ...state.activityLoad, subscriptions: failedLoad(state.activityLoad.subscriptions) } })); }),
+      ]);
+    } catch (error) { if (current()) set(state => ({ error: readable(error), activityLoad: { orders: failedLoad(state.activityLoad.orders), subscriptions: failedLoad(state.activityLoad.subscriptions) } })); }
   },
   loadAccount: async () => {
-    const generation = epoch;
+    const generation = epoch, request = ++accountRequest;
+    const current = () => generation === epoch && request === accountRequest;
+    set(state => ({ accountLoad: { wallet: beginLoad(state.accountLoad.wallet), ledger: beginLoad(state.accountLoad.ledger), notifications: beginLoad(state.accountLoad.notifications) } }));
     try {
       const token = await accessToken();
-      const [wallet, ledger, notifications] = await Promise.allSettled([customerApi.wallet(token), customerDetailsApi.ledger(token), customerDetailsApi.notifications(token)]);
-      if (generation !== epoch) return;
-      if (wallet.status === 'fulfilled') set({ wallet: wallet.value });
-      if (ledger.status === 'fulfilled') set({ ledger: ledger.value.items });
-      if (notifications.status === 'fulfilled') set({ notifications: notifications.value.items });
-      if (wallet.status === 'rejected' || ledger.status === 'rejected' || notifications.status === 'rejected') set({ error: 'Some account information could not be loaded. Please try again.' });
-    } catch (error) { if (generation === epoch) set({ error: readable(error) }); }
+      if (!current()) return;
+      await Promise.all([
+        customerApi.wallet(token).then(result => { if (current()) set(state => ({ wallet: result, accountLoad: { ...state.accountLoad, wallet: 'success' } })); })
+          .catch(() => { if (current()) set(state => ({ error: 'Some account information could not be loaded. Please try again.', accountLoad: { ...state.accountLoad, wallet: failedLoad(state.accountLoad.wallet) } })); }),
+        customerDetailsApi.ledger(token).then(result => { if (current()) set(state => ({ ledger: result.items, accountLoad: { ...state.accountLoad, ledger: 'success' } })); })
+          .catch(() => { if (current()) set(state => ({ error: 'Some account information could not be loaded. Please try again.', accountLoad: { ...state.accountLoad, ledger: failedLoad(state.accountLoad.ledger) } })); }),
+        customerDetailsApi.notifications(token).then(result => { if (current()) set(state => ({ notifications: result.items, accountLoad: { ...state.accountLoad, notifications: 'success' } })); })
+          .catch(() => { if (current()) set(state => ({ error: 'Some account information could not be loaded. Please try again.', accountLoad: { ...state.accountLoad, notifications: failedLoad(state.accountLoad.notifications) } })); }),
+      ]);
+    } catch (error) { if (current()) set(state => ({ error: readable(error), accountLoad: { wallet: failedLoad(state.accountLoad.wallet), ledger: failedLoad(state.accountLoad.ledger), notifications: failedLoad(state.accountLoad.notifications) } })); }
   },
   readNotifications: async () => { try { await customerDetailsApi.readNotifications(await accessToken()); await get().loadAccount(); } catch (error) { set({ error: readable(error) }); } },
   cancelOrder: async id => { set({ busy: true }); try { await customerDetailsApi.cancel(await accessToken(), id, 'Customer request', Crypto.randomUUID()); await get().loadActivity(); } catch (error) { set({ error: readable(error) }); } finally { set({ busy: false }); } },

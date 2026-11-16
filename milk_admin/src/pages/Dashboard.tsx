@@ -12,7 +12,7 @@ import { dashboardMetrics } from '@/api/dashboard'
 import { PageHeader, DateChip, EmptyState } from '@/components/shared/misc'
 import { Select } from '@/components/ui/form'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/overlays'
-import { Card } from '@/components/ui/base'
+import { Button, Card } from '@/components/ui/base'
 import { KpiCard } from '@/components/shared/KpiCard'
 import type { RangeKey } from '@/types'
 import { fmtDate, fmtINR } from '@/lib/utils'
@@ -48,6 +48,24 @@ function AlertRow({ title, sub, right, danger }: { title: string; sub: string; r
         <p className="truncate text-[11px] text-muted-foreground">{sub}</p>
       </div>
       <span className={`shrink-0 text-[12px] font-bold tabular ${danger ? 'text-destructive' : 'text-amber-600 dark:text-warning'}`}>{right}</span>
+    </div>
+  )
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-5" role="status" aria-label="Loading dashboard" aria-busy="true">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+        {Array.from({ length: 5 }, (_, i) => <div key={i} className="skeleton h-[110px] rounded-card" />)}
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {Array.from({ length: 3 }, (_, i) => <div key={i} className="skeleton h-[110px] rounded-card" />)}
+      </div>
+      <div className="skeleton h-16 rounded-card" />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <div className="skeleton h-80 rounded-card lg:col-span-7" />
+        <div className="skeleton h-80 rounded-card lg:col-span-5" />
+      </div>
     </div>
   )
 }
@@ -116,9 +134,10 @@ export function Dashboard() {
         }
       />
 
-      {dash.isError ? (
+      {dash.isError && d && <Card role="alert" className="flex items-center gap-3 p-3 text-sm text-muted-foreground"><span>The latest metrics could not be refreshed.</span><Button size="sm" variant="secondary" onClick={() => void dash.refetch()}>Try again</Button></Card>}
+      {(dash.isLoading || dash.isPlaceholderData) ? <DashboardSkeleton /> : dash.isError && !d ? (
         <Card className="p-8">
-          <EmptyState icon={PackageOpen} title="Dashboard unavailable" body="The metrics service did not respond. Try again shortly." />
+          <EmptyState icon={PackageOpen} title="Dashboard unavailable" body="The metrics service did not respond. Try again shortly." action={<Button size="sm" variant="secondary" onClick={() => void dash.refetch()}>Try again</Button>} />
         </Card>
       ) : (
         <motion.div variants={container.container} initial="hidden" animate="show" className="space-y-5">

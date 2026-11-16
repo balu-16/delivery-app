@@ -1,39 +1,41 @@
+import { firstFailedQuery, PageLoadError } from '@/components/PageLoadError'
 // §2 Orders & Picking — the main picking screen: KPIs, queue tabs, task table and the
 // right-hand Picking Workspace drawer (Pick Items → Pack Order → Handover).
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   Bike, Boxes, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight,
-  ClipboardList, Minus, Package, PackageCheck, PackageOpen, PackageX, Phone, Plus,
+  ClipboardList, Minus, Package, PackageCheck, PackageOpen, PackageX, Plus,
   ScanLine, ShoppingCart, User, XCircle,
 } from 'lucide-react'
 import { useStagger, useDebouncedValue } from '@dairydirect/shared/hooks/misc'
 import { useStoreAuth } from '@/login/authStore'
 import { useActiveStoreId, useStoreDashboard, usePickingTasks, usePickingTask } from '@/api/storeQueries'
 import { usePickingActions } from '@/api/storeMutations'
-import { useDB } from '@dairydirect/shared/mock-db/db'
-import { DEMO_NOW } from '@dairydirect/shared/mock-db/seed'
-import { Button, Card, Input, Label, Switch, Textarea, Badge, Skeleton } from '@dairydirect/shared/ui/base'
+import { Button, Card, Input, Label, Switch, Badge, Skeleton } from '@dairydirect/shared/ui/base'
 import { Drawer, ConfirmDialog, Popover, PopoverTrigger, PopoverContent, Tooltip, TooltipProvider } from '@dairydirect/shared/ui/overlays'
 import { Select } from '@dairydirect/shared/ui/form'
 import { PageHeader, TabPills, SearchInput, StatusPill, EmptyState } from '@dairydirect/shared/ui/misc'
 import { KpiCard } from '@dairydirect/shared/ui/KpiCard'
 import { DataTable, Pagination, type Column } from '@dairydirect/shared/ui/DataTable'
 import { ProductTile } from '@dairydirect/shared/assets/productIcons'
-import { ScooterScene } from '@dairydirect/shared/assets/scenes'
 import { cn, fmtTime, fmtDate } from '@dairydirect/shared/lib/utils'
 import { toast } from '@dairydirect/shared/lib/toast'
-import type { PickingTask, PickLine } from '@dairydirect/shared/types'
+import type { PickingTask, PickLine, SubstituteCandidate } from '@dairydirect/shared/types'
 
 type TaskRow = { task: PickingTask; order: { customerName: string; itemCount: number } }
 
-const UNAVAILABLE_REASONS = ['Damaged in cold storage', 'Not received today', 'Expired — quarantined', 'Other']
+const UNAVAILABLE_REASONS: Record<string, 'OUT_OF_STOCK' | 'DAMAGED' | 'EXPIRED' | 'NOT_FOUND'> = {
+  'Damaged in cold storage': 'DAMAGED',
+  'Not received today': 'OUT_OF_STOCK',
+  'Expired — quarantined': 'EXPIRED',
+  Other: 'NOT_FOUND',
+}
 const STEPS = ['Pick Items', 'Pack Order', 'Handover']
 
-/* ── Deadline countdown chip (demo clock: DEMO_NOW) ─────────────────────────── */
 function DeadlineChip({ deadline, className }: { deadline: string; className?: string }) {
-  const mins = Math.round((new Date(deadline).getTime() - DEMO_NOW.getTime()) / 60000)
+  const mins = Math.round((new Date(deadline).getTime() - Date.now()) / 60000)
   if (mins < 0) {
     return <span className={cn('inline-flex items-center rounded-full bg-destructive-soft px-2 py-0.5 text-[10px] font-bold text-destructive tabular', className)}>Overdue {-mins}m</span>
   }
@@ -77,37 +79,14 @@ function Stepper({ step }: { step: 1 | 2 | 3 | 4 }) {
 }
 
 /* ── Substitute picker (popover list; ineligible items disabled with reason) ── */
-function SubstitutePicker({ task, line, onPick }: {
-  task: PickingTask
+function SubstitutePicker({ line, onPick }: {
   line: PickLine
-  onPick: (variantId: string) => void
+  onPick: (candidate: SubstituteCandidate) => void
 }) {
-  const db = useDB((s) => s.db)
   const [open, setOpen] = useState(false)
-
-  const candidates = useMemo(() => {
-    const orig = db.variants.find((v) => v.id === line.variantId)
-    if (!orig) return []
-    const origProduct = db.products.find((p) => p.id === orig.productId)
-    const carried = new Set(db.storeVariants.filter((sv) => sv.storeId === task.storeId && sv.available).map((sv) => sv.variantId))
-    return db.variants
-      .filter((v) => v.id !== line.variantId && v.active && carried.has(v.id))
-      .map((v) => {
-        const product = db.products.find((p) => p.id === v.productId)!
-        const inStock = db.inventoryBatches.some((b) => b.storeId === task.storeId && b.variantId === v.id && b.qty > 0)
-        const sameCat = !!origProduct && product.categoryId === origProduct.categoryId
-        const inBand = v.price >= orig.price * 0.6 && v.price <= orig.price * 1.4
-        let reason = ''
-        if (!sameCat) reason = 'Different category'
-        else if (!inStock) reason = 'Out of stock'
-        else if (!inBand) reason = 'Price band'
-        return { id: v.id, name: `${product.name} – ${v.label}`, price: v.price, eligible: !reason, reason }
-      })
-      .sort((a, b) => Number(b.eligible) - Number(a.eligible) || a.name.localeCompare(b.name))
-  }, [db, line.variantId, task.storeId])
-
+  const candidates = [...line.substitutionCandidates].sort((a, b) => a.name.localeCompare(b.name))
   const chosen = line.substitutionVariantId
-    ? candidates.find((c) => c.id === line.substitutionVariantId)?.name ?? 'Substitute recorded'
+    ? candidates.find((c) => c.variantId === line.substitutionVariantId)?.name ?? 'Substitute recorded'
     : null
 
   return (
@@ -122,30 +101,17 @@ function SubstitutePicker({ task, line, onPick }: {
           Eligible substitutes (same category · in stock · ±40% price)
         </p>
         <div className="scrollbar-thin max-h-64 space-y-0.5 overflow-y-auto">
-          {candidates.map((c) =>
-            c.eligible ? (
-              <button
-                key={c.id}
-                onClick={() => { onPick(c.id); setOpen(false) }}
-                className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] font-medium transition-colors hover:bg-primary-soft"
-              >
-                <span className="truncate">{c.name}</span>
-                <span className="shrink-0 text-[11px] font-bold text-success">Eligible</span>
-              </button>
-            ) : (
-              <Tooltip key={c.id} content={c.reason}>
-                <span className="block">
-                  <button
-                    disabled
-                    className="flex w-full cursor-not-allowed items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] font-medium text-muted-foreground/60"
-                  >
-                    <span className="truncate">{c.name}</span>
-                    <XCircle className="h-3.5 w-3.5 shrink-0" />
-                  </button>
-                </span>
-              </Tooltip>
-            ),
-          )}
+          {candidates.length === 0 && <p className="px-2 py-3 text-[12px] text-muted-foreground">No eligible substitutes from the server.</p>}
+          {candidates.map((c) => (
+            <button
+              key={c.variantId}
+              onClick={() => { onPick(c); setOpen(false) }}
+              className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] font-medium transition-colors hover:bg-primary-soft"
+            >
+              <span className="truncate">{c.name}</span>
+              <span className="shrink-0 text-[11px] font-bold text-success">{c.available}</span>
+            </button>
+          ))}
         </div>
       </PopoverContent>
     </Popover>
@@ -153,22 +119,18 @@ function SubstitutePicker({ task, line, onPick }: {
 }
 
 /* ── One pick line row ──────────────────────────────────────────────────────── */
-function LineRow({ task, line, expanded, onToggle, onPick, onUnavailable, onSubstitute }: {
-  task: PickingTask
+function LineRow({ line, expanded, onToggle, onPick, onUnavailable, onSubstitute }: {
   line: PickLine
   expanded: boolean
   onToggle: () => void
   onPick: (qty: number) => void
   onUnavailable: (reason: string) => void
-  onSubstitute: (variantId: string) => void
+  onSubstitute: (candidate: SubstituteCandidate) => void
 }) {
-  const db = useDB((s) => s.db)
   const [reason, setReason] = useState('')
   const [reasonOpen, setReasonOpen] = useState(false)
   const subName = line.substitutionVariantId
-    ? db.variants.find((v) => v.id === line.substitutionVariantId)
-      ? `${db.products.find((p) => p.id === db.variants.find((v) => v.id === line.substitutionVariantId)!.productId)!.name} – ${db.variants.find((v) => v.id === line.substitutionVariantId)!.label}`
-      : 'Substitute'
+    ? line.substitutionCandidates.find((c) => c.variantId === line.substitutionVariantId)?.name ?? 'Substitute recorded'
     : null
 
   const resolvedOk = line.resolved && !line.unavailableReason
@@ -252,7 +214,7 @@ function LineRow({ task, line, expanded, onToggle, onPick, onUnavailable, onSubs
                       value={reason}
                       onValueChange={setReason}
                       placeholder="Reason (required)…"
-                      options={UNAVAILABLE_REASONS.map((r) => ({ value: r, label: r }))}
+                      options={Object.keys(UNAVAILABLE_REASONS).map((r) => ({ value: r, label: r }))}
                     />
                   </div>
                   <Button variant="ghost" size="sm" onClick={() => { setReasonOpen(false); setReason('') }}>Cancel</Button>
@@ -266,7 +228,7 @@ function LineRow({ task, line, expanded, onToggle, onPick, onUnavailable, onSubs
                   </Button>
                 </>
               )}
-              <SubstitutePicker task={task} line={line} onPick={onSubstitute} />
+              <SubstitutePicker line={line} onPick={onSubstitute} />
             </div>
           )}
         </div>
@@ -277,7 +239,6 @@ function LineRow({ task, line, expanded, onToggle, onPick, onUnavailable, onSubs
 
 /* ── The Picking Workspace drawer body ──────────────────────────────────────── */
 function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => void }) {
-  const db = useDB((s) => s.db)
   const user = useStoreAuth((s) => s.user)
   const taskQ = usePickingTask(taskId)
   const task = taskQ.data ?? null
@@ -293,9 +254,7 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
   // packing form (step 2)
   const [bags, setBags] = useState('1')
   const [coldChain, setColdChain] = useState(true)
-  const [packedBy, setPackedBy] = useState(user?.name ?? 'Store Manager')
-  const [notes, setNotes] = useState('')
-  const [riderId, setRiderId] = useState('')
+  const [sealCode, setSealCode] = useState('')
 
   // handover (step 3)
   const [code, setCode] = useState('')
@@ -305,9 +264,8 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
     if (task) {
       setBags(String(task.packing?.bags ?? 1))
       setColdChain(task.packing?.coldChain ?? true)
-      setPackedBy(task.packing?.packedBy || user?.name || 'Store Manager')
-      setNotes(task.packing?.notes ?? '')
-      setExpandedLine(null); setScanOpen(false); setScanVal(''); setCode(''); setCelebrate(false); setRiderId('')
+      setSealCode(task.packing?.sealCode ?? '')
+      setExpandedLine(null); setScanOpen(false); setScanVal(''); setCode(''); setCelebrate(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, task?.status])
@@ -321,6 +279,15 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
 
   useEffect(() => { if (scanOpen) scanRef.current?.focus() }, [scanOpen])
 
+  useEffect(() => {
+    if (!task || task.assigneeId !== user?.id || task.status !== 'being_picked') return
+    void actions.start(task.id)
+    const timer = window.setInterval(() => { void actions.heartbeat(task.id) }, 45_000)
+    return () => window.clearInterval(timer)
+    // Heartbeat follows the open task, not a fresh actions object each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id, task?.status, task?.assigneeId, user?.id])
+
   if (!task) {
     return (
       <div className="space-y-3">
@@ -331,7 +298,6 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
     )
   }
 
-  const order = db.orders.find((o) => o.id === task.orderId)
   const lines = task.lines
   const resolvedCount = lines.filter((l) => l.resolved).length
   const unitsPicked = lines.reduce((a, l) => a + l.qtyPicked, 0)
@@ -341,10 +307,8 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
     : task.status === 'ready_for_handover' ? 3
     : task.status === 'ready_to_pack' ? 2
     : 1
-  const isOverdue = (task.status === 'waiting_to_pick' || task.status === 'being_picked') && new Date(task.deadline).getTime() < DEMO_NOW.getTime()
-
-  const riders = db.riders.filter((r) => r.storeId === task.storeId && r.status === 'active')
-  const handoverRider = task.handover ? db.riders.find((r) => r.id === task.handover!.riderId) ?? null : null
+  const isOverdue = (task.status === 'waiting_to_pick' || task.status === 'being_picked') && new Date(task.deadline).getTime() < Date.now()
+  const handoverRiderName = task.handover?.riderName ?? null
   const attempts = task.handover?.attempts ?? 0
   const verified = !!task.handover?.verifiedAt
   const locked = !verified && attempts >= 3
@@ -353,15 +317,13 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
     e.preventDefault()
     const q = scanVal.trim()
     if (!q) return
-    const variant = db.variants.find((v) => v.sku.toLowerCase() === q.toLowerCase() || v.barcode === q)
-    const line = variant ? lines.find((l) => l.variantId === variant.id && !l.resolved && l.qtyPicked < l.qtyOrdered) : undefined
-    if (variant && line) {
-      actions.pickLine(task.id, line.id, line.qtyPicked + 1, line.batchId)
-      toast.success('Scanned ✓')
+    const line = lines.find((l) => !l.resolved && (l.barcode === q || l.sku.toLowerCase() === q.toLowerCase()))
+    if (line && line.barcode) {
+      void actions.pickLine(task.id, line.id, line.barcode, line.qtyPicked + 1, line.batchId || undefined)
       setScanVal('')
     } else {
       setShakeKey((k) => k + 1)
-      toast.error(variant ? 'All units of this item are already picked' : 'No matching product in this order')
+      toast.error(line ? 'This line has no barcode to verify' : 'No matching product in this order')
     }
   }
 
@@ -401,12 +363,8 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
           {step === 2 && (
             <Button
               size="md"
-              disabled={!riderId || !(Number(bags) >= 1)}
-              onClick={() => {
-                const rider = db.riders.find((r) => r.id === riderId)
-                if (!rider) { toast.error('Select a rider for handover'); return }
-                actions.savePacking(task.id, Math.max(1, Number(bags) || 1), coldChain, packedBy || user?.name || 'Store Manager', notes.trim() || undefined, rider.id, rider.name)
-              }}
+              disabled={!sealCode.trim() || !(Number(bags) >= 1)}
+              onClick={() => actions.savePacking(task.orderId, Math.max(1, Number(bags) || 1), coldChain, sealCode.trim())}
             >
               Mark ready for handover
             </Button>
@@ -421,8 +379,7 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
       {/* customer + timing block */}
       <div className="rounded-xl border border-border/70 bg-muted/40 px-4 py-3">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
-          <span className="flex items-center gap-1.5 font-semibold"><User className="h-4 w-4 text-muted-foreground" /> {order?.customerName ?? '—'}</span>
-          <span className="flex items-center gap-1.5 text-muted-foreground"><Phone className="h-3.5 w-3.5" /> {order?.customerPhone ?? '—'}</span>
+          <span className="flex items-center gap-1.5 font-semibold"><User className="h-4 w-4 text-muted-foreground" /> {task.customerName ?? '—'}</span>
           <span className="flex items-center gap-1.5 text-muted-foreground"><Package className="h-3.5 w-3.5" /> {itemCount} items</span>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[12.5px]">
@@ -444,7 +401,7 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
       {task.status === 'waiting_to_pick' && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/40 bg-warning-soft px-4 py-3">
           <p className="text-[13px] font-semibold text-amber-700 dark:text-amber-300">This task is unclaimed — claim it to start picking.</p>
-          <Button size="sm" onClick={() => actions.claim(task)}>Claim Task</Button>
+          <Button size="sm" onClick={() => { void actions.claim(task.id).then((claimed) => { if (claimed) void actions.start(task.id) }) }}>Claim Task</Button>
         </div>
       )}
 
@@ -462,7 +419,7 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
             <Check className="h-7 w-7" strokeWidth={3} />
           </motion.span>
           <p className="text-sm font-bold">Task completed — order handed over</p>
-          <p className="text-xs text-muted-foreground">{task.id} · {order?.customerName ?? ''} · {itemCount} items</p>
+          <p className="text-xs text-muted-foreground">{task.orderNumber ?? task.orderId} · {task.customerName ?? ''} · {itemCount} items</p>
         </motion.div>
       ) : step === 1 ? (
         /* ── STEP 1: Pick Items ── */
@@ -501,13 +458,16 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
             {lines.map((line) => (
               <LineRow
                 key={line.id}
-                task={task}
                 line={line}
                 expanded={expandedLine === line.id}
                 onToggle={() => setExpandedLine(expandedLine === line.id ? null : line.id)}
-                onPick={(qty) => { if (qty >= 1) actions.pickLine(task.id, line.id, qty, line.batchId) }}
-                onUnavailable={(r) => actions.markUnavailable(task.id, line.id, r)}
-                onSubstitute={(vid) => actions.substitute(task.id, line.id, vid)}
+                onPick={(qty) => {
+                  if (qty < 1) return
+                  if (!line.barcode) { toast.error('This line has no barcode to verify'); return }
+                  void actions.pickLine(task.id, line.id, line.barcode, qty, line.batchId || undefined)
+                }}
+                onUnavailable={(r) => actions.markUnavailable(task.id, line.id, UNAVAILABLE_REASONS[r] ?? 'NOT_FOUND')}
+                onSubstitute={(candidate) => actions.substitute(task.id, line.id, candidate.variantId, candidate.barcode || candidate.sku)}
               />
             ))}
           </div>
@@ -517,7 +477,7 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
         <div className="mt-4 space-y-4">
           <div className="flex items-center gap-2 rounded-xl bg-info-soft px-4 py-3 text-[13px] font-semibold text-info">
             <PackageCheck className="h-4 w-4 shrink-0" />
-            All {lines.length} lines resolved — pack the order and assign a rider.
+            All {lines.length} lines resolved — pack the order. The rider presents their code at handover.
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -531,33 +491,19 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
                 <span className="text-[13px] text-muted-foreground">Insulated bag + ice pack</span>
               </div>
             </div>
-            <div>
-              <Label required>Packed by</Label>
-              <Input value={packedBy} onChange={(e) => setPackedBy(e.target.value)} aria-label="Packed by" />
-            </div>
-            <div>
-              <Label required>Rider</Label>
-              <Select
-                value={riderId}
-                onValueChange={setRiderId}
-                placeholder="Select rider…"
-                options={riders.map((r) => ({ value: r.id, label: `${r.name} · ${r.vehicle}` }))}
-              />
-            </div>
             <div className="sm:col-span-2">
-              <Label>Packing notes</Label>
-              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. keep upright, fragile seal…" aria-label="Packing notes" />
+              <Label required>Seal code</Label>
+              <Input value={sealCode} onChange={(e) => setSealCode(e.target.value.slice(0, 64))} aria-label="Seal code" placeholder="Bag seal" />
             </div>
           </div>
         </div>
       ) : (
         /* ── STEP 3: Handover ── */
         <div className="mt-4 space-y-4">
-          {handoverRider && (
+          {handoverRiderName && (
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-xl border border-border/70 bg-muted/40 px-4 py-3 text-[13px]">
-              <span className="flex items-center gap-1.5 font-semibold"><User className="h-4 w-4 text-muted-foreground" /> {handoverRider.name}</span>
-              <span className="flex items-center gap-1.5 text-muted-foreground"><Phone className="h-3.5 w-3.5" /> {handoverRider.phone}</span>
-              <Badge tone="blue">{handoverRider.vehicle}</Badge>
+              <span className="flex items-center gap-1.5 font-semibold"><User className="h-4 w-4 text-muted-foreground" /> {handoverRiderName}</span>
+              {task.handover?.deliveryStatus && <Badge tone="blue">{task.handover.deliveryStatus}</Badge>}
             </div>
           )}
           {locked ? (
@@ -574,22 +520,21 @@ function PickingWorkspace({ taskId, onClose }: { taskId: string; onClose: () => 
               <div className="flex items-center gap-2">
                 <Input
                   value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="••••"
-                  inputMode="numeric"
+                  onChange={(e) => setCode(e.target.value.slice(0, 20))}
+                  placeholder="Code"
                   aria-label="Handover code"
-                  className="max-w-[140px] text-center text-lg font-bold tracking-[0.5em]"
+                  className="max-w-[180px] text-center text-lg font-bold tracking-[0.3em]"
                 />
                 <Button
                   size="md"
-                  disabled={code.length !== 4}
-                  onClick={() => actions.verifyHandover(task.id, code, attempts + 1)}
+                  disabled={!code.trim()}
+                  onClick={() => actions.verifyHandover(task.orderId, code.trim())}
                 >
                   Verify
                 </Button>
               </div>
               <p className="mt-1.5 text-[11px] font-medium text-muted-foreground">
-                {3 - attempts} attempt{3 - attempts === 1 ? '' : 's'} remaining · demo code <Badge tone="neutral">{task.handover?.code}</Badge>
+                {attempts} failed attempt{attempts === 1 ? '' : 's'} recorded. Ask the rider for the code issued by the server.
               </p>
             </div>
           )}
@@ -629,7 +574,6 @@ export function StoreOrdersPicking() {
   const container = useStagger()
   const storeId = useActiveStoreId()
   const user = useStoreAuth((s) => s.user)
-  const db = useDB((s) => s.db)
   const actions = usePickingActions()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -670,12 +614,11 @@ export function StoreOrdersPicking() {
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const totalTasks = d ? d.byStatus.waiting + d.byStatus.beingPicked + d.byStatus.readyToPack + d.byStatus.readyHandover : 0
-  const workforce = db.workforce
 
-  const assigneeLabel = (id: string | null) => {
-    if (!id) return '—'
-    if (id === user?.id) return 'You'
-    return workforce.find((w) => w.id === id)?.name ?? '—'
+  const assigneeLabel = (task: PickingTask) => {
+    if (!task.assigneeId) return '—'
+    if (task.assigneeId === user?.id) return 'You'
+    return task.assigneeName ?? '—'
   }
 
   const columns: Column<TaskRow>[] = [
@@ -686,7 +629,7 @@ export function StoreOrdersPicking() {
     {
       key: 'deadline', header: 'Deadline',
       render: (r) => {
-        const overdue = (r.task.status === 'waiting_to_pick' || r.task.status === 'being_picked') && new Date(r.task.deadline).getTime() < DEMO_NOW.getTime()
+        const overdue = (r.task.status === 'waiting_to_pick' || r.task.status === 'being_picked') && new Date(r.task.deadline).getTime() < Date.now()
         return (
           <div className="flex flex-col items-start gap-1">
             <span className={cn('font-semibold tabular', overdue && 'text-destructive')}>
@@ -698,7 +641,7 @@ export function StoreOrdersPicking() {
       },
     },
     { key: 'status', header: 'Status', render: (r) => <StatusPill status={r.task.status} /> },
-    { key: 'assignee', header: 'Assignee', render: (r) => <span className={cn(r.task.assigneeId === user?.id && 'font-bold text-brand-700 dark:text-brand-300')}>{assigneeLabel(r.task.assigneeId)}</span> },
+    { key: 'assignee', header: 'Assignee', render: (r) => <span className={cn(r.task.assigneeId === user?.id && 'font-bold text-brand-700 dark:text-brand-300')}>{assigneeLabel(r.task)}</span> },
     {
       key: 'actions', header: 'Actions', align: 'right',
       render: (r) => {
@@ -708,7 +651,7 @@ export function StoreOrdersPicking() {
         if (t.status === 'waiting_to_pick') {
           return (
             <div className="flex items-center justify-end gap-1.5">
-              <Button size="sm" onClick={(e) => { e.stopPropagation(); actions.claim(t) }}>Claim</Button>
+              <Button size="sm" onClick={(e) => { e.stopPropagation(); void actions.claim(t.id).then((claimed) => { if (claimed) void actions.start(t.id) }) }}>Claim</Button>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
           )
@@ -750,6 +693,9 @@ export function StoreOrdersPicking() {
 
   const openTask = openTaskId ? rows.find((r) => r.task.id === openTaskId) : undefined
 
+  const loadFailure = firstFailedQuery([tasksQ, mineQ, dashQ])
+  if (loadFailure) return <PageLoadError title="Orders & Picking" artwork="ordersPicking" query={loadFailure} />
+
   return (
     <TooltipProvider>
       <motion.div variants={container.container} initial="hidden" animate="show" className="space-y-5">
@@ -757,7 +703,7 @@ export function StoreOrdersPicking() {
           title="Orders &"
           titleAccent="Picking"
           subtitle="Manage store orders, pick items, pack and hand over to riders."
-          illustration={<ScooterScene />}
+          artwork="ordersPicking"
           breadcrumb={['Orders & Picking']}
         />
 

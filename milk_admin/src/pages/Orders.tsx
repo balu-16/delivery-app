@@ -296,7 +296,7 @@ function RiderCandidatePicker({ orderId, value, onChange }: { orderId: string; v
   }, [orderId])
 
   const eligible = candidates.filter((c) => c.eligible)
-  if (loading) return <p className="rounded-xl border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">Loading eligible riders…</p>
+  if (loading) return <div className="space-y-2" role="status" aria-label="Loading eligible riders"><div className="skeleton h-4 w-32" /><div className="skeleton h-10 w-full rounded-xl" /></div>
   if (error) return <p className="rounded-xl bg-destructive-soft px-3 py-2 text-xs font-semibold text-destructive">{error}</p>
   return (
     <Field label="New rider" required hint={eligible.length === 0 ? 'No eligible riders right now' : undefined}>
@@ -461,11 +461,11 @@ export function Orders() {
           <>
             {/* KPI row */}
             <motion.section variants={container.item} className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-              <KpiCard label="Placed" value={dashOrders?.placed ?? 0} icon={ShoppingCart} tint="violet" />
-              <KpiCard label="In progress" value={inProgress} icon={Loader} tint="blue" />
-              <KpiCard label="Out for delivery" value={dashOrders?.outForDelivery ?? 0} icon={Truck} tint="green" />
-              <KpiCard label="Cancelled / expired" value={(dashOrders?.cancelled ?? 0) + (dashOrders?.expired ?? 0)} icon={XIcon} tint="red" />
-              <KpiCard label="On hold" value={dashOrders?.onHold ?? 0} icon={AlertTriangle} tint="amber" highlight={(dashOrders?.onHold ?? 0) > 0} />
+              <KpiCard loading={dashQ.isLoading || dashQ.isPlaceholderData} unavailable={dashQ.isError && !dashQ.data} label="Placed" value={dashOrders?.placed ?? 0} icon={ShoppingCart} tint="violet" />
+              <KpiCard loading={dashQ.isLoading || dashQ.isPlaceholderData} unavailable={dashQ.isError && !dashQ.data} label="In progress" value={inProgress} icon={Loader} tint="blue" />
+              <KpiCard loading={dashQ.isLoading || dashQ.isPlaceholderData} unavailable={dashQ.isError && !dashQ.data} label="Out for delivery" value={dashOrders?.outForDelivery ?? 0} icon={Truck} tint="green" />
+              <KpiCard loading={dashQ.isLoading || dashQ.isPlaceholderData} unavailable={dashQ.isError && !dashQ.data} label="Cancelled / expired" value={(dashOrders?.cancelled ?? 0) + (dashOrders?.expired ?? 0)} icon={XIcon} tint="red" />
+              <KpiCard loading={dashQ.isLoading || dashQ.isPlaceholderData} unavailable={dashQ.isError && !dashQ.data} label="On hold" value={dashOrders?.onHold ?? 0} icon={AlertTriangle} tint="amber" highlight={(dashOrders?.onHold ?? 0) > 0} />
             </motion.section>
 
             {/* toolbar */}
@@ -486,7 +486,9 @@ export function Orders() {
                 <DataTable
                   keyId={(r) => r.id}
                   rows={rows}
-                  loading={ordersQ.isLoading}
+                  loading={ordersQ.isLoading || ordersQ.isPlaceholderData}
+                  error={ordersQ.isError && !ordersQ.data}
+                  onRetry={() => void ordersQ.refetch()}
                   onRowClick={(r) => setDrawerRow(r.id)}
                   empty={<EmptyState icon={ListFilter} title="No orders match" body="Adjust the store, status or date range." />}
                   columns={[

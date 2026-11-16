@@ -682,8 +682,8 @@ export function PayoutsScene({ className }: { className?: string }) {
       <g transform="translate(300 40)">
         <g className="animate-floaty" style={{ animationDuration: '5.2s' }}>
           <rect x="0" y="0" width="130" height="80" rx="14" fill="url(#payoutGrad)" />
-          <text x="65" y="28" textAnchor="middle" fontSize="12" fontWeight="700" fill="#DFF3D0">PAYOUT</text>
-          <text x="65" y="52" textAnchor="middle" fontSize="19" fontWeight="800" fill="#fff">₹ 12,480</text>
+          <text x="65" y="28" textAnchor="middle" fontSize="12" fontWeight="700" fill="#DFF3D0">CASH</text>
+          <text x="65" y="52" textAnchor="middle" fontSize="19" fontWeight="800" fill="#fff">COD</text>
           <rect x="18" y="62" width="94" height="8" rx="4" fill="#fff" opacity="0.3" />
           <rect x="18" y="62" width="64" height="8" rx="4" fill="#fff" opacity="0.85" />
         </g>

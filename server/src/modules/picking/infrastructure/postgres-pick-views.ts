@@ -1,6 +1,6 @@
 import { sql } from 'kysely';
 import type { Database } from '../../../platform/database/database.js';
-import type { KpiSummary, SlaTask, SlaTaskPage } from '../contracts/tasks.js';
+import type { KpiSummary, PickingBoard, SlaTask, SlaTaskPage } from '../contracts/tasks.js';
 
 /** Manager board metrics computed from picking-owned data only. */
 export class PostgresPickViews {
@@ -32,6 +32,47 @@ export class PostgresPickViews {
       avgPickSeconds: row.avg_seconds ? String(Math.round(Number(row.avg_seconds))) : '0',
       shortRateBps: shorts.rows[0]!.short_bps,
       backlog: Number(row.open_tasks),
+    };
+  }
+
+  async board(storeId: string): Promise<PickingBoard> {
+    if (!storeId) throw new Error('INVALID_INPUT');
+    const counts = await sql<{
+      waiting: number;
+      being_picked: number;
+      ready_to_pack: number;
+      ready_handover: number;
+    }>`SELECT
+      count(*) FILTER (WHERE t.status='PENDING')::int AS waiting,
+      count(*) FILTER (WHERE t.status IN ('ASSIGNED','IN_PROGRESS'))::int AS being_picked,
+      count(*) FILTER (WHERE t.status='COMPLETED' AND o.status='PICKING')::int AS ready_to_pack,
+      count(*) FILTER (WHERE o.status='PACKED')::int AS ready_handover
+      FROM pick_tasks t JOIN orders o ON o.id=t.order_id
+      WHERE t.store_id=${storeId}::uuid`.execute(this.db);
+    const hours = await sql<{
+      hour: number;
+      completed: number;
+      open: number;
+    }>`SELECT gs::int AS hour,
+      (SELECT count(*)::int FROM pick_tasks WHERE store_id=${storeId}::uuid AND status='COMPLETED'
+        AND (completed_at AT TIME ZONE 'Asia/Kolkata')::date=(clock_timestamp() AT TIME ZONE 'Asia/Kolkata')::date
+        AND extract(hour FROM completed_at AT TIME ZONE 'Asia/Kolkata')::int=gs) AS completed,
+      (SELECT count(*)::int FROM pick_tasks WHERE store_id=${storeId}::uuid AND status IN ('PENDING','ASSIGNED','IN_PROGRESS')
+        AND extract(hour FROM sla_due_at AT TIME ZONE 'Asia/Kolkata')::int=gs) AS open
+      FROM generate_series(0, extract(hour FROM clock_timestamp() AT TIME ZONE 'Asia/Kolkata')::int) AS gs`.execute(
+      this.db,
+    );
+    const row = counts.rows[0]!;
+    return {
+      waiting: Number(row.waiting),
+      beingPicked: Number(row.being_picked),
+      readyToPack: Number(row.ready_to_pack),
+      readyForHandover: Number(row.ready_handover),
+      hourly: hours.rows.map((hour) => ({
+        label: `${hour.hour}:00`,
+        completed: Number(hour.completed),
+        open: Number(hour.open),
+      })),
     };
   }
 

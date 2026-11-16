@@ -254,7 +254,7 @@ function applyStoreOp(db: DB, op: Extract<JournalOp, { t: 'picking.claim' | 'pic
       db.pickingTasks = db.pickingTasks.map((t) => (t.id === op.taskId ? {
         ...t, packing: { bags: op.bags, coldChain: op.coldChain, packedBy: op.packedBy, notes: op.notes },
         status: 'ready_for_handover',
-        handover: { riderId: op.riderId, riderName: op.riderName, code: t.handover?.code ?? String(Math.floor(1000 + Math.random() * 9000)), attempts: 0 },
+        handover: { state: 'PENDING' as const, riderId: op.riderId, riderName: op.riderName, locked: false, deliveryStatus: null, code: t.handover?.code ?? String(Math.floor(1000 + Math.random() * 9000)), attempts: 0 },
       } : t))
       if (task) {
         db.orders = db.orders.map((o) => (o.id === task.orderId ? { ...o, status: 'out_for_delivery', riderId: rider?.id ?? null } : o))

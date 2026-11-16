@@ -8,6 +8,7 @@ import { performAction } from '../actions';
 import { ApiError, riderApi, type Application, type Earning, type HistoryTask, type Notice, type Offer, type RiderStatus, type Task } from '../api';
 import { type PartnerIdentity } from '../auth/session';
 import { Brand } from '../components/Brand';
+import { CardListSkeleton, SkeletonBlock } from '../components/Skeleton';
 import { Button, Card, IconBox, IconButton, PageTitle, Text, type IconName } from '../components/Ui';
 import { enablePush, startPush, unregisterPush, usePush } from '../push';
 import { startRiderRealtime } from '../realtime';
@@ -21,11 +22,14 @@ import { TaskDetail } from './TaskDetail';
 type Tab = 'home' | 'tasks' | 'route' | 'earnings' | 'profile';
 type Page = { type: 'task'; id: string } | { type: 'notifications' | 'support' | 'language' } | null;
 type Dashboard = { todayDeliveries: number; todayEarningsPaise: string };
+type LoadKey = 'status' | 'offers' | 'tasks' | 'history' | 'dashboard' | 'earnings' | 'cash' | 'notifications';
+type LoadState = 'loading' | 'success' | 'error';
 type LiveData = { status: RiderStatus | null; offers: Offer[]; tasks: Task[]; history: HistoryTask[]; historyCursor: string | null;
   historyLoaded: boolean; dashboard: Dashboard | null; earnings: Earning[]; earningsCursor: string | null; earningsLoaded: boolean;
   cash: { cashInHandPaise: string; limitPaise: string | null } | null; notifications: Notice[]; notificationsLoaded: boolean };
 const initial: LiveData = { status: null, offers: [], tasks: [], history: [], historyCursor: null, historyLoaded: false,
   dashboard: null, earnings: [], earningsCursor: null, earningsLoaded: false, cash: null, notifications: [], notificationsLoaded: false };
+const initialLoads: Record<LoadKey, LoadState> = { status:'loading', offers:'loading', tasks:'loading', history:'loading', dashboard:'loading', earnings:'loading', cash:'loading', notifications:'loading' };
 const tabs: { key: Tab; label: string; icon: IconName; active: IconName }[] = [
   { key: 'home', label: 'Home', icon: 'home-outline', active: 'home' },
   { key: 'tasks', label: 'Tasks', icon: 'clipboard-outline', active: 'clipboard' },
@@ -40,7 +44,7 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
   const [tab, setTab] = useState<Tab>('home');
   const [page, setPage] = useState<Page>(null);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loads, setLoads] = useState(initialLoads);
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const [tracking, setTracking] = useState(false);
@@ -56,28 +60,28 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
   const refresh = useCallback((): Promise<void> => {
     if (inFlight.current) return inFlight.current;
     const work = (async () => {
+      setLoads(previous => Object.fromEntries(Object.entries(previous).map(([key, value]) => [key, value === 'error' ? 'loading' : value])) as Record<LoadKey, LoadState>);
+      const observe = <T,>(key: LoadKey, promise: Promise<T>, update: (previous: LiveData, value: T) => LiveData): Promise<T> => promise.then(value => {
+        setData(previous => update(previous, value));
+        setLoads(previous => ({ ...previous, [key]: 'success' }));
+        return value;
+      }, failure => {
+        setLoads(previous => ({ ...previous, [key]: previous[key] === 'success' ? 'success' : 'error' }));
+        throw failure;
+      });
       const results = await Promise.allSettled([
-        riderApi.status(), riderApi.offers(), riderApi.activeTasks(), riderApi.history(),
-        riderApi.dashboard(), riderApi.earnings(), riderApi.cash(), riderApi.notifications(),
+        observe('status', riderApi.status(), (p, value) => ({ ...p, status: value })),
+        observe('offers', riderApi.offers(), (p, value) => ({ ...p, offers: value.items })),
+        observe('tasks', riderApi.activeTasks(), (p, value) => ({ ...p, tasks: value.items })),
+        observe('history', riderApi.history(), (p, value) => ({ ...p, history: value.items, historyCursor: value.nextCursor, historyLoaded: true })),
+        observe('dashboard', riderApi.dashboard(), (p, value) => ({ ...p, dashboard: value })),
+        observe('earnings', riderApi.earnings(), (p, value) => ({ ...p, earnings: value.items, earningsCursor: value.nextCursor, earningsLoaded: true })),
+        observe('cash', riderApi.cash(), (p, value) => ({ ...p, cash: value })),
+        observe('notifications', riderApi.notifications(), (p, value) => ({ ...p, notifications: value.items, notificationsLoaded: true })),
       ] as const);
-      const [status, offers, tasks, history, dashboard, earnings, cash, notifications] = results;
+      const [status, offers, tasks] = results;
       const operational = status.status === 'fulfilled' && offers.status === 'fulfilled' && tasks.status === 'fulfilled';
       setConnected(operational);
-      setData((previous) => ({
-        status: status.status === 'fulfilled' ? status.value : previous.status,
-        offers: offers.status === 'fulfilled' ? offers.value.items : previous.offers,
-        tasks: tasks.status === 'fulfilled' ? tasks.value.items : previous.tasks,
-        history: history.status === 'fulfilled' ? history.value.items : previous.history,
-        historyCursor: history.status === 'fulfilled' ? history.value.nextCursor : previous.historyCursor,
-        historyLoaded: history.status === 'fulfilled' || previous.historyLoaded,
-        dashboard: dashboard.status === 'fulfilled' ? dashboard.value : previous.dashboard,
-        earnings: earnings.status === 'fulfilled' ? earnings.value.items : previous.earnings,
-        earningsCursor: earnings.status === 'fulfilled' ? earnings.value.nextCursor : previous.earningsCursor,
-        earningsLoaded: earnings.status === 'fulfilled' || previous.earningsLoaded,
-        cash: cash.status === 'fulfilled' ? cash.value : previous.cash,
-        notifications: notifications.status === 'fulfilled' ? notifications.value.items : previous.notifications,
-        notificationsLoaded: notifications.status === 'fulfilled' || previous.notificationsLoaded,
-      }));
       if (status.status === 'fulfilled') setTracking(await reconcileTracking(identity.subject, status.value.status.online).catch(() => false));
       if (!operational) {
         const failure = [status, offers, tasks].find((result) => result.status === 'rejected');
@@ -89,7 +93,6 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
       } else if (results.some((result) => result.status === 'rejected')) {
         setError('Some account information could not be refreshed.');
       } else setError('');
-      setLoading(false);
     })();
     inFlight.current = work.finally(() => { inFlight.current = null; });
     return inFlight.current;
@@ -180,9 +183,9 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
   let body;
   if (page?.type === 'task') body = selectedTask ? <TaskDetail key={selectedTask.id} task={selectedTask} enabled={connected} busy={busy} run={(action, value) => taskAction(selectedTask, action, value)} />
     : <><PageTitle title="Delivery unavailable" subtitle="This order is no longer assigned to you. Check your history for its latest status." /><Button label="Back to tasks" onPress={() => { setPage(null); setTab('tasks'); }} /></>;
-  else if (page?.type === 'support') body = <SupportScreen subject={identity.subject} />;
+  else if (page?.type === 'support') body = <SupportScreen key={identity.subject} subject={identity.subject} />;
   else if (page?.type === 'notifications') body = <><PageTitle title="Notifications" subtitle="Updates about your deliveries and account." />
-    {data.notifications.length ? <Button label="Mark all read" secondary compact onPress={() => void doWork(() => riderApi.readNotifications())} /> : <Empty text={!data.notificationsLoaded ? 'Connect to load notifications.' : 'No notifications yet.'} />}
+    {data.notifications.length ? <Button label="Mark all read" secondary compact onPress={() => void doWork(() => riderApi.readNotifications())} /> : <ResourceEmpty state={loads.notifications} label="notifications" empty="No notifications yet." onRetry={() => void refresh()} />}
     <View style={{ height: 12 }} />{data.notifications.map((notice) => <Card key={notice.id}><Text style={styles.strong}>{notice.title}</Text><Text style={styles.sub}>{notice.body}</Text><Text style={styles.small}>{shortTime(notice.createdAt)}</Text></Card>)}
   </>;
   else if (page?.type === 'language') body = <><PageTitle title="Language" subtitle="Choose the language shown on this device." />
@@ -191,36 +194,36 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
   else if (tab === 'home') body = <>
     <View style={[styles.row, { marginBottom: 14 }]}><View style={styles.avatar}><Text style={styles.avatarText}>{identity.name.slice(0, 1).toUpperCase()}</Text></View><View style={{ flex: 1 }}>
       <Text style={styles.eyebrow}>HELLO, {identity.name.toUpperCase()}</Text><Text style={styles.welcome}>Ready for a fresh day?</Text><Text style={styles.sub}>Your delivery overview</Text></View></View>
-    <Card style={styles.shiftCard}><View style={styles.row}><View style={{ flex: 1 }}><Text style={styles.strong}>{!data.status ? 'Checking your status' : online ? data.status.status.onBreak ? 'You are on a break' : 'You are online' : 'You are offline'}</Text>
+    {loads.status === 'loading' && !data.status ? <CardListSkeleton label="Loading shift status" count={1} /> : loads.status === 'error' && !data.status ? <ResourceEmpty state={loads.status} label="shift status" empty="" onRetry={() => void refresh()} /> : <Card style={styles.shiftCard}><View style={styles.row}><View style={{ flex: 1 }}><Text style={styles.strong}>{!data.status ? 'Checking your status' : online ? data.status.status.onBreak ? 'You are on a break' : 'You are online' : 'You are offline'}</Text>
       <Text style={styles.sub}>{!data.status ? 'Connect to load your shift.' : data.status.status.onBreak ? 'You will not receive new offers while on break.' : online ? 'Your shift is active.' : 'Go online to receive nearby delivery offers.'}</Text></View>
       <Switch accessibilityLabel="Go online" value={online} disabled={!connected || busy} onValueChange={(value) => void toggleOnline(value)} trackColor={{ true: colors.green, false: colors.lineStrong }} />
-    </View>{online ? <Button label={data.status?.status.onBreak ? 'End break' : 'Take a break'} compact secondary disabled={!connected || busy} onPress={() => void doWork(() => riderApi.break(!data.status?.status.onBreak))} /> : null}</Card>
+    </View>{online ? <Button label={data.status?.status.onBreak ? 'End break' : 'Take a break'} compact secondary disabled={!connected || busy} onPress={() => void doWork(() => riderApi.break(!data.status?.status.onBreak))} /> : null}</Card>}
     {unavailableTracking ? <Text style={styles.warning}>Location sharing is interrupted. Go offline and start your shift again.</Text> : null}
     {data.status?.status.unreachableSince ? <Text style={styles.warning}>Your connection was interrupted; check your location and network.</Text> : null}
-    <View style={styles.stats}><Card style={styles.stat}><Text style={styles.small}>TODAY&apos;S DELIVERIES</Text><Text style={styles.statValue}>{data.dashboard ? data.dashboard.todayDeliveries : '—'}</Text></Card>
-      <Card style={styles.stat}><Text style={styles.small}>TODAY&apos;S EARNINGS</Text><Text style={styles.statValue}>{formatMoney(data.dashboard?.todayEarningsPaise)}</Text></Card></View>
+    <View style={styles.stats}><Card style={styles.stat}><Text style={styles.small}>TODAY&apos;S DELIVERIES</Text><MetricValue state={loads.dashboard} label="today's deliveries" value={data.dashboard?.todayDeliveries ?? '—'} /></Card>
+      <Card style={styles.stat}><Text style={styles.small}>TODAY&apos;S EARNINGS</Text><MetricValue state={loads.dashboard} label="today’s earnings" value={formatMoney(data.dashboard?.todayEarningsPaise)} /></Card></View>
     <Section title="New offers" action="See tasks" onPress={() => setTab('tasks')} />
-    {data.offers.length ? data.offers.map((offer) => <OfferCard key={offer.offerId} offer={offer} disabled={!connected || busy} act={offerAction} />) : <Empty text={loading ? 'Loading offers…' : connected ? 'No new offers right now.' : 'Connect to load offers.'} />}
+    {data.offers.length ? data.offers.map((offer) => <OfferCard key={offer.offerId} offer={offer} disabled={!connected || busy} act={offerAction} />) : <ResourceEmpty state={loads.offers} label="offers" empty="No new offers right now." onRetry={() => void refresh()} />}
     <Section title="Active deliveries" action="View all" onPress={() => setTab('tasks')} />
-    {data.tasks.length ? data.tasks.map((task) => <TaskCard key={task.id} task={task} onPress={() => showPage({ type: 'task', id: task.id })} />) : <Empty text={loading ? 'Loading deliveries…' : connected ? 'No active deliveries.' : 'Connect to load deliveries.'} />}
+    {data.tasks.length ? data.tasks.map((task) => <TaskCard key={task.id} task={task} onPress={() => showPage({ type: 'task', id: task.id })} />) : <ResourceEmpty state={loads.tasks} label="deliveries" empty="No active deliveries." onRetry={() => void refresh()} />}
     <View style={styles.farmBanner}><Image source={require('../../assets/images/farm-scene-hd.png')} contentFit="cover" style={StyleSheet.absoluteFill} />
       <LinearGradient colors={['rgba(250,246,227,0.98)', 'rgba(250,246,227,0.05)']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
       <Text style={styles.farmTitle}>Fresh from{'\n'}our farms</Text><Text style={styles.small}>Every delivery makes a difference</Text></View>
   </>;
   else if (tab === 'tasks') body = <><PageTitle title="Your tasks" subtitle="Offers, active deliveries and your recent history." />
-    <Text style={styles.sectionTitle}>New offers</Text>{data.offers.length ? data.offers.map((offer) => <OfferCard key={offer.offerId} offer={offer} disabled={!connected || busy} act={offerAction} />) : <Empty text={connected ? 'No new offers.' : 'Connect to load offers.'} />}
-    <Text style={styles.sectionTitle}>Active deliveries</Text>{data.tasks.length ? data.tasks.map((task) => <TaskCard key={task.id} task={task} onPress={() => showPage({ type: 'task', id: task.id })} />) : <Empty text={connected ? 'No active deliveries.' : 'Connect to load deliveries.'} />}
-    <Text style={styles.sectionTitle}>History</Text>{data.history.length ? data.history.map((item) => <Card key={`${item.id}-${item.attemptNo}`}><View style={styles.row}><View style={{ flex: 1 }}><Text style={styles.strong}>{item.orderNumber}</Text><Text style={styles.sub}>{item.status.replaceAll('_', ' ')} · {shortTime(item.assignedAt)}</Text></View><Text>{formatMoney(item.totalPaise)}</Text></View></Card>) : <Empty text={data.historyLoaded ? 'No delivery history yet.' : 'Connect to load delivery history.'} />}
+    <Text style={styles.sectionTitle}>New offers</Text>{data.offers.length ? data.offers.map((offer) => <OfferCard key={offer.offerId} offer={offer} disabled={!connected || busy} act={offerAction} />) : <ResourceEmpty state={loads.offers} label="offers" empty="No new offers." onRetry={() => void refresh()} />}
+    <Text style={styles.sectionTitle}>Active deliveries</Text>{data.tasks.length ? data.tasks.map((task) => <TaskCard key={task.id} task={task} onPress={() => showPage({ type: 'task', id: task.id })} />) : <ResourceEmpty state={loads.tasks} label="deliveries" empty="No active deliveries." onRetry={() => void refresh()} />}
+    <Text style={styles.sectionTitle}>History</Text>{data.history.length ? data.history.map((item) => <Card key={`${item.id}-${item.attemptNo}`}><View style={styles.row}><View style={{ flex: 1 }}><Text style={styles.strong}>{item.orderNumber}</Text><Text style={styles.sub}>{item.status.replaceAll('_', ' ')} · {shortTime(item.assignedAt)}</Text></View><Text>{formatMoney(item.totalPaise)}</Text></View></Card>) : <ResourceEmpty state={loads.history} label="delivery history" empty="No delivery history yet." onRetry={() => void refresh()} />}
     {data.historyCursor ? <Button label="Load more history" secondary onPress={() => void doWork(moreHistory, false)} /> : null}
   </>;
   else if (tab === 'route') body = <><PageTitle title="Deliveries" subtitle="Open an active delivery for pickup and destination directions." />
-    {data.tasks.length ? data.tasks.map((task) => <TaskCard key={task.id} task={task} onPress={() => showPage({ type: 'task', id: task.id })} />) : <Empty text="Your active deliveries will appear here." />}
+    {data.tasks.length ? data.tasks.map((task) => <TaskCard key={task.id} task={task} onPress={() => showPage({ type: 'task', id: task.id })} />) : <ResourceEmpty state={loads.tasks} label="deliveries" empty="Your active deliveries will appear here." onRetry={() => void refresh()} />}
     <Card><Text style={styles.sub}>Optimized multi-stop routes are not available yet.</Text></Card></>;
   else if (tab === 'earnings') body = <><PageTitle title="Earnings" subtitle="Confirmed earnings and cash held from deliveries." />
-    <View style={styles.stats}><Card style={styles.stat}><Text style={styles.small}>TODAY</Text><Text style={styles.statValue}>{formatMoney(data.dashboard?.todayEarningsPaise)}</Text></Card>
-      <Card style={styles.stat}><Text style={styles.small}>CASH IN HAND</Text><Text style={styles.statValue}>{formatMoney(data.cash?.cashInHandPaise)}</Text></Card></View>
+    <View style={styles.stats}><Card style={styles.stat}><Text style={styles.small}>TODAY</Text><MetricValue state={loads.dashboard} label="today’s earnings" value={formatMoney(data.dashboard?.todayEarningsPaise)} /></Card>
+      <Card style={styles.stat}><Text style={styles.small}>CASH IN HAND</Text><MetricValue state={loads.cash} label="cash in hand" value={formatMoney(data.cash?.cashInHandPaise)} /></Card></View>
     {data.cash?.limitPaise ? <Text style={styles.sub}>Cash limit: {formatMoney(data.cash.limitPaise)}</Text> : null}
-    <Text style={styles.sectionTitle}>Earnings history</Text>{data.earnings.length ? data.earnings.map((earning) => <Card key={earning.taskId}><View style={styles.row}><View style={{ flex: 1 }}><Text style={styles.strong}>Delivery</Text><Text style={styles.sub}>{shortTime(earning.computedAt)}</Text></View><Text style={styles.strong}>{formatMoney(earning.totalPaise)}</Text></View></Card>) : <Empty text={data.earningsLoaded ? 'No earnings recorded yet.' : 'Connect to load earnings.'} />}
+    <Text style={styles.sectionTitle}>Earnings history</Text>{data.earnings.length ? data.earnings.map((earning) => <Card key={earning.taskId}><View style={styles.row}><View style={{ flex: 1 }}><Text style={styles.strong}>Delivery</Text><Text style={styles.sub}>{shortTime(earning.computedAt)}</Text></View><Text style={styles.strong}>{formatMoney(earning.totalPaise)}</Text></View></Card>) : <ResourceEmpty state={loads.earnings} label="earnings" empty="No earnings recorded yet." onRetry={() => void refresh()} />}
     {data.earningsCursor ? <Button label="Load more earnings" secondary onPress={() => void doWork(moreEarnings, false)} /> : null}
     <Card><Text style={styles.sub}>Payout requests and withdrawal details are not available yet.</Text></Card></>;
   else body = <><PageTitle title="Profile" subtitle="Your partner account and preferences." />
@@ -239,7 +242,7 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
   return <View style={[styles.root, { paddingTop: insets.top }]}>
     <View style={styles.header}>{page ? <IconButton name="arrow-back" label="Back" onPress={() => setPage(null)} /> : null}<View style={{ flex: 1 }}><Brand /></View>
       <IconButton name="notifications-outline" label="Notifications" onPress={() => showPage({ type: 'notifications' })} /></View>
-    <View style={styles.connection}><Text style={styles.connectionText}>{connected ? socketConnected ? 'Live updates connected' : 'Connected · checking for updates' : 'Connection unavailable'}</Text></View>
+    <View style={styles.connection}><Text style={styles.connectionText}>{loads.status === 'loading' && !data.status ? 'Checking connection…' : connected ? socketConnected ? 'Live updates connected' : 'Connected · checking for updates' : 'Connection unavailable'}</Text></View>
     {error ? <Pressable onPress={() => void refresh()}><Text accessibilityRole="alert" style={styles.warning}>{error}</Text></Pressable> : null}
     <ScrollView key={page ? `${page.type}${page.type === 'task' ? page.id : ''}` : tab} keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: page ? insets.bottom + 25 : 20 }]}>{body}</ScrollView>
     {!page ? <View style={[styles.nav, { paddingBottom: Math.max(8, insets.bottom) }]}>{tabs.map((item) => <Pressable key={item.key} accessibilityRole="tab" accessibilityState={{ selected: tab === item.key }} onPress={() => setTab(item.key)} style={[styles.navItem, tab === item.key && styles.navActive]}>
@@ -257,6 +260,15 @@ function TaskCard({ task, onPress }: { task: Task; onPress: () => void }) {
   return <Pressable onPress={onPress} accessibilityRole="button"><Card><View style={styles.row}><IconBox name="bicycle-outline" /><View style={{ flex: 1 }}><Text style={styles.strong}>{task.orderNumber}</Text><Text style={styles.sub}>{task.store.name} · {task.status.replaceAll('_', ' ')}</Text></View><Ionicons name="chevron-forward" size={20} color={colors.secondary} /></View></Card></Pressable>;
 }
 function Empty({ text }: { text: string }) { return <Card><Text style={styles.sub}>{text}</Text></Card>; }
+function ResourceEmpty({ state, label, empty, onRetry }: { state: LoadState; label: string; empty: string; onRetry: () => void }) {
+  if (state === 'loading') return <CardListSkeleton label={`Loading ${label}`} count={2} />;
+  if (state === 'error') return <Card><Text accessibilityRole="alert" style={styles.sub}>Could not load {label}.</Text><Button label="Try again" secondary compact onPress={onRetry} /></Card>;
+  return <Empty text={empty} />;
+}
+function MetricValue({ state, label, value }: { state: LoadState; label: string; value: string | number }) {
+  if (state === 'loading') return <View accessible accessibilityLabel={`Loading ${label}`} accessibilityState={{busy:true}}><SkeletonBlock width={76} height={22} style={{marginTop:5}} /></View>;
+  return <Text style={styles.statValue}>{state === 'error' ? 'Unavailable' : value}</Text>;
+}
 function Section({ title, action, onPress }: { title: string; action: string; onPress: () => void }) { return <View style={styles.section}><Text style={styles.sectionTitle}>{title}</Text><Pressable onPress={onPress}><Text style={styles.link}>{action}</Text></Pressable></View>; }
 function Menu({ icon, label, detail, onPress }: { icon: IconName; label: string; detail?: string; onPress: () => void }) { return <Pressable onPress={onPress} style={styles.menu}><Ionicons name={icon} size={20} color={colors.green} /><Text style={{ flex: 1 }}>{label}</Text>{detail ? <Text style={styles.sub}>{detail}</Text> : null}<Ionicons name="chevron-forward" size={18} color={colors.secondary} /></Pressable>; }
 

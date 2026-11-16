@@ -13,8 +13,12 @@ import { PLATFORM_RATE_LIMITER, type RateLimiter } from '../../../platform/contr
 import { AUTH_POLICY, type AuthenticatedRequest, type RoutePolicy } from './http.js';
 import { TOKEN_VERIFIER, type TokenVerifier } from './identity.js';
 import { IDENTITY_AUTHORIZER, type IdentityAuthorizer } from './identity.js';
-import { ADMIN_SESSION_AUTHENTICATOR, STORE_SESSION_AUTHENTICATOR } from './admin-auth.js';
-import type { AdminSessionAuthenticator } from './admin-auth.js';
+import {
+  ADMIN_SESSION_AUTHENTICATOR,
+  STORE_SESSION_AUTHENTICATOR,
+  STORE_SESSIONS,
+} from './admin-auth.js';
+import type { AdminSessionAuthenticator, AdminSessions } from './admin-auth.js';
 import { AdminSessionForbidden, AdminSessionUnavailable } from './admin-auth.js';
 
 /** Read the admin portal session cookie without pulling in a cookie parser. */
@@ -52,6 +56,7 @@ export class IdentityGuard implements CanActivate {
     private readonly adminSessions: AdminSessionAuthenticator,
     @Inject(STORE_SESSION_AUTHENTICATOR)
     private readonly storeSessions: AdminSessionAuthenticator,
+    @Inject(STORE_SESSIONS) private readonly storeSessionRecords: AdminSessions,
   ) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const policy = this.reflector.getAllAndOverride<RoutePolicy>(AUTH_POLICY, [
@@ -87,6 +92,15 @@ export class IdentityGuard implements CanActivate {
       const requiredRole = policy.audience === 'store' ? 'STORE_MANAGER' : 'SUPER_ADMIN';
       if (!authenticated.principal.roles.includes(requiredRole))
         throw new ForbiddenException({ code: 'FORBIDDEN' });
+      if (
+        policy.audience === 'store' &&
+        !['GET', 'HEAD', 'OPTIONS'].includes((request.method ?? 'GET').toUpperCase())
+      ) {
+        const presented = request.headers['x-store-csrf'];
+        const token = Array.isArray(presented) ? presented[0] : presented;
+        if (!(await this.storeSessionRecords.verifyCsrf(sessionCookie, token ?? '')))
+          throw new ForbiddenException({ code: 'CSRF_TOKEN_INVALID' });
+      }
       if (authenticated.rotation)
         context
           .switchToHttp()

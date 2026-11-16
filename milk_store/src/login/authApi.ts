@@ -34,6 +34,7 @@ export interface AuthenticatedOutcome {
   status: 'AUTHENTICATED'
   manager: ManagerPayload
   csrfToken: string
+  idleExpiresAt?: string
 }
 
 export interface ChallengeOutcome {
@@ -78,13 +79,13 @@ export async function completeChallenge(
 }
 
 /** Refresh bootstrap: resolves the cookie session, rotating it when needed. */
-export async function bootstrapSession(): Promise<StoreAuthUser | null> {
+export async function bootstrapSession(): Promise<{ user: StoreAuthUser; idleExpiresAt: string | null } | null> {
   try {
-    const result = await apiGet<{ manager: ManagerPayload; csrfToken: string }>(
+    const result = await apiGet<{ manager: ManagerPayload; csrfToken: string; idleExpiresAt?: string }>(
       '/v1/store/auth/session',
     )
     adoptCsrf(result.csrfToken)
-    return toUser(result.manager)
+    return { user: toUser(result.manager), idleExpiresAt: result.idleExpiresAt ?? null }
   } catch (error) {
     adoptCsrf(null)
     if ((error as { status?: number }).status === 401) return null

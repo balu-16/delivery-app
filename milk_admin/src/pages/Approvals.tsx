@@ -10,7 +10,7 @@ import {
   useApprovals, useFraudSignals, useErasureRequests, useLegalHolds, useUsers,
 } from '@/hooks/queries'
 import { useApprovalActions, useOrderActions, usePayoutActions, usePaymentActions, usePeopleActions, useProductActions } from '@/hooks/mutations'
-import { PageHeader, TabPills, StatusPill, EmptyState } from '@/components/shared/misc'
+import { PageHeader, TabPills, tabCount, StatusPill, EmptyState } from '@/components/shared/misc'
 import { Field } from '@/components/ui/form'
 import { Button, Card, Badge, Input, Textarea } from '@/components/ui/base'
 import { Dialog, DialogContent, Tooltip } from '@/components/ui/overlays'
@@ -156,10 +156,10 @@ export function Approvals() {
             value={tab}
             onChange={(v) => setTab(v as MainTab)}
             tabs={[
-              { value: 'approvals', label: 'Approvals', count: pending.length },
-              { value: 'fraud', label: 'Fraud signals', count: fraud.length },
-              { value: 'erasure', label: 'Erasure requests', count: erasure.length },
-              { value: 'holds', label: 'Legal holds', count: holds.filter((h) => !h.releasedAt).length },
+              { value: 'approvals', label: 'Approvals', count: tabCount(approvalsQ, pending.length) },
+              { value: 'fraud', label: 'Fraud signals', count: tabCount(fraudQ, fraud.length) },
+              { value: 'erasure', label: 'Erasure requests', count: tabCount(erasureQ, erasure.length) },
+              { value: 'holds', label: 'Legal holds', count: tabCount(holdsQ, holds.filter((h) => !h.releasedAt).length) },
             ]}
           />
         </motion.div>
@@ -169,7 +169,9 @@ export function Approvals() {
           <motion.section variants={container.item} className="space-y-3">
             {message && <Card className="border-destructive/40 bg-destructive-soft/60 p-4 text-[13px] font-semibold text-destructive">{message}</Card>}
             {approvalsQ.isLoading ? (
-              <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-20 w-full rounded-card" />)}</div>
+              <div className="space-y-2" role="status" aria-label="Loading approvals">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-20 w-full rounded-card" />)}</div>
+            ) : approvalsQ.isError && !approvalsQ.data ? (
+              <Card className="space-y-3 p-6" role="alert"><p>Could not load approvals.</p><Button size="sm" variant="secondary" onClick={() => void approvalsQ.refetch()}>Try again</Button></Card>
             ) : approvals.length === 0 ? (
               <Card className="p-8"><EmptyState icon={ScrollText} title="No approvals" body="Maker-checker requests will appear here." /></Card>
             ) : (
@@ -243,7 +245,9 @@ export function Approvals() {
               <DataTable
                 keyId={(f) => f.id}
                 rows={fraud}
-                loading={fraudQ.isLoading}
+                loading={fraudQ.isLoading || fraudQ.isPlaceholderData}
+                error={fraudQ.isError && !fraudQ.data}
+                onRetry={() => void fraudQ.refetch()}
                 empty={<EmptyState icon={ShieldAlert} title="No fraud signals" body="Signals land here for review." />}
                 columns={[
                   { key: 'kind', header: 'Signal', render: (f: FraudSignal) => <span className="font-semibold">{f.kind.toLowerCase().replace(/_/g, ' ')}</span> },
@@ -279,7 +283,9 @@ export function Approvals() {
               <DataTable
                 keyId={(e) => e.id}
                 rows={erasure}
-                loading={erasureQ.isLoading}
+                loading={erasureQ.isLoading || erasureQ.isPlaceholderData}
+                error={erasureQ.isError && !erasureQ.data}
+                onRetry={() => void erasureQ.refetch()}
                 empty={<EmptyState icon={Trash2} title="No erasure requests" body="GDPR erasure requests will appear here." />}
                 columns={[
                   { key: 'user', header: 'Customer', render: (e: ErasureRequest) => <span className="font-semibold">{userName(e.userId)}</span> },
@@ -318,7 +324,9 @@ export function Approvals() {
               <DataTable
                 keyId={(h) => h.id}
                 rows={holds}
-                loading={holdsQ.isLoading}
+                loading={holdsQ.isLoading || holdsQ.isPlaceholderData}
+                error={holdsQ.isError && !holdsQ.data}
+                onRetry={() => void holdsQ.refetch()}
                 empty={<EmptyState icon={Lock} title="No legal holds" body="Holds block erasure and data deletion for the subject." />}
                 columns={[
                   { key: 'user', header: 'Subject', render: (h: LegalHold) => <span className="font-semibold">{userName(h.userId)}</span> },

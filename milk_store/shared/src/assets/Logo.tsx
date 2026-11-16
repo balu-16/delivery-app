@@ -29,7 +29,7 @@ export function Logo({ compact = false, badge = 'Admin Portal', dark = false }: 
           <div className={cn('flex items-center whitespace-nowrap text-[19px] font-extrabold leading-none tracking-tight', dark && 'text-white')}>
             DairyDirect<span className="translate-y-[-6px] text-[9px] font-bold">®</span>
           </div>
-          <span className={cn('mt-1.5 inline-block rounded-full px-2.5 py-0.5 text-[11px] font-semibold', dark ? 'bg-brand-200 text-brand-900' : 'bg-brand-100 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300')}>
+          <span className={cn('mt-1.5 inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-[10px] font-semibold', dark ? 'bg-brand-200 text-brand-900' : 'bg-brand-100 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300')}>
             {badge}
           </span>
         </div>

@@ -126,6 +126,7 @@ class DashboardQuery {
 /** Composed store-manager dashboard view (aggregate over picking, store and alerts). */
 export interface StoreDashboardView {
   kpis: KpiSummary;
+  board: Awaited<ReturnType<PickTasks['board']>>;
   workload: { staff: StoreStaffMember[]; breaches: SlaTask[] };
   upcomingTasks: Awaited<ReturnType<PickTasks['queue']>>['items'];
   alerts: { unreadNotifications: number };
@@ -158,8 +159,9 @@ export class StoreOpsController {
     @CurrentPrincipal() p: Principal,
     @Query() q: DashboardQuery,
   ): Promise<StoreDashboardView> {
-    const [kpis, staff, breaches, upcoming, unread, store] = await Promise.all([
+    const [kpis, board, staff, breaches, upcoming, unread, store] = await Promise.all([
       this.picking.kpis(p.userId, q.storeId),
+      this.picking.board(p.userId, q.storeId),
       this.picking.staff(p.userId, q.storeId, undefined, 25),
       this.picking.slaBoard(p.userId, q.storeId, undefined, 25),
       this.picking.queue(p.userId, { storeId: q.storeId, scope: 'ALL', limit: 8 }),
@@ -168,6 +170,7 @@ export class StoreOpsController {
     ]);
     return {
       kpis,
+      board,
       workload: { staff: staff.items, breaches: breaches.items },
       upcomingTasks: upcoming.items,
       alerts: { unreadNotifications: unread },

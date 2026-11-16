@@ -1,24 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { signIn } from '@/login/authApi'
+import * as authApi from '@/login/authApi'
 import { STORE_PAGE_IMPORTS, STORE_NAV_PATH_IMPORTS } from '@/routes'
+import { rupeesToPaise } from '@/api/storeMutations'
 
 describe('store-web auth boundary', () => {
-  it('accepts a store-manager account and reports assigned stores', async () => {
-    const res = await signIn('chaitanya.raju@srm.edu.in', 'Store@123')
-    expect(res.ok).toBe(true)
-    if (res.ok) {
-      expect(res.user.assignedStoreIds.length).toBeGreaterThan(0)
-    }
+  it('exposes the server session client and not the retired demo sign-in', () => {
+    expect(authApi.login).toBeTypeOf('function')
+    expect(authApi.bootstrapSession).toBeTypeOf('function')
+    expect(authApi.completeChallenge).toBeTypeOf('function')
+    expect('signIn' in authApi).toBe(false)
   })
 
-  it("rejects an admin account with the cross-portal message", async () => {
-    const res = await signIn('admin@dairydirect.in', 'Admin@123')
-    expect(res).toEqual({ ok: false, error: "This account can't sign in here" })
-  })
-
-  it('rejects wrong password generically', async () => {
-    const res = await signIn('chaitanya.raju@srm.edu.in', 'nope')
-    expect(res).toEqual({ ok: false, error: 'Invalid email or password' })
+  it('converts rupees to integer paise', () => {
+    expect(rupeesToPaise(70)).toBe('7000')
+    expect(rupeesToPaise(10.5)).toBe('1050')
   })
 })
 

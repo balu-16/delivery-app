@@ -137,8 +137,7 @@ function PayoutDrawer({ payout, onClose, onApprove, onCancel, onCorrection }: {
         <section>
           <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Corrections</h4>
           <div className="space-y-1.5">
-            {corrections.length === 0 && <p className="rounded-xl border border-dashed border-border px-3 py-3 text-center text-xs text-muted-foreground">No corrections on this payout</p>}
-            {corrections.map((c) => (
+            {correctionsQ.isLoading || correctionsQ.isPlaceholderData ? <div role="status" aria-label="Loading payout corrections" className="skeleton h-14 rounded-xl" /> : correctionsQ.isError && !correctionsQ.data ? <div role="alert" className="space-y-2 text-sm text-muted-foreground"><p>Could not load payout corrections.</p><Button size="sm" variant="secondary" onClick={() => void correctionsQ.refetch()}>Try again</Button></div> : corrections.length === 0 ? <p className="rounded-xl border border-dashed border-border px-3 py-3 text-center text-xs text-muted-foreground">No corrections on this payout</p> : corrections.map((c) => (
               <div key={c.id} className="flex items-center gap-3 rounded-xl border border-border/70 px-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-semibold">{c.reason}</p>
@@ -208,10 +207,10 @@ export function Payouts() {
 
       <motion.div variants={container.container} initial="hidden" animate="show" className="space-y-5">
         <motion.section variants={container.item} className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-          <KpiCard label="Awaiting review (page)" value={pendingReview} icon={Bike} tint="amber" format="num" />
-          <KpiCard label="Paid (page)" value={paidCount} icon={CheckCircle2} tint="green" format="num" />
-          <KpiCard label="Net value (page)" value={netTotal} icon={IndianRupee} tint="blue" format="inr" />
-          <KpiCard label="Riders on roster" value={fleetQ.data?.items.length ?? 0} icon={Bike} tint="violet" format="num" />
+          <KpiCard loading={payoutsQ.isLoading || payoutsQ.isPlaceholderData} unavailable={payoutsQ.isError && !payoutsQ.data} label="Awaiting review (page)" value={pendingReview} icon={Bike} tint="amber" format="num" />
+          <KpiCard loading={payoutsQ.isLoading || payoutsQ.isPlaceholderData} unavailable={payoutsQ.isError && !payoutsQ.data} label="Paid (page)" value={paidCount} icon={CheckCircle2} tint="green" format="num" />
+          <KpiCard loading={payoutsQ.isLoading || payoutsQ.isPlaceholderData} unavailable={payoutsQ.isError && !payoutsQ.data} label="Net value (page)" value={netTotal} icon={IndianRupee} tint="blue" format="inr" />
+          <KpiCard loading={fleetQ.isLoading || fleetQ.isPlaceholderData} unavailable={fleetQ.isError && !fleetQ.data} label="Riders on roster" value={fleetQ.data?.items.length ?? 0} icon={Bike} tint="violet" format="num" />
         </motion.section>
 
         <motion.div variants={container.item}>
@@ -238,7 +237,9 @@ export function Payouts() {
             <DataTable
               keyId={(p) => p.id}
               rows={filtered}
-              loading={payoutsQ.isLoading}
+              loading={payoutsQ.isLoading || payoutsQ.isPlaceholderData}
+              error={payoutsQ.isError && !payoutsQ.data}
+              onRetry={() => void payoutsQ.refetch()}
               onRowClick={(p) => setDetail(p)}
               empty={<EmptyState icon={Bike} title="No payouts match" body="Payouts are drafted by the platform after each cycle." />}
               columns={[
@@ -286,7 +287,7 @@ export function Payouts() {
               }}
               hasPrev={stack.length > 1}
               hasNext={!!payoutsQ.data?.nextCursor}
-              loading={payoutsQ.isLoading}
+              loading={payoutsQ.isLoading || payoutsQ.isPlaceholderData}
               label={`Page ${stack.length} · payouts feed`}
             />
           </Card>

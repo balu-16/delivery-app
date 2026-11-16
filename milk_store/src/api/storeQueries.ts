@@ -1,15 +1,16 @@
 /**
  * Store portal query hooks — React Query over the real /v1/store API.
  * Keys are scoped ['store', section, userId, storeId, filters] so logout and
- * store switches can clear precisely; lists keep previous data while paging.
+ * store switches can clear precisely without showing a previous store's data.
  */
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useStoreAuth, useActiveStore } from '@/login/authStore'
 import * as storeApi from './storeApi'
 import type { StoreDashboardSummary } from './storeSelectors'
 
 const V = { staleTime: 10_000, gcTime: 5 * 60_000 }
-const LIST = { ...V, placeholderData: keepPreviousData }
+// Never display the previous store's data while a newly selected store loads.
+const LIST = { ...V }
 
 /** The manager's active store id (falls back to first assignment). */
 export function useActiveStoreId(): string | null {
@@ -49,13 +50,16 @@ export const usePickingTasks = (
     ...LIST,
   })
 }
-export const usePickingTask = (id: string | null) =>
-  useQuery({
-    queryKey: ['store', 'picking-task', id],
+export const usePickingTask = (id: string | null) => {
+  const storeId = useActiveStoreId()
+  const user = useStoreAuth((s) => s.user)
+  return useQuery({
+    queryKey: ['store', 'picking-task', scope(user?.id, storeId), id],
     queryFn: () => storeApi.getPickingTask(id!),
     enabled: !!id,
     ...V,
   })
+}
 export const useStoreOrders = (storeId: string | null) => {
   const user = useStoreAuth((s) => s.user)
   return useQuery({
@@ -242,10 +246,16 @@ export const useStoreNotifications = () => {
     staleTime: 5 * 60_000,
   })
   const notificationsQuery = useQuery({
-    queryKey: ['store', 'notifications', user?.id],
+    queryKey: ['store', 'notifications', scope(user?.id, storeId)],
     queryFn: () => storeApi.listStoreNotifications(storeId),
     enabled: !!user,
     ...LIST,
   })
-  return { data: notificationsQuery.data ?? [], prefs: prefsQuery.data, isLoading: notificationsQuery.isLoading }
+  return {
+    data: notificationsQuery.data ?? [],
+    prefs: prefsQuery.data,
+    isLoading: notificationsQuery.isLoading,
+    notificationsQuery,
+    prefsQuery,
+  }
 }

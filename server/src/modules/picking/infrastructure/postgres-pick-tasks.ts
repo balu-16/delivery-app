@@ -13,6 +13,7 @@ import type { OrderFulfillment, OrderFulfillmentReads } from '../contracts/fulfi
 import type {
   ClaimResult,
   KpiSummary,
+  PickingBoard,
   PickTaskPage,
   PickTaskView,
   PickTasks,
@@ -367,6 +368,11 @@ export class PostgresPickTasks implements PickTasks {
   async kpis(actorId: string, storeId: string): Promise<KpiSummary> {
     await assertStoreRole(this.identity, actorId, storeId, ['STORE_MANAGER']);
     return this.views.kpis(storeId);
+  }
+
+  async board(actorId: string, storeId: string): Promise<PickingBoard> {
+    await assertStoreRole(this.identity, actorId, storeId, ['STORE_MANAGER']);
+    return this.views.board(storeId);
   }
 
   async slaBoard(

@@ -47,6 +47,13 @@ export interface CodRider {
 }
 export interface BackendDashboard {
   kpis: BackendKpis
+  board: {
+    waiting: number
+    beingPicked: number
+    readyToPack: number
+    readyForHandover: number
+    hourly: Array<{ label: string; completed: number; open: number }>
+  }
   workload: { staff: BackendStaffMember[]; breaches: BackendSlaTask[] }
   upcomingTasks: BackendPickTaskView[]
   alerts: { unreadNotifications: number }
@@ -63,12 +70,12 @@ export async function getStoreDashboardSummary(storeId: string): Promise<StoreDa
   const [dash, status, lowStock, expiring, eligible, recorded, deposits, riderApps] = await Promise.all([
     apiGet<BackendDashboard>(`/v1/store/dashboard?storeId=${storeId}`),
     apiGet<{ store: BackendStoreDetails; history: BackendStatusHistoryEntry[] }>(`/v1/store/status?storeId=${storeId}`),
-    apiGet<Page<{ variantId: string; variantName?: string; productName?: string; available: string; reorderLevel?: string }>>(`/v1/store/inventory/low-stock?storeId=${storeId}&limit=50`).catch(() => ({ items: [], nextCursor: null }) as Page<{ variantId: string; variantName?: string; productName?: string; available: string; reorderLevel?: string }>),
-    apiGet<Page<{ variantId: string; variantName?: string; productName?: string; expiresAt: string; available: string }>>(`/v1/store/inventory/expiring?storeId=${storeId}&limit=50`).catch(() => ({ items: [], nextCursor: null }) as Page<{ variantId: string; variantName?: string; productName?: string; expiresAt: string; available: string }>),
-    listEligibleReturnOrders(storeId).catch(() => []),
-    listRecordedReturns(storeId).catch(() => []),
-    listCodDeposits(storeId).catch(() => [] as CodDeposit[]),
-    listRiderApplicationsForStore(storeId, 'all').catch(() => []),
+    apiGet<Page<{ variantId: string; variantName?: string; productName?: string; available: string; reorderLevel?: string }>>(`/v1/store/inventory/low-stock?storeId=${storeId}&limit=50`),
+    apiGet<Page<{ variantId: string; variantName?: string; productName?: string; expiresAt: string; available: string }>>(`/v1/store/inventory/expiring?storeId=${storeId}&limit=50`),
+    listEligibleReturnOrders(storeId),
+    listRecordedReturns(storeId),
+    listCodDeposits(storeId),
+    listRiderApplicationsForStore(storeId, 'all'),
   ])
   const todayKey = istDayKey(new Date().toISOString())
   const now = Date.now()
@@ -80,7 +87,7 @@ export async function getStoreDashboardSummary(storeId: string): Promise<StoreDa
     itemCount: view.items.reduce((a, i) => a + num(i.expectedQty), 0),
     dueBy: view.slaDueAt,
     overdue: new Date(view.slaDueAt).getTime() < now,
-    status: mapTaskStatus(view.status),
+    status: mapTaskStatus(view.status, view.orderStatus),
     assigneeName: view.assignedToName,
   }))
   const processedToday = recorded.filter((r) => r.processedAt && istDayKey(r.processedAt) === todayKey).length
@@ -94,17 +101,17 @@ export async function getStoreDashboardSummary(storeId: string): Promise<StoreDa
     avgPickingTimeMin: num(dash.kpis.avgPickSeconds) / 60,
     substitutedRatePct: num(dash.kpis.shortRateBps) / 100,
     pendingRiderApps: riderApps.filter((a) => a.status === 'pending' || a.status === 'under_review').length,
-    storeStatus: status.store.status === 'PAUSED' ? 'paused' : 'online',
+    storeStatus: status.store.status === 'PAUSED' ? 'paused' : status.store.status === 'OFFLINE' ? 'offline' : 'online',
     storeName: status.store.name,
     storeCode: status.store.storeId.slice(-6),
     lowStock: lowStock.items.map((row) => ({ variantName: row.variantName ?? row.productName ?? row.variantId, qty: num(row.available), reorderLevel: num(row.reorderLevel) })),
     expiringStock: expiring.items.map((row) => ({ variantName: row.variantName ?? row.productName ?? row.variantId, qty: num(row.available), expiryDate: row.expiresAt, daysLeft: Math.max(0, Math.round((new Date(row.expiresAt).getTime() - now) / 86400000)) })),
-    hourly: [],
+    hourly: dash.board.hourly,
     byStatus: {
-      waiting: dash.kpis.openTasks,
-      beingPicked: dash.workload.staff.reduce((a, s) => a + s.activeTasks, 0),
-      readyToPack: 0,
-      readyHandover: 0,
+      waiting: dash.board.waiting,
+      beingPicked: dash.board.beingPicked,
+      readyToPack: dash.board.readyToPack,
+      readyHandover: dash.board.readyForHandover,
     },
     staffWorkload: dash.workload.staff.map((s) => ({ id: s.userId, name: s.name, activeTasks: s.activeTasks, level: s.activeTasks >= 4 ? 'High' : s.activeTasks >= 2 ? 'Medium' : 'Low', status: 'active' as const })),
     avgTasksPerActivePicker: dash.workload.staff.length ? Number((dash.kpis.openTasks / dash.workload.staff.length).toFixed(1)) : 0,
@@ -373,7 +380,8 @@ export interface BackendInspectionDraft {
   updatedAt: string
 }
 export async function getReturnDraft(storeId: string, orderId: string): Promise<BackendInspectionDraft | null> {
-  return apiGet<BackendInspectionDraft | null>(`/v1/store/returns/orders/${orderId}/draft?storeId=${storeId}`)
+  // An absent draft is a valid result; React Query requires null rather than undefined.
+  return (await apiGet<BackendInspectionDraft | null | undefined>(`/v1/store/returns/orders/${orderId}/draft?storeId=${storeId}`)) ?? null
 }
 export async function saveReturnDraft(
   storeId: string,
@@ -523,5 +531,19 @@ export async function setStoreNotificationPrefs(prefs: StoreNotificationPrefs): 
 export async function listStoreNotifications(storeId: string | null): Promise<StoreNotification[]> {
   const rows = await collect<BackendNotification>((cursor) =>
     apiGet<Page<BackendNotification>>(`/v1/store/notifications?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`))
-  return rows.map((row) => mapNotification(row, storeId))
+  const scoped = storeId
+    ? rows.filter((row) => !row.payload?.storeId || row.payload.storeId === storeId)
+    : rows
+  return scoped.map((row) => mapNotification(row, storeId))
+}
+
+export async function exportInventory(storeId: string, search = ''): Promise<{ items: Array<Record<string, string | null>>; truncated: boolean }> {
+  const query = new URLSearchParams({ storeId })
+  if (search) query.set('search', search)
+  return apiGet(`/v1/store/inventory/export?${query.toString()}`)
+}
+
+export async function searchStore(storeId: string, type: 'ORDERS' | 'CUSTOMERS' | 'PRODUCTS', q: string) {
+  const query = new URLSearchParams({ storeId, type, q, limit: '8' })
+  return apiGet<{ items: Array<Record<string, unknown>> }>(`/v1/store/search?${query.toString()}`)
 }

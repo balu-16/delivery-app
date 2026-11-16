@@ -230,6 +230,8 @@ export function useStoreNotificationActions() {
       if (!id) return run(() => apiPost('/v1/store/notifications/read-all', {}), 'All notifications marked read')
       return run(() => apiPost(`/v1/store/notifications/${id}/read`, {}))
     },
+    markNotificationUnread: (id: string) =>
+      run(() => apiPost(`/v1/store/notifications/${id}/unread`, {}), 'Marked unread'),
     markAllRead: () => run(() => apiPost('/v1/store/notifications/read-all', {}), 'All notifications marked read'),
     setPrefs: (prefs: StoreNotificationPrefs) =>
       run(() => apiPatch('/v1/store/notification-preferences', {

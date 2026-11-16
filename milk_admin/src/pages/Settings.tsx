@@ -170,7 +170,9 @@ export function Settings() {
               <DataTable
                 keyId={(r: ConfigRow) => r.key}
                 rows={Object.keys(configValues).map((k) => ({ key: k }))}
-                loading={configQ.isLoading}
+                loading={configQ.isLoading || configQ.isPlaceholderData}
+                error={configQ.isError && !configQ.data}
+                onRetry={() => void configQ.refetch()}
                 empty={<EmptyState icon={Settings2} title="No configuration keys" body="Server config appears here." />}
                 columns={[
                   { key: 'key', header: 'Key', render: (r: ConfigRow) => <span className="font-mono text-[12.5px] font-bold">{r.key}</span> },
@@ -202,8 +204,9 @@ export function Settings() {
         {tab === 'notifications' && (
           <motion.section variants={container.item} className="space-y-3">
             <Card className="divide-y divide-border/60">
-              {prefsQ.isLoading && <div className="space-y-2 p-5">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-10 w-full rounded-xl" />)}</div>}
-              {!prefsQ.isLoading && prefs.length === 0 && (
+              {prefsQ.isLoading && <div className="space-y-2 p-5" role="status" aria-label="Loading notification preferences">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-10 w-full rounded-xl" />)}</div>}
+              {prefsQ.isError && !prefsQ.data && <div className="space-y-2 p-5" role="alert"><p>Could not load notification preferences.</p><Button size="sm" variant="secondary" onClick={() => void prefsQ.refetch()}>Try again</Button></div>}
+              {!prefsQ.isLoading && !(prefsQ.isError && !prefsQ.data) && prefs.length === 0 && (
                 <div className="p-8"><EmptyState icon={Bell} title="No preference rows" body="Notification categories appear here once the server reports them." /></div>
               )}
               {prefs.map((p) => (
@@ -233,7 +236,7 @@ export function Settings() {
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <Card className="p-5">
                 <h3 className="flex items-center gap-2 text-[15px] font-bold tracking-tight"><ServerCog className="h-4 w-4 text-brand-600" /> Outbox</h3>
-                <dl className="mt-3 grid grid-cols-2 gap-3 text-[13px]">
+                {outboxQ.isLoading ? <div role="status" aria-label="Loading outbox" className="mt-3 grid grid-cols-2 gap-3"><div className="skeleton h-20 rounded-xl" /><div className="skeleton h-20 rounded-xl" /></div> : outboxQ.isError && !outboxQ.data ? <div role="alert" className="mt-3 space-y-2 text-sm"><p>Could not load outbox status.</p><Button size="sm" variant="secondary" onClick={() => void outboxQ.refetch()}>Try again</Button></div> : <><dl className="mt-3 grid grid-cols-2 gap-3 text-[13px]">
                   <div className="rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5">
                     <dt className="text-[11px] font-bold uppercase text-muted-foreground">Pending</dt>
                     <dd className="text-[22px] font-extrabold tabular">{outboxQ.data?.pending ?? '—'}</dd>
@@ -245,7 +248,7 @@ export function Settings() {
                 </dl>
                 <p className="mt-3 text-xs text-muted-foreground">
                   Oldest pending: {outboxQ.data?.oldestPending ? fmtDateTime(outboxQ.data.oldestPending) : '—'} · latest processed: {outboxQ.data?.latestProcessed ? fmtDateTime(outboxQ.data.latestProcessed) : '—'}
-                </p>
+                </p></>}
                 <p className="mt-2 text-[11px] text-muted-foreground">Suspended outbox rows replay per-consumer from the ops API when a downstream fix lands.</p>
               </Card>
               <Card className="p-5">
@@ -254,11 +257,12 @@ export function Settings() {
                   <Select value={concern} onValueChange={setConcern} options={OPS_CONCERNS.map((c) => ({ value: c, label: `${c} jobs` }))} />
                 </div>
                 <div className="mt-3 space-y-1.5">
-                  {jobsQ.isLoading && <div className="skeleton h-16 w-full rounded-xl" />}
-                  {!jobsQ.isLoading && (jobsQ.data ?? []).length === 0 && (
+                  {(jobsQ.isLoading || jobsQ.isPlaceholderData) && <div className="skeleton h-16 w-full rounded-xl" role="status" aria-label="Loading failed jobs" />}
+                  {jobsQ.isError && !jobsQ.data && <div className="space-y-2" role="alert"><p>Could not load failed jobs.</p><Button size="sm" variant="secondary" onClick={() => void jobsQ.refetch()}>Try again</Button></div>}
+                  {!jobsQ.isLoading && !jobsQ.isPlaceholderData && !(jobsQ.isError && !jobsQ.data) && (jobsQ.data ?? []).length === 0 && (
                     <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No failed {concern} jobs</p>
                   )}
-                  {(jobsQ.data ?? []).map((j) => (
+                  {!jobsQ.isPlaceholderData && (jobsQ.data ?? []).map((j) => (
                     <div key={j.id} className="flex items-center gap-3 rounded-xl border border-border/70 px-3 py-2.5">
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-mono text-[12.5px] font-bold">{j.id.slice(0, 12)}…</p>

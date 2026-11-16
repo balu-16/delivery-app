@@ -10,7 +10,7 @@ import { useStagger, useDebouncedValue } from '@/hooks/misc'
 import { usePaymentAttempts, useRefundList, useWalletLedger, useReconciliation, useInvoiceFailures, useStoreOptions } from '@/hooks/queries'
 import { usePaymentActions } from '@/hooks/mutations'
 import { rangeToFromTo } from '@/api/mapping'
-import { PageHeader, TabPills, SearchInput, StatusPill, EmptyState } from '@/components/shared/misc'
+import { PageHeader, TabPills, tabCount, SearchInput, StatusPill, EmptyState } from '@/components/shared/misc'
 import { Select, Field } from '@/components/ui/form'
 import { Button, Card, Badge, Input, Textarea } from '@/components/ui/base'
 import { Dialog, DialogContent, Tooltip } from '@/components/ui/overlays'
@@ -207,10 +207,10 @@ export function Payments() {
 
       <motion.div variants={container.container} initial="hidden" animate="show" className="space-y-5">
         <motion.section variants={container.item} className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-          <KpiCard label="Captured (page)" value={captured} icon={Check} tint="green" format="num" />
-          <KpiCard label="Failed (page)" value={failed} icon={AlertTriangle} tint="red" format="num" />
-          <KpiCard label="Refunds pending" value={pendingRefunds} icon={RotateCcw} tint="amber" format="num" />
-          <KpiCard label="Reconciliation open" value={reconOpen} icon={Scale} tint="violet" format="num" highlight={reconOpen > 0} />
+          <KpiCard loading={attemptsQ.isLoading || attemptsQ.isPlaceholderData} unavailable={attemptsQ.isError && !attemptsQ.data} label="Captured (page)" value={captured} icon={Check} tint="green" format="num" />
+          <KpiCard loading={attemptsQ.isLoading || attemptsQ.isPlaceholderData} unavailable={attemptsQ.isError && !attemptsQ.data} label="Failed (page)" value={failed} icon={AlertTriangle} tint="red" format="num" />
+          <KpiCard loading={refundsQ.isLoading || refundsQ.isPlaceholderData} unavailable={refundsQ.isError && !refundsQ.data} label="Refunds pending" value={pendingRefunds} icon={RotateCcw} tint="amber" format="num" />
+          <KpiCard loading={reconQ.isLoading || reconQ.isPlaceholderData} unavailable={reconQ.isError && !reconQ.data} label="Reconciliation open" value={reconOpen} icon={Scale} tint="violet" format="num" highlight={reconOpen > 0} />
         </motion.section>
 
         <motion.div variants={container.item}>
@@ -222,8 +222,8 @@ export function Payments() {
               { value: 'attempts', label: 'Attempts' },
               { value: 'refunds', label: 'Refunds' },
               { value: 'wallet', label: 'Wallet ledger' },
-              { value: 'reconciliation', label: 'Reconciliation', count: reconOpen },
-              { value: 'invoices', label: 'Invoice failures', count: invoiceFailures.length },
+              { value: 'reconciliation', label: 'Reconciliation', count: tabCount(reconQ, reconOpen) },
+              { value: 'invoices', label: 'Invoice failures', count: tabCount(invoicesQ, invoiceFailures.length) },
             ]}
           />
         </motion.div>
@@ -236,7 +236,9 @@ export function Payments() {
               <DataTable
                 keyId={(a) => a.attemptId}
                 rows={attempts}
-                loading={attemptsQ.isLoading}
+                loading={attemptsQ.isLoading || attemptsQ.isPlaceholderData}
+                error={attemptsQ.isError && !attemptsQ.data}
+                onRetry={() => void attemptsQ.refetch()}
                 empty={<EmptyState icon={SearchX} title="No attempts match" body="Adjust the filters or range." />}
                 columns={[
                   { key: 'order', header: 'Order', render: (a: PaymentAttempt) => <Link to={`/orders/${a.orderId}`} className="font-mono text-[13px] font-bold text-brand-700 hover:underline dark:text-brand-300">{a.orderId.slice(0, 8)}…</Link> },
@@ -252,7 +254,7 @@ export function Payments() {
                 onNext={() => pageNext(attemptsQ.data, setAttemptsCursor, setAttemptsStack)}
                 hasPrev={attemptsStack.length > 1}
                 hasNext={!!attemptsQ.data?.nextCursor}
-                loading={attemptsQ.isLoading}
+                loading={attemptsQ.isLoading || attemptsQ.isPlaceholderData}
                 label={`Page ${attemptsStack.length} · attempts feed`}
               />
             </Card>
@@ -272,7 +274,9 @@ export function Payments() {
               <DataTable
                 keyId={(r) => r.refundId}
                 rows={refunds}
-                loading={refundsQ.isLoading}
+                loading={refundsQ.isLoading || refundsQ.isPlaceholderData}
+                error={refundsQ.isError && !refundsQ.data}
+                onRetry={() => void refundsQ.refetch()}
                 empty={<EmptyState icon={SearchX} title="No refunds match" body="Adjust the filters or range." />}
                 columns={[
                   { key: 'order', header: 'Order', render: (r: RefundRow) => <Link to={`/orders/${r.orderId}`} className="font-mono text-[13px] font-bold text-brand-700 hover:underline dark:text-brand-300">{r.orderId.slice(0, 8)}…</Link> },
@@ -287,7 +291,7 @@ export function Payments() {
                 onNext={() => pageNext(refundsQ.data, setRefundsCursor, setRefundsStack)}
                 hasPrev={refundsStack.length > 1}
                 hasNext={!!refundsQ.data?.nextCursor}
-                loading={refundsQ.isLoading}
+                loading={refundsQ.isLoading || refundsQ.isPlaceholderData}
                 label={`Page ${refundsStack.length} · refunds feed`}
               />
             </Card>
@@ -305,7 +309,9 @@ export function Payments() {
               <DataTable
                 keyId={(r) => r.id}
                 rows={wallet}
-                loading={walletQ.isLoading}
+                loading={walletQ.isLoading || walletQ.isPlaceholderData}
+                error={walletQ.isError && !walletQ.data}
+                onRetry={() => void walletQ.refetch()}
                 empty={<EmptyState icon={Wallet} title="No wallet entries" body="Wallet ledger rows will appear here." />}
                 columns={[
                   { key: 'user', header: 'Customer', render: (r: WalletLedgerRow) => <span className="font-mono text-xs text-muted-foreground">{r.userId.slice(0, 8)}…</span> },
@@ -328,7 +334,7 @@ export function Payments() {
                 onNext={() => pageNext(walletQ.data, setWalletCursor, setWalletStack)}
                 hasPrev={walletStack.length > 1}
                 hasNext={!!walletQ.data?.nextCursor}
-                loading={walletQ.isLoading}
+                loading={walletQ.isLoading || walletQ.isPlaceholderData}
                 label={`Page ${walletStack.length} · wallet feed`}
               />
             </Card>
@@ -342,7 +348,9 @@ export function Payments() {
               <DataTable
                 keyId={(r) => r.id}
                 rows={recon}
-                loading={reconQ.isLoading}
+                loading={reconQ.isLoading || reconQ.isPlaceholderData}
+                error={reconQ.isError && !reconQ.data}
+                onRetry={() => void reconQ.refetch()}
                 empty={<EmptyState icon={Scale} title="No reconciliation findings" body="Open findings will appear here for review." />}
                 columns={[
                   { key: 'kind', header: 'Kind', render: (r: ReconciliationFinding) => <Badge tone="amber">{r.kind.toLowerCase().replace(/_/g, ' ')}</Badge> },
@@ -377,7 +385,9 @@ export function Payments() {
               <DataTable
                 keyId={(r) => r.documentId}
                 rows={invoiceFailures}
-                loading={invoicesQ.isLoading}
+                loading={invoicesQ.isLoading || invoicesQ.isPlaceholderData}
+                error={invoicesQ.isError && !invoicesQ.data}
+                onRetry={() => void invoicesQ.refetch()}
                 empty={<EmptyState icon={Receipt} title="No invoice render failures" body="All invoices are rendering cleanly." />}
                 columns={[
                   { key: 'number', header: 'Invoice', render: (r) => <span className="font-mono text-[13px] font-bold">{r.number}</span> },

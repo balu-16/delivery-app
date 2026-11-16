@@ -182,6 +182,20 @@ it('logs a store manager in with assignments, bootstraps the session and logs ou
   expect((afterLogout.json() as { code: string }).code).toBe('SESSION_EXPIRED');
 });
 
+it('rejects a store cookie mutation that omits the CSRF token', async () => {
+  const server = app.getHttpAdapter().getInstance();
+  const issued = await login(server, managerEmail, password);
+  const cookie = sessionCookieOf(issued);
+  const denied = await server.inject({
+    method: 'POST',
+    url: '/v1/store/status',
+    payload: { storeId: managerStoreId, status: 'PAUSED', reason: 'csrf check' },
+    headers: { cookie },
+  });
+  expect(denied.statusCode).toBe(403);
+  expect((denied.json() as { code: string }).code).toBe('CSRF_TOKEN_INVALID');
+});
+
 it('answers login failures generically and rejects admin credentials on the store audience', async () => {
   const server = app.getHttpAdapter().getInstance();
   for (const attempt of [

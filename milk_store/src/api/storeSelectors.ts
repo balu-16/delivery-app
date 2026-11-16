@@ -8,7 +8,7 @@ export interface StoreDashboardSummary {
   avgPickingTimeMin: number
   substitutedRatePct: number
   pendingRiderApps: number
-  storeStatus: 'online' | 'paused'
+  storeStatus: 'online' | 'paused' | 'offline'
   storeName: string
   storeCode: string
   storeNote?: string

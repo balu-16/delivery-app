@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import type { LucideIcon } from 'lucide-react'
 import { CalendarDays, ChevronRight, CreditCard, Search, X } from 'lucide-react'
 import { cn, STATUS_LABEL } from '../lib/utils'
 import { Kbd } from '../ui/base'
 import { useOS } from '../hooks/misc'
+import { storeArtwork, type StoreArtwork } from '../assets/storeArtwork'
 
 /* ── Status pill ────────────────────────────────────────────── */
 const STATUS_TONE: Record<string, { cls: string; dot?: string }> = {
@@ -92,50 +92,32 @@ export function DeltaText({ value, good = 'up', className, suffix }: { value: nu
   )
 }
 
-/* ── Page header (breadcrumb + title + hero illustration) ───── */
-function usePauseOffscreen<T extends HTMLElement>(active: boolean) {
-  const ref = useRef<T | null>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (!el || !active) return
-    const io = new IntersectionObserver((entries) => {
-      el.classList.toggle('anim-offscreen', !entries.some((e) => e.isIntersecting))
-    })
-    io.observe(el)
-    return () => io.disconnect()
-  }, [active])
-  return ref
+/* ── Page header (breadcrumb + title + section artwork) ─────── */
+export function PageArtwork({ artwork }: { artwork: StoreArtwork }) {
+  return (
+    <div aria-hidden="true" className="pointer-events-none flex h-[110px] w-full shrink-0 justify-end sm:h-[170px] sm:w-[40%] sm:max-w-[520px]">
+      <img src={storeArtwork[artwork]} alt="" decoding="async" className="h-full w-full object-contain object-right" />
+    </div>
+  )
 }
 
 export function PageHeader({
-  title, titleAccent, subtitle, illustration, actions, breadcrumb,
+  title, titleAccent, subtitle, artwork, actions, breadcrumb,
 }: {
   title: string
   titleAccent?: string
   subtitle?: string
-  illustration?: React.ReactNode
+  artwork?: StoreArtwork
   actions?: React.ReactNode
   breadcrumb?: string[]
 }) {
-  const illusRef = usePauseOffscreen<HTMLDivElement>(!!illustration)
   return (
-    <div className={`relative flex min-w-0 flex-1 flex-wrap items-end justify-between gap-4 ${illustration ? 'min-h-[150px]' : ''}`}>
-      {illustration && (
-        <motion.div
-          initial={{ opacity: 0, x: 30 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.08 }}
-          ref={illusRef as never}
-          className="pointer-events-none absolute inset-y-0 right-0 hidden w-[48%] max-w-[560px] items-center justify-end lg:flex"
-        >
-          {illustration}
-        </motion.div>
-      )}
+    <div className={cn('relative flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-4', artwork && 'sm:min-h-[170px]')}>
       <motion.div
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-        className="relative z-10 pb-1"
+        className="relative z-10 min-w-0 flex-1 pb-1"
       >
         <div className="min-w-0">
           {breadcrumb && breadcrumb.length > 0 && (
@@ -157,6 +139,7 @@ export function PageHeader({
           {actions && <div className="mt-4 flex flex-wrap items-center gap-2.5">{actions}</div>}
         </div>
       </motion.div>
+      {artwork && <PageArtwork artwork={artwork} />}
     </div>
   )
 }

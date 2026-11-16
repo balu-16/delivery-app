@@ -10,7 +10,7 @@ import { useCoupons, useCampaigns, useInbox, useCategories, useStores, useProduc
 import { useOfferActions } from '@/hooks/mutations'
 import { rupeesToPaise } from '@/api/money'
 import { timeAgo } from '@/lib/utils'
-import { PageHeader, TabPills, SearchInput, StatusPill, EmptyState } from '@/components/shared/misc'
+import { PageHeader, TabPills, tabCount, SearchInput, StatusPill, EmptyState } from '@/components/shared/misc'
 import { Select, Field } from '@/components/ui/form'
 import { Button, Card, Badge, Input, Switch, Textarea, Label } from '@/components/ui/base'
 import {
@@ -340,9 +340,9 @@ export function Offers() {
             value={tab}
             onChange={(v) => setTab(v as MainTab)}
             tabs={[
-              { value: 'coupons', label: 'Coupons', count: coupons.length },
-              { value: 'campaigns', label: 'Push campaigns', count: campaigns.length },
-              { value: 'inbox', label: 'My notifications', count: inbox.filter((n) => !n.readAt).length },
+              { value: 'coupons', label: 'Coupons', count: tabCount(couponsQ, coupons.length) },
+              { value: 'campaigns', label: 'Push campaigns', count: tabCount(campaignsQ, campaigns.length) },
+              { value: 'inbox', label: 'My notifications', count: tabCount(inboxQ, inbox.filter((n) => !n.readAt).length) },
             ]}
           />
         </motion.div>
@@ -357,7 +357,9 @@ export function Offers() {
               <DataTable
                 keyId={(c) => c.id}
                 rows={filteredCoupons}
-                loading={couponsQ.isLoading}
+                loading={couponsQ.isLoading || couponsQ.isPlaceholderData}
+                error={couponsQ.isError && !couponsQ.data}
+                onRetry={() => void couponsQ.refetch()}
                 empty={<EmptyState icon={Ticket} title="No coupons" body="Create the first coupon for the storefront." />}
                 columns={[
                   { key: 'code', header: 'Code', render: (c: Coupon) => <span className="font-mono text-[13px] font-bold">{c.code}</span> },
@@ -392,7 +394,9 @@ export function Offers() {
               <DataTable
                 keyId={(c) => c.id}
                 rows={campaigns}
-                loading={campaignsQ.isLoading}
+                loading={campaignsQ.isLoading || campaignsQ.isPlaceholderData}
+                error={campaignsQ.isError && !campaignsQ.data}
+                onRetry={() => void campaignsQ.refetch()}
                 onRowClick={(c) => setCampaignDetail(c)}
                 empty={<EmptyState icon={Megaphone} title="No campaigns yet" body="Create the first push campaign." />}
                 columns={[
@@ -424,8 +428,9 @@ export function Offers() {
               </Button>
             </div>
             <Card className="divide-y divide-border/60">
-              {inboxQ.isLoading && <div className="space-y-2 p-5">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-12 w-full rounded-xl" />)}</div>}
-              {!inboxQ.isLoading && inbox.length === 0 && (
+              {inboxQ.isLoading && <div className="space-y-2 p-5" role="status" aria-label="Loading notifications">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-12 w-full rounded-xl" />)}</div>}
+              {inboxQ.isError && !inboxQ.data && <div className="space-y-2 p-5" role="alert"><p>Could not load notifications.</p><Button size="sm" variant="secondary" onClick={() => void inboxQ.refetch()}>Try again</Button></div>}
+              {!inboxQ.isLoading && !(inboxQ.isError && !inboxQ.data) && inbox.length === 0 && (
                 <div className="p-8"><EmptyState icon={Bell} title="You're all caught up" body="Operational notifications will appear here." /></div>
               )}
               {inbox.map((n) => (

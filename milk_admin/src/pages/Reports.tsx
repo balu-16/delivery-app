@@ -119,7 +119,9 @@ export function Reports() {
             <DataTable
               keyId={(r: Record<string, unknown>) => String(r['id'] ?? JSON.stringify(r).slice(0, 40))}
               rows={rows}
-              loading={previewQ.isLoading}
+              loading={previewQ.isLoading || previewQ.isPlaceholderData}
+              error={previewQ.isError && !previewQ.data}
+              onRetry={() => void previewQ.refetch()}
               empty={<EmptyState icon={Clock} title="No rows in this window" body="Try a wider range or different store." />}
               columns={columns}
             />
@@ -149,7 +151,9 @@ export function Reports() {
               <p className="mt-0.5 text-xs text-muted-foreground">Files are generated server-side; downloads open the pre-signed URL</p>
             </div>
             {jobsQ.isLoading ? (
-              <div className="space-y-2 px-5 pb-5">{[1, 2].map((i) => <div key={i} className="skeleton h-12 w-full rounded-xl" />)}</div>
+              <div className="space-y-2 px-5 pb-5" role="status" aria-label="Loading export jobs">{[1, 2].map((i) => <div key={i} className="skeleton h-12 w-full rounded-xl" />)}</div>
+            ) : jobsQ.isError && !jobsQ.data ? (
+              <div role="alert" className="space-y-2 px-5 pb-5 text-sm text-muted-foreground"><p>Could not load export jobs.</p><Button size="sm" variant="secondary" onClick={() => void jobsQ.refetch()}>Try again</Button></div>
             ) : jobs.length === 0 ? (
               <div className="px-5 pb-6"><EmptyState icon={Download} title="No exports yet" body="Request an export from the preview above." /></div>
             ) : (

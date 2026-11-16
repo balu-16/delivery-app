@@ -123,6 +123,15 @@ export interface KpiSummary {
   backlog: number;
 }
 
+/** Store-board counts and today's hourly series. Zeros are real empty buckets. */
+export interface PickingBoard {
+  waiting: number;
+  beingPicked: number;
+  readyToPack: number;
+  readyForHandover: number;
+  hourly: Array<{ label: string; completed: number; open: number }>;
+}
+
 export interface SlaTask {
   id: string;
   orderId: string;
@@ -194,6 +203,8 @@ export interface PickTasks {
   ): Promise<PickTaskView>;
   /** Manager board metrics over picking-owned data. */
   kpis(actorId: string, storeId: string): Promise<KpiSummary>;
+  /** Status buckets and today's hourly completed/open counts for the store board. */
+  board(actorId: string, storeId: string): Promise<PickingBoard>;
   slaBoard(actorId: string, storeId: string, cursor?: string, limit?: number): Promise<SlaTaskPage>;
   /** Staff roster with active task counts. */
   staff(actorId: string, storeId: string, cursor?: string, limit?: number): Promise<StoreStaffPage>;

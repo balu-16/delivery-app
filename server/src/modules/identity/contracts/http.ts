@@ -11,11 +11,13 @@ export const AUTH_POLICY = 'delivery.identity.route-policy';
 export const AuthPolicy = (policy: RoutePolicy): MethodDecorator & ClassDecorator =>
   SetMetadata(AUTH_POLICY, policy);
 export interface AuthenticatedRequest {
+  method?: string;
   headers: {
     authorization?: string;
     cookie?: string;
     origin?: string;
     referer?: string;
+    'x-store-csrf'?: string | string[];
   };
   url?: string;
   principal?: Principal;

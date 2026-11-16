@@ -1,3 +1,4 @@
+import { firstFailedQuery, PageLoadError } from '@/components/PageLoadError'
 // §8 Staff & Workload — staff table with workload bars, live picking workload tabs,
 // task reassignment, overdue list and workload distribution. No account creation,
 // store assignment or scheduling here (admin-only concerns, per spec).
@@ -13,14 +14,12 @@ import {
 } from '@/api/storeQueries'
 import { useStaffActions } from '@/api/storeMutations'
 import { useStoreAuth } from '@/login/authStore'
-import { DEMO_NOW } from '@dairydirect/shared/mock-db/seed'
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Textarea } from '@dairydirect/shared/ui/base'
 import { Field, Select } from '@dairydirect/shared/ui/form'
 import { EmptyState, PageHeader, SearchInput, StatusPill, TabPills } from '@dairydirect/shared/ui/misc'
 import { DataTable, Pagination, type Column } from '@dairydirect/shared/ui/DataTable'
 import { KpiCard } from '@dairydirect/shared/ui/KpiCard'
 import { InitialAvatar } from '@dairydirect/shared/assets/avatars'
-import { PeopleScene } from '@dairydirect/shared/assets/scenes'
 import { cn, fmtTime } from '@dairydirect/shared/lib/utils'
 import type { LucideIcon } from 'lucide-react'
 import type { PickingTask } from '@dairydirect/shared/types'
@@ -119,7 +118,7 @@ export function StoreStaffWorkload() {
   const beingPicked = useMemo(() => allTasks.filter((r) => r.task.status === 'being_picked'), [allTasks])
   const overdueTasks = useMemo(
     () => allTasks
-      .filter((r) => (r.task.status === 'waiting_to_pick' || r.task.status === 'being_picked') && new Date(r.task.deadline).getTime() < DEMO_NOW.getTime())
+      .filter((r) => (r.task.status === 'waiting_to_pick' || r.task.status === 'being_picked') && new Date(r.task.deadline).getTime() < Date.now())
       .sort((a, b) => a.task.deadline.localeCompare(b.task.deadline)),
     [allTasks],
   )
@@ -181,7 +180,7 @@ export function StoreStaffWorkload() {
     {
       key: 'deadline', header: 'Deadline',
       render: (r) => {
-        const overdue = new Date(r.task.deadline).getTime() < DEMO_NOW.getTime()
+        const overdue = new Date(r.task.deadline).getTime() < Date.now()
         return <span className={cn('whitespace-nowrap tabular font-semibold', overdue ? 'text-destructive' : 'text-muted-foreground')}>{fmtTime(r.task.deadline)}</span>
       },
     },
@@ -196,6 +195,9 @@ export function StoreStaffWorkload() {
     },
   ]
 
+  const loadFailure = firstFailedQuery([staffQ, tasksQ, dash])
+  if (loadFailure) return <PageLoadError title="Staff & Workload" artwork="staffWorkload" query={loadFailure} />
+
   return (
     <motion.div variants={stagger.container} initial="hidden" animate="show" className="space-y-5">
       <PageHeader
@@ -203,7 +205,7 @@ export function StoreStaffWorkload() {
         title="Staff &"
         titleAccent="Workload"
         subtitle="View your store staff, their current picking workload and reassign tasks when needed."
-        illustration={<PeopleScene />}
+        artwork="staffWorkload"
       />
 
       {/* ── KPI row ── */}
@@ -271,7 +273,7 @@ export function StoreStaffWorkload() {
               <p className="rounded-xl bg-card px-3 py-4 text-center text-xs text-muted-foreground">Nothing overdue — the queue is healthy.</p>
             ) : (
               overdueTasks.slice(0, 5).map((r) => {
-                const mins = Math.max(1, Math.floor((DEMO_NOW.getTime() - new Date(r.task.deadline).getTime()) / 60000))
+                const mins = Math.max(1, Math.floor((Date.now() - new Date(r.task.deadline).getTime()) / 60000))
                 return (
                   <div key={r.task.id} className="rounded-xl border border-destructive/25 bg-card p-3">
                     <div className="flex items-center justify-between gap-2">

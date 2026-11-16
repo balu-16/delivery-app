@@ -14,7 +14,7 @@ import {
 import { useStoreActions, zoneGeometryFromPoints } from '@/hooks/mutations'
 import { polygonToPoints, minutesToTime, timeToMinutes } from '@/api/mapping'
 import { useFeature } from '@/hooks/flags'
-import { PageHeader, TabPills, SearchInput, StatusPill, EmptyState } from '@/components/shared/misc'
+import { PageHeader, TabPills, tabCount, SearchInput, StatusPill, EmptyState } from '@/components/shared/misc'
 import { Select, Field } from '@/components/ui/form'
 import { Button, Card, Input, Badge, Label } from '@/components/ui/base'
 import {
@@ -241,11 +241,14 @@ function EntityFormDialog({ open, onOpenChange, initial, serverError, onSubmit }
 }
 
 /* ── Store detail drawer: meta, hours, holidays, staff ─────── */
-function StoreDrawer({ store, cities, entities, managers, codOn, onClose, onSaveHours, onSaveHoliday, onDeleteHoliday, onToggleStaff, onSetCod }: {
+function StoreDrawer({ store, cities, entities, managers, managersLoading, managersError, retryManagers, codOn, onClose, onSaveHours, onSaveHoliday, onDeleteHoliday, onToggleStaff, onSetCod }: {
   store: Store
   cities: City[]
   entities: LegalEntity[]
   managers: Array<{ userId: string; name: string }>
+  managersLoading: boolean
+  managersError: boolean
+  retryManagers: () => void
   codOn: boolean
   onClose: () => void
   onSaveHours: (entries: Array<{ weekday: number; startMinute: number; endMinute: number }>) => void
@@ -255,7 +258,8 @@ function StoreDrawer({ store, cities, entities, managers, codOn, onClose, onSave
   onSetCod: (enabled: boolean) => void
 }) {
   const opsQ = useStoreOperations(store.id)
-  const ops: StoreOperations | null = opsQ.data ?? null
+  const ops: StoreOperations | null = opsQ.isPlaceholderData ? null : opsQ.data ?? null
+  const opsLoading = opsQ.isLoading || opsQ.isPlaceholderData
   const [hoursDraft, setHoursDraft] = useState<Array<{ weekday: number; startMinute: number; endMinute: number }>>([])
   const [holidayDate, setHolidayDate] = useState('')
   const [assignPick, setAssignPick] = useState('')
@@ -321,8 +325,10 @@ function StoreDrawer({ store, cities, entities, managers, codOn, onClose, onSave
         {/* weekly opening hours editor */}
         <section>
           <h4 className="mb-2 flex items-center gap-2 text-[13px] font-bold uppercase tracking-wide text-muted-foreground"><Save className="h-3.5 w-3.5" /> Weekly opening hours</h4>
-          {opsQ.isLoading ? (
-            <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-9 w-full rounded-lg" />)}</div>
+          {opsLoading || (!!ops && hoursDraft.length === 0) ? (
+            <div className="space-y-2" role="status" aria-label="Loading opening hours">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-9 w-full rounded-lg" />)}</div>
+          ) : opsQ.isError && !opsQ.data ? (
+            <div role="alert" className="space-y-2 text-sm text-muted-foreground"><p>Could not load opening hours.</p><Button size="sm" variant="secondary" onClick={() => void opsQ.refetch()}>Try again</Button></div>
           ) : (
             <>
               <div className="overflow-hidden rounded-xl border border-border">
@@ -365,8 +371,7 @@ function StoreDrawer({ store, cities, entities, managers, codOn, onClose, onSave
         <section>
           <h4 className="mb-2 flex items-center gap-2 text-[13px] font-bold uppercase tracking-wide text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" /> Holiday calendar</h4>
           <div className="space-y-1.5">
-            {(ops?.holidays ?? []).length === 0 && <p className="rounded-xl border border-dashed border-border px-3 py-2.5 text-center text-xs text-muted-foreground">No holidays configured</p>}
-            {(ops?.holidays ?? []).map((h) => (
+            {opsLoading ? <div role="status" aria-label="Loading holidays" className="skeleton h-12 rounded-xl" /> : !ops ? <p className="text-xs text-muted-foreground">Holiday details are unavailable.</p> : ops.holidays.length === 0 ? <p className="rounded-xl border border-dashed border-border px-3 py-2.5 text-center text-xs text-muted-foreground">No holidays configured</p> : ops.holidays.map((h) => (
               <div key={h.day} className="flex items-center gap-3 rounded-xl border border-border/70 px-3 py-2">
                 <Badge tone="violet">{h.day}</Badge>
                 <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{h.closed ? 'Closed all day' : 'Special hours'}</span>
@@ -378,7 +383,7 @@ function StoreDrawer({ store, cities, entities, managers, codOn, onClose, onSave
           </div>
           <div className="mt-2 flex flex-wrap items-end gap-2">
             <div className="w-40"><Input type="date" value={holidayDate} onChange={(e) => setHolidayDate(e.target.value)} /></div>
-            <Button size="sm" variant="outline" disabled={!holidayDate} onClick={() => { onSaveHoliday(holidayDate, true); setHolidayDate('') }}>
+            <Button size="sm" variant="outline" disabled={!holidayDate || !ops} onClick={() => { onSaveHoliday(holidayDate, true); setHolidayDate('') }}>
               <Plus className="h-3.5 w-3.5" /> Add closed day
             </Button>
           </div>
@@ -388,8 +393,7 @@ function StoreDrawer({ store, cities, entities, managers, codOn, onClose, onSave
         <section>
           <h4 className="mb-2 flex items-center gap-2 text-[13px] font-bold uppercase tracking-wide text-muted-foreground"><Users className="h-3.5 w-3.5" /> Store managers</h4>
           <div className="space-y-1.5">
-            {assigned.length === 0 && <p className="rounded-xl border border-dashed border-border px-3 py-2.5 text-center text-xs text-muted-foreground">No manager assigned</p>}
-            {assigned.map((m) => (
+            {opsLoading || managersLoading ? <div role="status" aria-label="Loading managers" className="skeleton h-12 rounded-xl" /> : !ops ? <p className="text-xs text-muted-foreground">Manager assignments are unavailable.</p> : managersError ? <div role="alert" className="space-y-2 text-sm text-muted-foreground"><p>Could not load managers.</p><Button size="sm" variant="secondary" onClick={retryManagers}>Try again</Button></div> : assigned.length === 0 ? <p className="rounded-xl border border-dashed border-border px-3 py-2.5 text-center text-xs text-muted-foreground">No manager assigned</p> : assigned.map((m) => (
               <div key={m.userId} className="flex items-center gap-3 rounded-xl border border-border/70 px-3 py-2">
                 <span className="grid h-7 w-7 place-items-center rounded-full bg-primary-soft text-[10px] font-bold text-brand-700 dark:text-brand-300">{m.name.split(' ').map((p) => p[0]).join('')}</span>
                 <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{m.name}</span>
@@ -405,9 +409,9 @@ function StoreDrawer({ store, cities, entities, managers, codOn, onClose, onSave
           </div>
           <div className="mt-2 flex items-end gap-2">
             <div className="min-w-0 flex-1">
-              <Select value={assignPick} onValueChange={setAssignPick} placeholder="Assign a manager…" options={available.map((m) => ({ value: m.userId, label: m.name }))} disabled={available.length === 0} />
+              <Select value={assignPick} onValueChange={setAssignPick} placeholder="Assign a manager…" options={available.map((m) => ({ value: m.userId, label: m.name }))} disabled={!ops || managersLoading || managersError || available.length === 0} />
             </div>
-            <Button size="sm" variant="outline" disabled={!assignPick} onClick={() => { onToggleStaff(assignPick, true); setAssignPick('') }}>
+            <Button size="sm" variant="outline" disabled={!assignPick || !ops || managersLoading || managersError} onClick={() => { onToggleStaff(assignPick, true); setAssignPick('') }}>
               <UserPlus className="h-3.5 w-3.5" /> Assign
             </Button>
           </div>
@@ -490,7 +494,9 @@ export function Stores() {
     <DataTable
       keyId={(s) => s.id}
       rows={filteredStores}
-      loading={storesQ.isLoading}
+      loading={storesQ.isLoading || storesQ.isPlaceholderData}
+      error={storesQ.isError && !storesQ.data}
+      onRetry={() => void storesQ.refetch()}
       onRowClick={(s) => setDetailId(s.id)}
       empty={<EmptyState icon={StoreIcon} title="No stores match" body="Adjust the search, status or COD filters." />}
       columns={[
@@ -555,9 +561,9 @@ export function Stores() {
             value={tab}
             onChange={(v) => setTab(v as MainTab)}
             tabs={[
-              { value: 'stores', label: 'Stores', count: stores.length },
-              { value: 'cities', label: 'Cities & zones', count: zones.length },
-              { value: 'entities', label: 'Legal entities', count: entities.length },
+              { value: 'stores', label: 'Stores', count: tabCount(storesQ, stores.length) },
+              { value: 'cities', label: 'Cities & zones', count: tabCount(zonesQ, zones.length) },
+              { value: 'entities', label: 'Legal entities', count: tabCount(entitiesQ, entities.length) },
             ]}
           />
         </motion.div>
@@ -597,7 +603,9 @@ export function Stores() {
                   <Button size="sm" variant="primary" onClick={() => { setEditingZone(null); setZoneFormOpen(true) }}><Plus className="h-3.5 w-3.5" /> Add zone</Button>
                 </div>
                 {citiesQ.isLoading || zonesQ.isLoading ? (
-                  <p className="py-6 text-center text-xs text-muted-foreground">Loading zones…</p>
+                  <div className="space-y-2 py-2" role="status" aria-label="Loading service zones">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-16 rounded-xl" />)}</div>
+                ) : citiesQ.isError || zonesQ.isError ? (
+                  <div role="alert" className="space-y-3 py-4 text-sm text-muted-foreground"><p>Could not load service zones.</p><Button size="sm" variant="secondary" onClick={() => { void citiesQ.refetch(); void zonesQ.refetch() }}>Try again</Button></div>
                 ) : zones.length === 0 ? (
                   <EmptyState icon={Route} title="No service zones yet" body="Create the first zone to start dispatching." />
                 ) : (
@@ -670,7 +678,9 @@ export function Stores() {
               <DataTable
                 keyId={(e) => e.id}
                 rows={entities}
-                loading={entitiesQ.isLoading}
+                loading={entitiesQ.isLoading || entitiesQ.isPlaceholderData}
+                error={entitiesQ.isError && !entitiesQ.data}
+                onRetry={() => void entitiesQ.refetch()}
                 empty={<EmptyState icon={Building2} title="No legal entities" body="Add the first billing entity." />}
                 columns={[
                   { key: 'name', header: 'Entity', render: (e: LegalEntity) => <span className="font-semibold">{e.name}</span> },
@@ -703,10 +713,14 @@ export function Stores() {
       {/* ── Store detail drawer ── */}
       {detailStore && (
         <StoreDrawer
+          key={detailStore.id}
           store={detailStore}
           cities={cities}
           entities={entities}
           managers={managers}
+          managersLoading={workforceQ.isLoading || workforceQ.isPlaceholderData}
+          managersError={workforceQ.isError && !workforceQ.data}
+          retryManagers={() => void workforceQ.refetch()}
           codOn={codOn}
           onClose={() => setDetailId(null)}
           onSaveHours={(entries) => actions.saveHours(detailStore.id, entries).mutate(undefined, { onError: (e) => setServerError(e.message) })}

@@ -117,6 +117,7 @@ export function buildStorePortalData(db: SeedBase, rng: RNG): void {
       else if (status === 'under_review') docStatus = k < (i % 3) + 1 ? 'approved' : 'pending'
       else if (status === 'rejected') docStatus = k === 3 ? 'rejected' : 'approved'
       return {
+        id: `doc-${i}-${type}`,
         type, label,
         number: type === 'license' ? `DL-${int(rng, 10000000, 99999999)}`
           : type === 'vehicle_rc' ? `AP${int(rng, 10, 39)} ${String.fromCharCode(65 + (i % 26))}${String.fromCharCode(65 + ((i + 3) % 26))} ${int(rng, 1000, 9999)}`
@@ -172,8 +173,12 @@ export function buildStorePortalData(db: SeedBase, rng: RNG): void {
         icon: iconFor(product.name),
         qtyOrdered,
         qtyPicked: isPicked ? qtyOrdered : 0,
+        sku: v.sku ?? v.id,
+        barcode: v.barcode ?? null,
         batchId: batch,
+        batchCode: batch,
         batchExpiry: expiry,
+        substitutionCandidates: [],
         substitutionVariantId: isSubstitute ? 'v-131' : undefined, // Tofu – 200 g
         unavailableReason: isUnavailable ? pick(rng, ['Damaged pack in cold storage', 'Not received in morning stock']) : undefined,
         resolved: isPicked || isUnavailable || isSubstitute,
@@ -227,7 +232,7 @@ export function buildStorePortalData(db: SeedBase, rng: RNG): void {
       deadline,
       createdAt: iso(placed), lines,
       packing: opts.status === 'ready_to_pack' || opts.status === 'ready_for_handover' ? { bags: int(rng, 1, 3), coldChain: chance(rng, 0.6), packedBy: 'Store staff', notes: undefined } : undefined,
-      handover: opts.status === 'ready_for_handover' && rider ? { riderId: rider.id, riderName: rider.name, code: String(int(rng, 1000, 9999)), attempts: 0 } : undefined,
+      handover: opts.status === 'ready_for_handover' && rider ? { state: 'PENDING' as const, riderId: rider.id, riderName: rider.name, locked: false, deliveryStatus: null, code: String(int(rng, 1000, 9999)), attempts: 0 } : undefined,
       completedAt: opts.completedAt,
     })
   }
@@ -246,14 +251,14 @@ export function buildStorePortalData(db: SeedBase, rng: RNG): void {
   pushOrderAndTask({
     status: 'being_picked', placed: [24, 10, 20], deadline: [12, 45], assignee: beingPickedAssignees[3], picked: 2,
     lines: [
-      { id: 'pl-x1', variantId: 'v-012', name: 'Cow Milk – 1 L', icon: 'milk', qtyOrdered: 2, qtyPicked: 2, batchId: 'ML-2403', batchExpiry: D(28, 9, 0), resolved: true },
-      { id: 'pl-x2', variantId: 'v-101', name: 'Curd – 400 g', icon: 'curd', qtyOrdered: 1, qtyPicked: 1, batchId: 'CR-1124', batchExpiry: D(26, 9, 0), resolved: true },
-      { id: 'pl-x3', variantId: 'v-061', name: 'Paneer – 200 g', icon: 'paneer', qtyOrdered: 1, qtyPicked: 0, batchId: 'PN-0903', batchExpiry: D(24, 9, 0), unavailableReason: 'Damaged pack in cold storage', substitutionVariantId: 'v-131', resolved: true },
-      { id: 'pl-x4', variantId: 'v-121', name: 'Butter – 500 g', icon: 'butter', qtyOrdered: 2, qtyPicked: 0, batchId: 'BT-7781', batchExpiry: D(2, 9, 0) + ' ', resolved: false },
-      { id: 'pl-x5', variantId: 'v-011', name: 'Cow Milk – 500 ml', icon: 'milk', qtyOrdered: 1, qtyPicked: 0, batchId: 'ML-2410', batchExpiry: D(28, 9, 0), resolved: false },
-      { id: 'pl-x6', variantId: 'v-081', name: 'Ghee – 500 ml', icon: 'ghee', qtyOrdered: 1, qtyPicked: 0, batchId: 'GH-4401', batchExpiry: D(45, 9, 0), resolved: false },
-      { id: 'pl-x7', variantId: 'v-111', name: 'Sweet Lassi – 200 ml', icon: 'lassi', qtyOrdered: 2, qtyPicked: 0, batchId: 'LS-2201', batchExpiry: D(6, 9, 0), resolved: false },
-      { id: 'pl-x8', variantId: 'v-021', name: 'Toned Milk – 500 ml', icon: 'milk', qtyOrdered: 1, qtyPicked: 0, batchId: 'TM-1802', batchExpiry: D(28, 9, 0), resolved: false },
+      { id: 'pl-x1', variantId: 'v-012', name: 'Cow Milk – 1 L', icon: 'milk', sku: 'v-012', barcode: null, batchCode: 'ML-2403', substitutionCandidates: [], qtyOrdered: 2, qtyPicked: 2, batchId: 'ML-2403', batchExpiry: D(28, 9, 0), resolved: true },
+      { id: 'pl-x2', variantId: 'v-101', name: 'Curd – 400 g', icon: 'curd', sku: 'v-101', barcode: null, batchCode: 'CR-1124', substitutionCandidates: [], qtyOrdered: 1, qtyPicked: 1, batchId: 'CR-1124', batchExpiry: D(26, 9, 0), resolved: true },
+      { id: 'pl-x3', variantId: 'v-061', name: 'Paneer – 200 g', icon: 'paneer', sku: 'v-061', barcode: null, batchCode: 'PN-0903', substitutionCandidates: [], qtyOrdered: 1, qtyPicked: 0, batchId: 'PN-0903', batchExpiry: D(24, 9, 0), unavailableReason: 'Damaged pack in cold storage', substitutionVariantId: 'v-131', resolved: true },
+      { id: 'pl-x4', variantId: 'v-121', name: 'Butter – 500 g', icon: 'butter', sku: 'v-121', barcode: null, batchCode: 'BT-7781', substitutionCandidates: [], qtyOrdered: 2, qtyPicked: 0, batchId: 'BT-7781', batchExpiry: D(2, 9, 0) + ' ', resolved: false },
+      { id: 'pl-x5', variantId: 'v-011', name: 'Cow Milk – 500 ml', icon: 'milk', sku: 'v-011', barcode: null, batchCode: 'ML-2410', substitutionCandidates: [], qtyOrdered: 1, qtyPicked: 0, batchId: 'ML-2410', batchExpiry: D(28, 9, 0), resolved: false },
+      { id: 'pl-x6', variantId: 'v-081', name: 'Ghee – 500 ml', icon: 'ghee', sku: 'v-081', barcode: null, batchCode: 'GH-4401', substitutionCandidates: [], qtyOrdered: 1, qtyPicked: 0, batchId: 'GH-4401', batchExpiry: D(45, 9, 0), resolved: false },
+      { id: 'pl-x7', variantId: 'v-111', name: 'Sweet Lassi – 200 ml', icon: 'lassi', sku: 'v-111', barcode: null, batchCode: 'LS-2201', substitutionCandidates: [], qtyOrdered: 2, qtyPicked: 0, batchId: 'LS-2201', batchExpiry: D(6, 9, 0), resolved: false },
+      { id: 'pl-x8', variantId: 'v-021', name: 'Toned Milk – 500 ml', icon: 'milk', sku: 'v-021', barcode: null, batchCode: 'TM-1802', substitutionCandidates: [], qtyOrdered: 1, qtyPicked: 0, batchId: 'TM-1802', batchExpiry: D(28, 9, 0), resolved: false },
     ],
   })
   // remaining waiting (15 more → 18 total), being picked (8 more → 12), ready to pack (21), ready for handover (12)
@@ -422,11 +427,15 @@ export function buildStorePortalData(db: SeedBase, rng: RNG): void {
   db.stockReceipts = stockReceipts
 
   const stockCounts: StockCount[] = [{
-    id: 'SC-101', storeId: 'st-ap1', startedAt: D(24, 8, 0), status: 'open',
+    id: 'SC-101', storeId: 'st-ap1', startedAt: D(24, 8, 0), status: 'open', version: '1',
     lines: apStoreVariants.slice(0, 5).map(({ v }, i) => ({
+      id: `scl-${i}`,
       variantId: v.id, name: `${db.products.find((p) => p.id === v.productId)!.name} – ${v.label}`,
+      batchId: `batch-${i}`,
+      batchCode: `B${i}`,
       expected: inventoryBatches.filter((b) => b.variantId === v.id).reduce((a, b) => a + b.qty, 0) + (i === 2 ? 3 : 0),
       counted: null,
+      reason: null,
     })),
   }]
   db.stockCounts = stockCounts

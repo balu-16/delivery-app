@@ -19,6 +19,8 @@ import {
 interface StoreAuthState {
   status: 'loading' | 'anonymous' | 'authenticated'
   user: StoreAuthUser | null
+  /** Server idle deadline for the current cookie session. */
+  idleExpiresAt: string | null
   /** Set when the provider demanded a first-login password change. */
   pendingChallengeId: string | null
   bootstrap: () => Promise<void>
@@ -37,13 +39,18 @@ interface StoreAuthState {
 export const useStoreAuth = create<StoreAuthState>()((set, get) => ({
   status: 'loading',
   user: null,
+  idleExpiresAt: null,
   pendingChallengeId: null,
   bootstrap: async () => {
     try {
-      const user = await bootstrapSession()
-      set({ status: user ? 'authenticated' : 'anonymous', user })
+      const session = await bootstrapSession()
+      set({
+        status: session ? 'authenticated' : 'anonymous',
+        user: session?.user ?? null,
+        idleExpiresAt: session?.idleExpiresAt ?? null,
+      })
     } catch {
-      set({ status: 'anonymous', user: null })
+      set({ status: 'anonymous', user: null, idleExpiresAt: null })
     }
   },
   login: async (email, password, remember = true) => {
@@ -53,14 +60,24 @@ export const useStoreAuth = create<StoreAuthState>()((set, get) => ({
       set({ pendingChallengeId: outcome.challengeId })
       return { ok: false, challenge: true }
     }
-    set({ status: 'authenticated', user: toUserState(outcome.manager), pendingChallengeId: null })
+    set({
+      status: 'authenticated',
+      user: toUserState(outcome.manager),
+      idleExpiresAt: outcome.idleExpiresAt ?? null,
+      pendingChallengeId: null,
+    })
     return { ok: true }
   },
   completeFirstLogin: async (newPassword) => {
     const challengeId = get().pendingChallengeId
     if (!challengeId) return { ok: false, error: 'No pending first-login challenge' }
     const outcome = await completeChallenge(challengeId, newPassword)
-    set({ status: 'authenticated', user: toUserState(outcome.manager), pendingChallengeId: null })
+    set({
+      status: 'authenticated',
+      user: toUserState(outcome.manager),
+      idleExpiresAt: outcome.idleExpiresAt ?? null,
+      pendingChallengeId: null,
+    })
     return { ok: true }
   },
   logout: async () => {
@@ -69,10 +86,10 @@ export const useStoreAuth = create<StoreAuthState>()((set, get) => ({
     } finally {
       // Sensitive queries never outlive the session.
       queryClient.clear()
-      set({ status: 'anonymous', user: null, pendingChallengeId: null })
+      set({ status: 'anonymous', user: null, idleExpiresAt: null, pendingChallengeId: null })
     }
   },
-  adoptSignedOut: () => set({ status: 'anonymous', user: null, pendingChallengeId: null }),
+  adoptSignedOut: () => set({ status: 'anonymous', user: null, idleExpiresAt: null, pendingChallengeId: null }),
   setUser: (user) => set({ status: 'authenticated', user }),
 }))
 
@@ -96,7 +113,10 @@ export const useActiveStore = create<ActiveStoreState>()(
   persist(
     (set) => ({
       activeStoreId: null,
-      setActiveStore: (id) => set({ activeStoreId: id }),
+      setActiveStore: (id) => {
+        set({ activeStoreId: id })
+        queryClient.removeQueries({ queryKey: ['store'] })
+      },
     }),
     { name: 'dd_store_active_store', partialize: (s) => ({ activeStoreId: s.activeStoreId }) },
   ),

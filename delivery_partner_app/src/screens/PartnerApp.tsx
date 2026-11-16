@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { ApiError, riderApi, type Application } from '../api';
 import { getAccessToken, type PartnerIdentity } from '../auth/session';
 import { Brand } from '../components/Brand';
+import { FormSkeleton } from '../components/Skeleton';
 import { Button, Text } from '../components/Ui';
 import { stopTracking } from '../tracking';
 import { colors } from '../theme';
@@ -60,7 +61,7 @@ export function PartnerApp({ identity, onSignOut }: { identity: PartnerIdentity;
   if (application?.status === 'APPROVED') return <LivePartner identity={identity} application={application} onSignOut={onSignOut} onAuthorizationChange={reload} />;
   if (application) return <ApplicationScreen application={application} reload={reload} signOut={async () => { await stopTracking(); await onSignOut(); }} />;
   return <View style={styles.center}><Brand large />
-    {waiting ? <><ActivityIndicator color={colors.green} style={{ marginTop: 20 }} /><Text style={styles.message}>Preparing your partner application…</Text></>
+    {waiting ? <><Text style={styles.message}>Preparing your partner application…</Text><FormSkeleton label="Loading partner application" /></>
       : <><Text accessibilityRole="alert" style={styles.message}>{error}</Text><View style={{ width: '100%', gap: 10 }}>
         <Button label="Try again" onPress={() => setRetry((value) => value + 1)} />
         <Button label="Sign out" secondary onPress={() => void onSignOut()} />

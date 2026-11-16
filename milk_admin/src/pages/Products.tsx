@@ -167,10 +167,16 @@ function ProductFormDialog({ open, onOpenChange, initial, categories, brands, se
 }
 
 /* ── Product detail drawer: variants + store pricing ───────── */
-function ProductDrawer({ product, variants, stores, onClose, onUpdateVariant, onAddVariant, onSetPrice, onAddAssortment, serverError }: {
+function ProductDrawer({ product, variants, stores, variantsLoading, variantsError, retryVariants, storesLoading, storesError, retryStores, onClose, onUpdateVariant, onAddVariant, onSetPrice, onAddAssortment, serverError }: {
   product: Product
   variants: Variant[]
   stores: Array<{ id: string; name: string }>
+  variantsLoading: boolean
+  variantsError: boolean
+  retryVariants: () => void
+  storesLoading: boolean
+  storesError: boolean
+  retryStores: () => void
   onClose: () => void
   onUpdateVariant: (v: Variant, values: VariantFormValues) => void
   onAddVariant: (values: VariantFormValues) => void
@@ -183,6 +189,7 @@ function ProductDrawer({ product, variants, stores, onClose, onUpdateVariant, on
   const [priceVariantId, setPriceVariantId] = useState(variants[0]?.id ?? '')
   const [selling, setSelling] = useState('')
   const [mrp, setMrp] = useState('')
+  const selectedVariantId = variants.some(v => v.id === priceVariantId) ? priceVariantId : variants[0]?.id ?? ''
 
   return (
     <Drawer open onOpenChange={(v) => { if (!v) onClose() }} width="lg" title={product.name} subtitle={`${product.perishable ? 'Perishable' : 'Shelf-stable'} · GST ${((product.gstRateBps ?? 0) / 100).toFixed(1)}%`}>
@@ -200,12 +207,11 @@ function ProductDrawer({ product, variants, stores, onClose, onUpdateVariant, on
         {/* variant list */}
         <section>
           <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Variants ({variants.length})</h4>
+            <h4 className="text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Variants {!variantsLoading && !variantsError && `(${variants.length})`}</h4>
             <Button size="sm" variant="outline" onClick={() => setAddingVariant(true)}><Plus className="h-3.5 w-3.5" /> Add variant</Button>
           </div>
           <div className="space-y-1.5">
-            {variants.length === 0 && <p className="rounded-xl border border-dashed border-border px-3 py-3 text-center text-xs text-muted-foreground">No variants yet</p>}
-            {variants.map((v) => (
+            {variantsLoading ? <div role="status" aria-label="Loading variants" className="space-y-2">{[1, 2].map(i => <div key={i} className="skeleton h-12 rounded-xl" />)}</div> : variantsError ? <div role="alert" className="space-y-2 text-sm text-muted-foreground"><p>Could not load variants.</p><Button size="sm" variant="secondary" onClick={retryVariants}>Try again</Button></div> : variants.length === 0 ? <p className="rounded-xl border border-dashed border-border px-3 py-3 text-center text-xs text-muted-foreground">No variants yet</p> : variants.map((v) => (
               <div key={v.id} className="flex items-center gap-3 rounded-xl border border-border/70 px-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-semibold">{v.name}</p>
@@ -220,9 +226,10 @@ function ProductDrawer({ product, variants, stores, onClose, onUpdateVariant, on
         {/* store pricing */}
         <section>
           <h4 className="mb-2 flex items-center gap-2 text-[13px] font-bold uppercase tracking-wide text-muted-foreground"><StoreIcon className="h-3.5 w-3.5" /> Store listing & pricing</h4>
+          {variantsLoading || storesLoading ? <div role="status" aria-label="Loading store pricing" className="skeleton h-16 rounded-xl" /> : variantsError || storesError ? <div role="alert" className="space-y-2 text-sm text-muted-foreground"><p>Could not load listing options.</p><Button size="sm" variant="secondary" onClick={() => { if (variantsError) retryVariants(); if (storesError) retryStores() }}>Try again</Button></div> : <>
           {variants.length > 0 && (
             <div className="mb-2 w-72">
-              <Select value={priceVariantId} onValueChange={setPriceVariantId} options={variants.map((v) => ({ value: v.id, label: `${v.name} · ${v.sku}` }))} />
+              <Select value={selectedVariantId} onValueChange={setPriceVariantId} options={variants.map((v) => ({ value: v.id, label: `${v.name} · ${v.sku}` }))} />
             </div>
           )}
           <div className="space-y-1.5">
@@ -231,21 +238,22 @@ function ProductDrawer({ product, variants, stores, onClose, onUpdateVariant, on
                 <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{s.name}</span>
                 <Tooltip content="List this variant at the store (assortment)">
                   <span>
-                    <Button size="sm" variant="outline" disabled={!priceVariantId} onClick={() => onAddAssortment(priceVariantId, s.id)}>
+                    <Button size="sm" variant="outline" disabled={!selectedVariantId} onClick={() => onAddAssortment(selectedVariantId, s.id)}>
                       <ListChecks className="h-3.5 w-3.5" /> List
                     </Button>
                   </span>
                 </Tooltip>
                 <Input type="number" value={selling} onChange={(e) => setSelling(e.target.value)} placeholder="Selling ₹" className="h-8 w-28" />
                 <Input type="number" value={mrp} onChange={(e) => setMrp(e.target.value)} placeholder="MRP ₹" className="h-8 w-24" />
-                <Button size="sm" variant="primary" disabled={!priceVariantId || !Number(selling) || !Number(mrp)}
-                  onClick={() => onSetPrice(priceVariantId, s.id, Number(selling), Number(mrp))}>
+                <Button size="sm" variant="primary" disabled={!selectedVariantId || !Number(selling) || !Number(mrp)}
+                  onClick={() => onSetPrice(selectedVariantId, s.id, Number(selling), Number(mrp))}>
                   <IndianRupee className="h-3.5 w-3.5" /> Set price
                 </Button>
               </div>
             ))}
           </div>
           <p className="mt-2 text-[11px] text-muted-foreground">Listing state and current prices live in the platform; setting a price may create an approval per pricing policy.</p>
+          </>}
         </section>
       </div>
 
@@ -431,7 +439,7 @@ export function Products() {
   // global page as fallback when the drawer is closed.
   const drawerVariantsQ = useVariants(100, detailProduct?.id, !!detailProduct)
   const detailVariants = detailProduct
-    ? (drawerVariantsQ.data ?? variants.filter((v) => v.productId === detailProduct.id))
+    ? (drawerVariantsQ.isPlaceholderData ? [] : drawerVariantsQ.data ?? [])
     : []
 
   const catName = (id: string) => categories.find((c) => c.id === id)?.name ?? '—'
@@ -463,7 +471,9 @@ export function Products() {
             <DataTable
               keyId={(p) => p.id}
               rows={filtered}
-              loading={productsQ.isLoading}
+              loading={productsQ.isLoading || productsQ.isPlaceholderData}
+              error={productsQ.isError && !productsQ.data}
+              onRetry={() => void productsQ.refetch()}
               onRowClick={(p) => setDetail(p)}
               empty={<EmptyState icon={Package} title="No products match" body="Try a different search or clear the filter." />}
               columns={[
@@ -547,6 +557,12 @@ export function Products() {
           product={detailProduct}
           variants={detailVariants}
           stores={stores.map((s) => ({ id: s.id, name: s.name }))}
+          variantsLoading={drawerVariantsQ.isLoading || drawerVariantsQ.isPlaceholderData}
+          variantsError={drawerVariantsQ.isError && !drawerVariantsQ.data}
+          retryVariants={() => void drawerVariantsQ.refetch()}
+          storesLoading={storesQ.isLoading || storesQ.isPlaceholderData}
+          storesError={storesQ.isError && !storesQ.data}
+          retryStores={() => void storesQ.refetch()}
           onClose={() => setDetail(null)}
           serverError={serverError}
           onUpdateVariant={(v, values) => actions.updateVariant(v.id, { name: values.name, productId: detailProduct.id, sku: values.sku, barcode: values.barcode || undefined, baseUnit: values.baseUnit }, `${detailProduct.name} – ${values.name}`).mutate(undefined, {

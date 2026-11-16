@@ -14,12 +14,14 @@ export interface Column<T> {
 
 export function DataTable<T extends { [k: string]: any }>({
   columns, rows, keyId, loading = false, selectable = false, selected = [], onSelectedChange,
-  onRowClick, empty, skeletonRows = 5, footer, className,
+  onRowClick, empty, skeletonRows = 5, footer, className, error = false, onRetry,
 }: {
   columns: Column<T>[]
   rows: T[]
   keyId: (row: T) => string
   loading?: boolean
+  error?: boolean
+  onRetry?: () => void
   selectable?: boolean
   selected?: string[]
   onSelectedChange?: (ids: string[]) => void
@@ -32,7 +34,8 @@ export function DataTable<T extends { [k: string]: any }>({
   const allSelected = rows.length > 0 && rows.every((r) => selected.includes(keyId(r)))
   const someSelected = rows.some((r) => selected.includes(keyId(r)))
   return (
-    <div className={cn('overflow-hidden', className)}>
+    <div className={cn('overflow-hidden', className)} aria-busy={loading}>
+      {loading && <span role="status" className="sr-only">Loading data</span>}
       <div className="scrollbar-thin overflow-x-auto">
         <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left">
           <thead>
@@ -71,7 +74,7 @@ export function DataTable<T extends { [k: string]: any }>({
                     ))}
                   </tr>
                 ))
-              : rows.map((row, i) => {
+              : error ? null : rows.map((row, i) => {
                   const id = keyId(row)
                   const isSel = selected.includes(id)
                   return (
@@ -115,7 +118,13 @@ export function DataTable<T extends { [k: string]: any }>({
           </tbody>
         </table>
       </div>
-      {!loading && rows.length === 0 && (empty ?? <DefaultEmpty />)}
+      {!loading && error && (
+        <div role="alert" className="space-y-2 px-5 py-8 text-center text-sm text-muted-foreground">
+          <p>Could not load this data.</p>
+          {onRetry && <button type="button" className="font-semibold text-brand-700 underline" onClick={onRetry}>Try again</button>}
+        </div>
+      )}
+      {!loading && !error && rows.length === 0 && (empty ?? <DefaultEmpty />)}
       {footer}
     </div>
   )

@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
-import { AnimatePresence, motion } from 'framer-motion'
+import { Suspense, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { SidebarNav, MobileSidebar, type SidebarConfig } from './Sidebar'
 import { Topbar, type BellNotification } from './Topbar'
+import { RouteFallback } from '../RouteFallback'
+import { RouteErrorBoundary } from '../RouteErrorBoundary'
 import { useUI } from './ui'
 import { cn } from '../../lib/utils'
 
@@ -21,6 +22,7 @@ export interface ShellUser {
 }
 
 export interface AppShellProps {
+  children?: React.ReactNode
   sidebar: SidebarConfig
   searchPlaceholder: string
   onSearchClick?: () => void
@@ -38,6 +40,10 @@ export interface AppShellProps {
   /** Per-app session config: cross-tab logout watch + idle timeout behaviour. */
   sessionStorageKey: string
   onSessionExpire: () => void
+  /** Server idle deadline. When set, the warning follows this instant instead of a local 30-minute clock. */
+  sessionDeadline?: string | null
+  /** Debounced by the caller. Fired on user activity so the server idle window can slide. */
+  onSessionActivity?: () => void
   bellTitle?: string
   bellNotifications?: BellNotification[]
   onBellMarkAllRead?: () => void
@@ -47,38 +53,63 @@ export interface AppShellProps {
 }
 
 /** Idle timeout (30 min → warn at 28) + cross-tab logout via the app's session key. */
-function useSessionGuard(sessionStorageKey: string, onSessionExpire: () => void) {
+function useSessionGuard(
+  sessionStorageKey: string,
+  onSessionExpire: () => void,
+  deadline?: string | null,
+  onActivity?: () => void,
+) {
   useEffect(() => {
     const IDLE_MS = 30 * 60_000
     let last = Date.now()
-    const bump = () => { last = Date.now() }
+    let warned = false
+    const bump = () => {
+      last = Date.now()
+      onActivity?.()
+    }
     const events: Array<keyof WindowEventMap> = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart']
     events.forEach((e) => window.addEventListener(e, bump, { passive: true }))
     const onStorage = (e: StorageEvent) => {
       if (e.key === sessionStorageKey && e.newValue === null) {
-        // another tab signed out → sign out here too
         window.location.reload()
       }
     }
+    let channel: BroadcastChannel | null = null
+    try {
+      channel = new BroadcastChannel(sessionStorageKey)
+      channel.onmessage = (event) => {
+        if (event.data === 'logout') window.location.assign('/login')
+      }
+    } catch { /* unsupported */ }
     window.addEventListener('storage', onStorage)
     const timer = setInterval(() => {
+      if (deadline) {
+        const remain = new Date(deadline).getTime() - Date.now()
+        if (remain <= 120_000 && remain > 0 && !warned) {
+          warned = true
+          void import('../../lib/toast').then(({ toast }) => toast.warning('You will be signed out soon — move the mouse to stay logged in'))
+        }
+        if (remain <= 0) onSessionExpire()
+        return
+      }
       if (Date.now() - last > IDLE_MS - 120_000 && Date.now() - last < IDLE_MS) {
-        import('../../lib/toast').then(({ toast }) => toast.warning('You will be signed out soon — move the mouse to stay logged in'))
+        void import('../../lib/toast').then(({ toast }) => toast.warning('You will be signed out soon — move the mouse to stay logged in'))
       }
       if (Date.now() - last > IDLE_MS) onSessionExpire()
     }, 30_000)
     return () => {
       events.forEach((e) => window.removeEventListener(e, bump))
       window.removeEventListener('storage', onStorage)
+      channel?.close()
       clearInterval(timer)
     }
-  }, [sessionStorageKey, onSessionExpire])
+  }, [sessionStorageKey, onSessionExpire, deadline, onActivity])
 }
 
 /** Generic portal shell — shared by AdminLayout and StoreLayout. No app imports here. */
-export function AppShell({ sidebar, searchPlaceholder, onSearchClick, topbarLeft, userLabel, user, onSignOut, homePath, settingsPath, themeKey, sessionStorageKey, onSessionExpire, bellTitle, bellNotifications, onBellMarkAllRead, onBellMarkRead, overlay }: AppShellProps) {
+export function AppShell({ children, sidebar, searchPlaceholder, onSearchClick, topbarLeft, userLabel, user, onSignOut, homePath, settingsPath, themeKey, sessionStorageKey, onSessionExpire, sessionDeadline, onSessionActivity, bellTitle, bellNotifications, onBellMarkAllRead, onBellMarkRead, overlay }: AppShellProps) {
   useThemeEffect(themeKey)
-  useSessionGuard(sessionStorageKey, onSessionExpire)
+  useSessionGuard(sessionStorageKey, onSessionExpire, sessionDeadline, onSessionActivity)
   const location = useLocation()
   const mobileNavOpen = useUI((s) => s.mobileNavOpen)
   const setMobileNavOpen = useUI((s) => s.setMobileNavOpen)
@@ -105,18 +136,11 @@ export function AppShell({ sidebar, searchPlaceholder, onSearchClick, topbarLeft
           onBellMarkRead={onBellMarkRead}
         />
         <main className="page-bg scrollbar-thin flex-1 overflow-y-auto">
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-              className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8"
-            >
-              <Outlet />
-            </motion.div>
-          </AnimatePresence>
+          <div className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8">
+            <RouteErrorBoundary key={location.pathname}>
+              <Suspense fallback={<RouteFallback />}>{children}</Suspense>
+            </RouteErrorBoundary>
+          </div>
         </main>
       </div>
       {overlay}

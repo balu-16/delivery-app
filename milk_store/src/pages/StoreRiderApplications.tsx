@@ -1,7 +1,9 @@
+import { firstFailedQuery, InlineLoadError, PageLoadError } from '@/components/PageLoadError'
 // §5 Rider Applications — store-scoped application review: KPIs, status tabs fed by
 // ?status=, sortable searchable list, detail drawer with document approve/reject.
 // Approval is AUTOMATIC (all 4 docs approved → rider created) — no manual approve button.
 import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -10,9 +12,9 @@ import {
 } from 'lucide-react'
 import { useDebouncedValue, useStagger } from '@dairydirect/shared/hooks/misc'
 import { useActiveStoreId, useRiderApplicationsStore } from '@/api/storeQueries'
+import { getRiderApplication } from '@/api/storeApi'
 import { useRiderDocActions } from '@/api/storeMutations'
-import { useDB } from '@dairydirect/shared/mock-db/db'
-import { DEMO_NOW } from '@dairydirect/shared/mock-db/seed'
+import { useStoreAuth } from '@/login/authStore'
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from '@dairydirect/shared/ui/base'
 import { Dialog, DialogContent, Drawer } from '@dairydirect/shared/ui/overlays'
 import { Field, Select } from '@dairydirect/shared/ui/form'
@@ -20,7 +22,6 @@ import { EmptyState, PageHeader, SearchInput, StatusPill, TabPills } from '@dair
 import { DataTable, Pagination, type Column } from '@dairydirect/shared/ui/DataTable'
 import { KpiCard } from '@dairydirect/shared/ui/KpiCard'
 import { InitialAvatar } from '@dairydirect/shared/assets/avatars'
-import { ScooterScene } from '@dairydirect/shared/assets/scenes'
 import { cn, fmtDateTime, fmtTime, sameDay } from '@dairydirect/shared/lib/utils'
 import type { RiderApplication, RiderApplicationDoc } from '@dairydirect/shared/types'
 
@@ -59,11 +60,12 @@ function maskNumber(n: string) {
 }
 
 /* ── Doc row inside the drawer (approve/reject only for undecided docs) ── */
-function DocRow({ app, doc, onApprove, onReject }: {
+function DocRow({ app, doc, onApprove, onReject, onPreview }: {
   app: RiderApplication
   doc: RiderApplicationDoc
   onApprove: () => void
   onReject: () => void
+  onPreview: () => void
 }) {
   const Icon = DOC_ICON[doc.type]
   return (
@@ -78,6 +80,7 @@ function DocRow({ app, doc, onApprove, onReject }: {
       {doc.status === 'approved' && <Badge tone="green">Approved</Badge>}
       {doc.status === 'rejected' && <Badge tone="red">Rejected</Badge>}
       {doc.status === 'pending' && <Badge>Pending</Badge>}
+      <Button variant="outline" size="sm" onClick={onPreview} aria-label={`View ${doc.label}`}>View</Button>
       {doc.status === 'pending' ? (
         <div className="flex items-center gap-1.5">
           <Button variant="success" size="sm" onClick={onApprove} aria-label={`Approve ${doc.label} for ${app.id}`}>
@@ -102,7 +105,7 @@ export function StoreRiderApplications() {
   const storeId = useActiveStoreId()
   const stagger = useStagger()
   const docActions = useRiderDocActions()
-  const db = useDB((s) => s.db)
+  const user = useStoreAuth((s) => s.user)
 
   const [params, setParams] = useSearchParams()
   const statusParam = params.get('status') ?? 'all'
@@ -114,7 +117,12 @@ export function StoreRiderApplications() {
   const [rejectTarget, setRejectTarget] = useState<{ app: RiderApplication; doc: RiderApplicationDoc } | null>(null)
   const [rejectReason, setRejectReason] = useState('')
 
-  const all = useRiderApplicationsStore(storeId) // unfiltered — KPIs + tabs compute locally
+  const all = useRiderApplicationsStore(storeId)
+  const detail = useQuery({
+    queryKey: ['store', 'rider-application', user?.id, storeId, drawerId],
+    queryFn: () => getRiderApplication(storeId!, drawerId!),
+    enabled: !!storeId && !!drawerId,
+  })
 
   const counts = useMemo(() => ({
     all: all.data?.length ?? 0,
@@ -138,9 +146,9 @@ export function StoreRiderApplications() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const activeApp = drawerId ? all.data?.find((a) => a.id === drawerId) ?? null : null
-  const store = activeApp ? db.stores.find((s) => s.id === activeApp.storeId) ?? null : null
-  const cityName = store ? db.cities.find((c) => c.id === store.cityId)?.name ?? 'Guntur' : 'Guntur'
+  const listed = drawerId ? all.data?.find((a) => a.id === drawerId) ?? null : null
+  const activeApp = detail.data ?? listed
+  const assigned = activeApp ? user?.stores.find((s) => s.storeId === activeApp.storeId) : undefined
 
   const setTab = (v: string) => {
     setParams(v === 'all' ? {} : { status: v }, { replace: true })
@@ -167,9 +175,12 @@ export function StoreRiderApplications() {
         </span>
       ),
     },
-    { key: 'appliedAt', header: 'Applied On', render: (a) => <span className="whitespace-nowrap text-muted-foreground">{appliedLabel(a.appliedAt, DEMO_NOW)}</span> },
+    { key: 'appliedAt', header: 'Applied On', render: (a) => <span className="whitespace-nowrap text-muted-foreground">{appliedLabel(a.appliedAt, new Date())}</span> },
     { key: 'status', header: 'Status', render: (a) => <StatusPill status={APP_STATUS_KEY[a.status]} /> },
   ]
+
+  const loadFailure = firstFailedQuery([all])
+  if (loadFailure) return <PageLoadError title="Rider Applications" artwork="riderApplications" query={loadFailure} />
 
   return (
     <motion.div variants={stagger.container} initial="hidden" animate="show" className="space-y-5">
@@ -178,7 +189,7 @@ export function StoreRiderApplications() {
         title="Rider"
         titleAccent="Applications"
         subtitle="Review rider applications, verify documents and approve eligible riders for your store."
-        illustration={<ScooterScene />}
+        artwork="riderApplications"
       />
 
       <motion.section variants={stagger.item} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -284,7 +295,13 @@ export function StoreRiderApplications() {
           }
           subtitle={`Applied ${fmtDateTime(activeApp.appliedAt)}`}
         >
-          <div className="space-y-4">
+          {detail.isError ? (
+            <InlineLoadError query={detail} label="rider application" />
+          ) : detail.isLoading ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Loading application…</p>
+          ) : detail.data === null ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">This application is no longer available.</p>
+          ) : <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-xl border border-border/70 bg-muted/40 px-4 py-3 text-[13px]">
               <a href={`tel:${activeApp.phone.replace(/\s/g, '')}`} className="inline-flex items-center gap-1.5 font-medium hover:text-brand-700">
                 <Phone className="h-3.5 w-3.5 text-muted-foreground" /> {activeApp.phone}
@@ -313,10 +330,7 @@ export function StoreRiderApplications() {
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2"><MapPin className="h-4 w-4 text-brand-600" /> Store Assignment</CardTitle></CardHeader>
                 <CardContent className="space-y-1.5 text-[13px]">
-                  <p>Applied for: <span className="font-semibold">{store?.name ?? activeApp.storeId} ({store?.code ?? '—'})</span></p>
-                  <p className="inline-flex items-center gap-1.5 text-muted-foreground">
-                    <MapPin className="h-3.5 w-3.5" /> {cityName}, Andhra Pradesh
-                  </p>
+                  <p>Applied for: <span className="font-semibold">{assigned?.name ?? activeApp.storeId}</span></p>
                 </CardContent>
               </Card>
             </div>
@@ -326,10 +340,15 @@ export function StoreRiderApplications() {
               <CardContent className="space-y-3">
                 {activeApp.documents.map((doc) => (
                   <DocRow
-                    key={doc.type}
+                    key={doc.id}
                     app={activeApp}
                     doc={doc}
-                    onApprove={() => docActions.decide(activeApp.id, doc.type, 'approved')}
+                    onPreview={() => {
+                      void docActions.readUrl(doc.id).then((result) => {
+                        if (result.readUrl) window.open(result.readUrl, '_blank', 'noopener')
+                      }).catch(() => undefined)
+                    }}
+                    onApprove={() => docActions.decide(doc.id, doc.type, 'approved')}
                     onReject={() => { setRejectTarget({ app: activeApp, doc }); setRejectReason('') }}
                   />
                 ))}
@@ -339,7 +358,7 @@ export function StoreRiderApplications() {
                 </div>
               </CardContent>
             </Card>
-          </div>
+          </div>}
         </Drawer>
       )}
 
@@ -365,7 +384,7 @@ export function StoreRiderApplications() {
                 disabled={!rejectReason}
                 onClick={() => {
                   if (!rejectTarget) return
-                  docActions.decide(rejectTarget.app.id, rejectTarget.doc.type, 'rejected', rejectReason)
+                  docActions.decide(rejectTarget.doc.id, rejectTarget.doc.type, 'rejected', rejectReason)
                   setRejectTarget(null)
                 }}
               >

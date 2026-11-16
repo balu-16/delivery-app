@@ -243,8 +243,12 @@ export function RangeToggle({ value, onChange, options = ['7d', '30d', '90d'], i
 }
 
 /* ── Tabs (pill style) ──────────────────────────────────────── */
+export function tabCount(query: { isLoading: boolean; isPlaceholderData?: boolean; data?: unknown }, count: number): number | 'loading' | undefined {
+  return query.isLoading || query.isPlaceholderData ? 'loading' : query.data === undefined ? undefined : count
+}
+
 export function TabPills({ tabs, value, onChange, id, className }: {
-  tabs: Array<{ value: string; label: string; count?: number }>
+  tabs: Array<{ value: string; label: string; count?: number | 'loading' }>
   value: string
   onChange: (v: string) => void
   id: string
@@ -265,7 +269,7 @@ export function TabPills({ tabs, value, onChange, id, className }: {
           )}
           <span className={cn('relative z-10', value === t.value ? 'text-white' : 'text-muted-foreground hover:text-foreground')}>
             {t.label}
-            {t.count !== undefined && <span className="ml-1.5 opacity-90">({t.count.toLocaleString('en-IN')})</span>}
+            {t.count === 'loading' ? <span className="skeleton ml-1.5 inline-block h-3 w-5 align-middle" role="status" aria-label={`Loading ${t.label} count`} /> : t.count !== undefined && <span className="ml-1.5 opacity-90">({t.count.toLocaleString('en-IN')})</span>}
           </span>
         </button>
       ))}

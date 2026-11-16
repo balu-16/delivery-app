@@ -1,3 +1,4 @@
+import { firstFailedQuery, PageLoadError } from '@/components/PageLoadError'
 // §1 Store Dashboard — greeting hero, KPI row, store status, picking overview,
 // quick actions, attention list, status donut, staff workload, upcoming tasks.
 import { useMemo, useState } from 'react'
@@ -17,12 +18,11 @@ import { useStoreStatusActions } from '@/api/storeMutations'
 import { Button, Card, CardContent, CardHeader, CardTitle, Label, Skeleton } from '@dairydirect/shared/ui/base'
 import { Dialog, DialogContent } from '@dairydirect/shared/ui/overlays'
 import { Select } from '@dairydirect/shared/ui/form'
-import { StatusPill, TabPills, EmptyState } from '@dairydirect/shared/ui/misc'
+import { StatusPill, TabPills, EmptyState, PageArtwork } from '@dairydirect/shared/ui/misc'
 import { KpiCard } from '@dairydirect/shared/ui/KpiCard'
 import { DonutChart, ChartTooltip } from '@dairydirect/shared/ui/charts'
 import { DataTable } from '@dairydirect/shared/ui/DataTable'
 import { InitialAvatar } from '@dairydirect/shared/assets/avatars'
-import { MeadowScene } from '@dairydirect/shared/assets/scenes'
 import { cn, fmtTime } from '@dairydirect/shared/lib/utils'
 import type { StoreDashboardSummary } from '@/api/storeSelectors'
 import type { LucideIcon } from 'lucide-react'
@@ -166,24 +166,19 @@ export function StoreDashboard() {
   const totalTasks = d ? d.byStatus.waiting + d.byStatus.beingPicked + d.byStatus.readyToPack + d.byStatus.readyHandover : 0
   const paused = d?.storeStatus === 'paused'
 
+  const loadFailure = firstFailedQuery([dashQ])
+  if (loadFailure) return <PageLoadError title="Store Dashboard" artwork="dashboard" query={loadFailure} />
+
   return (
     <>
       <motion.div variants={container.container} initial="hidden" animate="show" className="space-y-5">
         {/* ── Greeting hero (custom header: animated wave + bold store name) ── */}
-        <div className="relative flex min-h-[150px] min-w-0 flex-1 flex-wrap items-end justify-between gap-4">
-          <motion.div
-            initial={{ opacity: 0, x: 30 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.08 }}
-            className="pointer-events-none absolute inset-y-0 right-0 hidden w-[48%] max-w-[560px] items-center justify-end lg:flex"
-          >
-            <MeadowScene variant="dashboard" />
-          </motion.div>
+        <div className="relative flex min-w-0 flex-1 flex-col gap-2 sm:min-h-[170px] sm:flex-row sm:items-end sm:justify-between sm:gap-4">
           <motion.div
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-            className="relative z-10 pb-1"
+            className="relative z-10 min-w-0 flex-1 pb-1"
           >
             <nav className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground" aria-label="Breadcrumb">
               <span>Home</span>
@@ -205,6 +200,7 @@ export function StoreDashboard() {
               Here&apos;s what needs your attention at <strong className="font-bold text-foreground">{d?.storeName ?? 'your store'}</strong> today.
             </p>
           </motion.div>
+          <PageArtwork artwork="dashboard" />
         </div>
 
         {/* ── KPI row ── */}
@@ -236,7 +232,7 @@ export function StoreDashboard() {
               </CardHeader>
               <CardContent className="flex h-[calc(100%-64px)] flex-col justify-between gap-4">
                 <p className="text-[13px] text-muted-foreground">
-                  {paused ? 'Store is paused.' : 'Store is currently accepting orders.'}
+                  {paused ? 'Store is paused.' : d?.storeStatus === 'offline' ? 'Store is offline.' : 'Store is currently accepting orders.'}
                   {d?.storeCode && <span className="ml-1 font-semibold text-foreground/70">({d.storeCode})</span>}
                 </p>
                 {paused ? (

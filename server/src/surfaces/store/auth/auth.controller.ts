@@ -137,6 +137,7 @@ export class StoreAuthController {
       status: 'AUTHENTICATED',
       manager: established.manager,
       csrfToken: established.session.csrfToken,
+      idleExpiresAt: await this.idleExpiresAt(established.session.sessionId),
     };
   }
 
@@ -166,6 +167,7 @@ export class StoreAuthController {
       status: 'AUTHENTICATED',
       manager: established.manager,
       csrfToken: established.session.csrfToken,
+      idleExpiresAt: await this.idleExpiresAt(established.session.sessionId),
     };
   }
 
@@ -229,6 +231,7 @@ export class StoreAuthController {
     return {
       manager: await this.managerView(context.principal.userId, context.identity),
       csrfToken: context.csrfToken,
+      idleExpiresAt: await this.idleExpiresAt(context.sessionId),
     };
   }
 
@@ -263,6 +266,11 @@ export class StoreAuthController {
       .split(',')
       .map((origin) => origin.trim())
       .filter(Boolean);
+  }
+
+  private async idleExpiresAt(sessionId: string): Promise<string> {
+    const live = await this.sessions.resolve(sessionId);
+    return live.idleExpiresAt;
   }
 
   /** Verifies the provider tokens, authorizes the store audience and enforces STORE_MANAGER. */

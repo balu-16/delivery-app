@@ -31,7 +31,7 @@ test('refreshes a stale sign-in token while waiting for the rider group', async 
     userId: 'rider', status: 'PENDING', vehicleType: null, vehicleNo: null,
     homeStoreId: null, requiredDocuments: [], documents: [],
   });
-  render(<PartnerApp identity={{ subject: 'rider', name: 'Rider', email: 'rider@example.test' }} onSignOut={async () => {}} />);
+  await render(<PartnerApp identity={{ subject: 'rider', name: 'Rider', email: 'rider@example.test' }} onSignOut={async () => {}} />);
   await act(async () => { await jest.advanceTimersByTimeAsync(6000); });
   expect(riderApi.bootstrap).toHaveBeenCalledTimes(4);
   expect(getAccessToken).toHaveBeenCalledWith(true);

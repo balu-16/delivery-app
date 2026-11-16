@@ -122,7 +122,8 @@ export interface BackendRiderApplication {
   homeStoreId?: string | null
   documents?: Array<{
     id: string
-    documentType: string
+    documentType?: string
+    type?: string
     status: 'PENDING' | 'APPROVED' | 'REJECTED'
     reviewedAt?: string | null
     reason?: string | null
@@ -298,7 +299,9 @@ export function deriveIcon(name: string): ProductIcon {
   return match ?? 'milk'
 }
 
-export function mapTaskStatus(status: BackendPickTaskView['status']): PickingTaskStatus {
+export function mapTaskStatus(status: BackendPickTaskView['status'], orderStatus?: string): PickingTaskStatus {
+  if (orderStatus === 'PACKED') return 'ready_for_handover'
+  if (orderStatus === 'OUT_FOR_DELIVERY' || orderStatus === 'DELIVERED' || orderStatus === 'RETURNED_TO_STORE') return 'completed'
   switch (status) {
     case 'PENDING': return 'waiting_to_pick'
     case 'ASSIGNED':
@@ -339,7 +342,7 @@ export function mapTask(view: BackendPickTaskView, order?: BackendStoreOrder): P
     orderStatus: view.orderStatus ?? order?.status,
     customerName: view.customerName || order?.customerName || undefined,
     storeId: view.storeId,
-    status: mapTaskStatus(view.status),
+    status: mapTaskStatus(view.status, view.orderStatus ?? order?.status),
     assigneeId: view.assignedTo,
     assigneeName: view.assignedToName,
     claimedAt: view.startedAt ?? undefined,
@@ -445,14 +448,18 @@ export function mapRiderStatus(status: BackendRiderApplication['status']): Rider
 }
 
 export function mapRiderApplication(row: BackendRiderApplication): RiderApplication {
-  const documents: RiderApplicationDoc[] = (row.documents ?? []).map((doc) => ({
-    type: doc.documentType as RiderApplicationDoc['type'],
-    label: doc.documentType.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()),
-    number: doc.id.slice(0, 8).toUpperCase(),
-    status: doc.status.toLowerCase() as RiderApplicationDoc['status'],
-    decidedAt: doc.reviewedAt ?? undefined,
-    reason: doc.reason ?? undefined,
-  }))
+  const documents: RiderApplicationDoc[] = (row.documents ?? []).map((doc) => {
+    const documentType = doc.documentType ?? doc.type ?? 'license'
+    return {
+      id: doc.id,
+      type: documentType as RiderApplicationDoc['type'],
+      label: documentType.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()),
+      number: doc.id.slice(0, 8).toUpperCase(),
+      status: doc.status.toLowerCase() as RiderApplicationDoc['status'],
+      decidedAt: doc.reviewedAt ?? undefined,
+      reason: doc.reason ?? undefined,
+    }
+  })
   return {
     id: row.userId,
     storeId: row.homeStoreId ?? '',

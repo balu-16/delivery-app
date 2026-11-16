@@ -95,6 +95,7 @@ async function main(): Promise<void> {
       'subscription_skips',
       'user_roles',
       'admin_sessions',
+      'store_sessions',
     ];
     await client.query(`REVOKE DELETE ON ALL TABLES IN SCHEMA public FROM ${quoted}`);
     for (const table of deletable)

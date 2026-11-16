@@ -61,7 +61,7 @@ export function OrderDetail() {
   const [refundError, setRefundError] = useState('')
   const [invoice, setInvoice] = useState<{ state: 'loading' | 'error'; message?: string } | null>(null)
 
-  if (detailQ.isLoading) {
+  if (detailQ.isLoading || detailQ.isPlaceholderData) {
     return (
       <div className="space-y-4" aria-busy="true">
         <div className="skeleton h-40 rounded-card" />
@@ -71,6 +71,10 @@ export function OrderDetail() {
         </div>
       </div>
     )
+  }
+
+  if (!order && detailQ.isError) {
+    return <Card className="p-8"><EmptyState icon={PackageSearch} title="Order unavailable" body="Could not load this order." action={<Button variant="secondary" size="md" onClick={() => void detailQ.refetch()}>Try again</Button>} /></Card>
   }
 
   if (!order) {
@@ -92,8 +96,8 @@ export function OrderDetail() {
   const alreadyRefunded = refunds.reduce((a, r) => a + (r.status !== 'failed' ? r.amount : 0), 0)
   const refundRemaining = Math.max(0, order.total - alreadyRefunded)
   const refundElig = {
-    eligible: el.refund.enabled && refundRemaining > 0,
-    reason: el.refund.reason ?? 'Nothing left to refund on this order',
+    eligible: !!paymentsQ.data && !paymentsQ.isPlaceholderData && el.refund.enabled && refundRemaining > 0,
+    reason: !paymentsQ.data || paymentsQ.isPlaceholderData ? 'Payment information is not available yet' : el.refund.reason ?? 'Nothing left to refund on this order',
   }
 
   const direct = (a: 'release' | 'resetCode') => {
@@ -219,7 +223,11 @@ export function OrderDetail() {
             {/* timeline */}
             <motion.section variants={container.item}>
               <SectionCard title="Timeline" subtitle="Status history recorded by the platform">
-                {timelineSteps.length === 0 ? (
+                {timelineQ.isLoading || timelineQ.isPlaceholderData ? (
+                  <div role="status" aria-label="Loading timeline" className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-12 rounded-xl" />)}</div>
+                ) : timelineQ.isError && !timelineQ.data ? (
+                  <p role="alert" className="text-sm text-destructive">Could not load the timeline. <button className="underline" onClick={() => void timelineQ.refetch()}>Try again</button></p>
+                ) : timelineSteps.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No timeline entries yet</p>
                 ) : (
                   <StatusTimeline steps={timelineSteps} />
@@ -260,7 +268,11 @@ export function OrderDetail() {
             {/* payment attempts */}
             <motion.section variants={container.item}>
               <SectionCard title="Payment attempts" subtitle="Gateway + wallet funding records">
-                {(paymentsQ.data?.attempts ?? []).length === 0 ? (
+                {paymentsQ.isLoading || paymentsQ.isPlaceholderData ? (
+                  <div role="status" aria-label="Loading payment attempts" className="space-y-2">{[1, 2].map((i) => <div key={i} className="skeleton h-14 rounded-xl" />)}</div>
+                ) : paymentsQ.isError && !paymentsQ.data ? (
+                  <p role="alert" className="text-sm text-destructive">Could not load payments. <button className="underline" onClick={() => void paymentsQ.refetch()}>Try again</button></p>
+                ) : (paymentsQ.data?.attempts ?? []).length === 0 ? (
                   <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No payment attempts recorded</p>
                 ) : (
                   <div className="space-y-1.5">
@@ -286,7 +298,7 @@ export function OrderDetail() {
             <motion.section variants={container.item}>
               <SectionCard
                 title="Refunds"
-                subtitle={`${fmtINR(alreadyRefunded)} refunded · ${fmtINR(refundRemaining)} remaining`}
+                subtitle={paymentsQ.data && !paymentsQ.isPlaceholderData ? `${fmtINR(alreadyRefunded)} refunded · ${fmtINR(refundRemaining)} remaining` : paymentsQ.isError ? 'Refund information unavailable' : 'Loading refund information'}
                 action={(
                   <Tooltip content={refundElig.eligible ? 'File a refund against this order' : (refundElig.reason ?? 'Refund not eligible')}>
                     <span>
@@ -297,7 +309,11 @@ export function OrderDetail() {
                   </Tooltip>
                 )}
               >
-                {refunds.length === 0 ? (
+                {paymentsQ.isLoading || paymentsQ.isPlaceholderData ? (
+                  <div role="status" aria-label="Loading refunds" className="space-y-2">{[1, 2].map((i) => <div key={i} className="skeleton h-14 rounded-xl" />)}</div>
+                ) : paymentsQ.isError && !paymentsQ.data ? (
+                  <p role="alert" className="text-sm text-destructive">Could not load refunds. <button className="underline" onClick={() => void paymentsQ.refetch()}>Try again</button></p>
+                ) : refunds.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No refunds on this order</p>
                 ) : (
                   <div className="space-y-1.5">

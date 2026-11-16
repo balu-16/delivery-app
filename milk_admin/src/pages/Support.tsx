@@ -10,7 +10,7 @@ import { useStagger } from '@/hooks/misc'
 import { useTickets, useTicket, useSavedResponses, useRatings } from '@/hooks/queries'
 import { useSupportActions } from '@/hooks/mutations'
 import { rupeesToPaise } from '@/api/money'
-import { PageHeader, TabPills, StatusPill, EmptyState, SearchInput } from '@/components/shared/misc'
+import { PageHeader, TabPills, tabCount, StatusPill, EmptyState, SearchInput } from '@/components/shared/misc'
 import { Select, Field } from '@/components/ui/form'
 import { Button, Card, Badge, Input, Textarea } from '@/components/ui/base'
 import {
@@ -47,7 +47,7 @@ function CursorBar({ onPrev, onNext, hasPrev, hasNext, loading, label }: {
 function TicketDrawer({ ticketId, onClose }: { ticketId: string | null; onClose: () => void }) {
   const actions = useSupportActions()
   const ticketQ = useTicket(ticketId)
-  const data: TicketDetail | null = ticketQ.data ?? null
+  const data: TicketDetail | null = ticketQ.isPlaceholderData ? null : ticketQ.data ?? null
   const [reply, setReply] = useState('')
   const [internal, setInternal] = useState(false)
   const [status, setStatus] = useState<TicketStatus>('open')
@@ -58,8 +58,8 @@ function TicketDrawer({ ticketId, onClose }: { ticketId: string | null; onClose:
   const savedQ = useSavedResponses()
 
   useEffect(() => {
-    if (data) setStatus(data.ticket.status)
-  }, [data])
+    if (data && !ticketQ.isPlaceholderData) setStatus(data.ticket.status)
+  }, [data, ticketQ.isPlaceholderData])
 
   if (!ticketId) return null
 
@@ -102,8 +102,10 @@ function TicketDrawer({ ticketId, onClose }: { ticketId: string | null; onClose:
 
   return (
     <Drawer open onOpenChange={(v) => { if (!v) onClose() }} width="lg" title={`Ticket ${ticketId.slice(0, 8)}…`} subtitle={ticket ? `${ticket.category} · created ${fmtDateTime(ticket.createdAt)}` : ''}>
-      {ticketQ.isLoading || !ticket ? (
-        <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-14 w-full rounded-xl" />)}</div>
+      {ticketQ.isLoading || ticketQ.isPlaceholderData ? (
+        <div className="space-y-2" role="status" aria-label="Loading ticket">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-14 w-full rounded-xl" />)}</div>
+      ) : !ticket ? (
+        <div role="alert" className="space-y-3 text-sm text-muted-foreground"><p>Could not load this ticket.</p><Button size="sm" variant="secondary" onClick={() => void ticketQ.refetch()}>Try again</Button></div>
       ) : (
         <div className="space-y-4">
           {/* header */}
@@ -301,9 +303,9 @@ export function Support() {
             value={tab}
             onChange={(v) => setTab(v as MainTab)}
             tabs={[
-              { value: 'tickets', label: 'Tickets', count: tickets.length },
-              { value: 'ratings', label: 'Rating moderation', count: ratings.length },
-              { value: 'canned', label: 'Canned responses', count: canned.length },
+              { value: 'tickets', label: 'Tickets', count: tabCount(ticketsQ, tickets.length) },
+              { value: 'ratings', label: 'Rating moderation', count: tabCount(ratingsQ, ratings.length) },
+              { value: 'canned', label: 'Canned responses', count: tabCount(cannedQ, canned.length) },
             ]}
           />
         </motion.div>
@@ -318,7 +320,9 @@ export function Support() {
               <DataTable
                 keyId={(t) => t.id}
                 rows={filteredTickets}
-                loading={ticketsQ.isLoading}
+                loading={ticketsQ.isLoading || ticketsQ.isPlaceholderData}
+                error={ticketsQ.isError && !ticketsQ.data}
+                onRetry={() => void ticketsQ.refetch()}
                 onRowClick={(t) => setDetailId(t.id)}
                 empty={<EmptyState icon={LifeBuoy} title="No tickets match" body="Try a different search or clear the filter." />}
                 columns={[
@@ -358,7 +362,7 @@ export function Support() {
                 }}
                 hasPrev={ticketsStack.length > 1}
                 hasNext={!!ticketsQ.data?.nextCursor}
-                loading={ticketsQ.isLoading}
+                loading={ticketsQ.isLoading || ticketsQ.isPlaceholderData}
                 label={`Page ${ticketsStack.length} · ticket feed`}
               />
             </Card>
@@ -379,7 +383,9 @@ export function Support() {
               <DataTable
                 keyId={(r) => r.id}
                 rows={ratings}
-                loading={ratingsQ.isLoading}
+                loading={ratingsQ.isLoading || ratingsQ.isPlaceholderData}
+                error={ratingsQ.isError && !ratingsQ.data}
+                onRetry={() => void ratingsQ.refetch()}
                 empty={<EmptyState icon={Star} title="Nothing to moderate" body="Flagged ratings will appear here." />}
                 columns={[
                   {
@@ -423,7 +429,7 @@ export function Support() {
                 }}
                 hasPrev={ratingsPager.stack.length > 1}
                 hasNext={!!ratingsQ.data?.nextCursor}
-                loading={ratingsQ.isLoading}
+                loading={ratingsQ.isLoading || ratingsQ.isPlaceholderData}
                 label={`Page ${ratingsPager.stack.length} · ratings feed`}
               />
             </Card>
@@ -438,7 +444,9 @@ export function Support() {
               <DataTable
                 keyId={(r) => r.id}
                 rows={canned}
-                loading={cannedQ.isLoading}
+                loading={cannedQ.isLoading || cannedQ.isPlaceholderData}
+                error={cannedQ.isError && !cannedQ.data}
+                onRetry={() => void cannedQ.refetch()}
                 empty={<EmptyState icon={LifeBuoy} title="No canned responses" body="Save the first quick reply." />}
                 columns={[
                   { key: 'label', header: 'Label', render: (r: SavedResponse) => <span className="font-semibold">{r.label}</span> },

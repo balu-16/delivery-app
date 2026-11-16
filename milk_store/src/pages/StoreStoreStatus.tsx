@@ -1,3 +1,4 @@
+import { firstFailedQuery, PageLoadError } from '@/components/PageLoadError'
 // §7 Store Status — current status hero, Online/Paused option cards (pause needs a
 // reason + confirm), read-only store details, operational impact, status history.
 // The manager never sees global store configuration — only their own store.
@@ -15,7 +16,6 @@ import { ConfirmDialog, Dialog, DialogContent } from '@dairydirect/shared/ui/ove
 import { Field, Select } from '@dairydirect/shared/ui/form'
 import { DataTable, type Column } from '@dairydirect/shared/ui/DataTable'
 import { EmptyState, PageHeader, StatusPill } from '@dairydirect/shared/ui/misc'
-import { MeadowScene } from '@dairydirect/shared/assets/scenes'
 import { cn, fmtDateTime, timeAgo } from '@dairydirect/shared/lib/utils'
 import type { StoreStatusChange } from '@dairydirect/shared/types'
 
@@ -33,15 +33,15 @@ const IMPACT_PAUSED = [
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 /* ── Giant status pill (same language as StatusPill, hero-sized) ── */
-function BigStatusPill({ status }: { status: 'online' | 'paused' | 'offline' }) {
-  const tone = status === 'online' ? 'online' : status === 'paused' ? 'paused' : 'offline'
+function BigStatusPill({ status }: { status: 'online' | 'paused' | 'offline' | 'loading' }) {
+  const tone = status === 'online' ? 'online' : status === 'paused' ? 'paused' : status === 'offline' ? 'offline' : 'loading'
   return (
     <span className={cn(
       'inline-flex items-center gap-2.5 rounded-full px-6 py-3 text-lg font-extrabold capitalize',
       tone === 'online' ? 'bg-success-soft text-success' : tone === 'paused' ? 'bg-warning-soft text-amber-600 dark:text-warning' : 'bg-muted text-muted-foreground',
     )}>
       <span className={cn('h-3 w-3 rounded-full animate-pulse-soft', tone === 'online' ? 'bg-success' : tone === 'paused' ? 'bg-warning' : 'bg-muted-foreground')} />
-      {status === 'online' ? 'Online' : status === 'paused' ? 'Paused' : 'Offline'}
+      {status === 'online' ? 'Online' : status === 'paused' ? 'Paused' : status === 'offline' ? 'Offline' : 'Loading'}
     </span>
   )
 }
@@ -79,8 +79,8 @@ export function StoreStoreStatus() {
 
   const store = info.data?.store ?? null
   const statusChanges = info.data?.statusChanges ?? []
-  const status: 'online' | 'paused' | 'offline' =
-    store?.status === 'ONLINE' ? 'online' : store?.status === 'PAUSED' ? 'paused' : 'offline'
+  const status: 'online' | 'paused' | 'offline' | 'loading' =
+    !store ? 'loading' : store.status === 'ONLINE' ? 'online' : store.status === 'PAUSED' ? 'paused' : 'offline'
   const latest = statusChanges[0] ?? null
   const composedReason = pauseDetails.trim() ? `${pauseReason} — ${pauseDetails.trim()}` : pauseReason
 
@@ -92,6 +92,9 @@ export function StoreStoreStatus() {
     { key: 'reason', header: 'Reason', render: (c) => c.reason ?? <span className="text-muted-foreground">—</span> },
   ]
 
+  const loadFailure = firstFailedQuery([info])
+  if (loadFailure) return <PageLoadError title="Store Status" artwork="storeStatus" query={loadFailure} />
+
   return (
     <motion.div variants={stagger.container} initial="hidden" animate="show" className="space-y-5">
       <PageHeader
@@ -99,7 +102,7 @@ export function StoreStoreStatus() {
         title="Store"
         titleAccent="Status"
         subtitle="Control whether your store is accepting work right now."
-        illustration={<MeadowScene variant="stores" />}
+        artwork="storeStatus"
       />
 
       {/* ── Current status hero ── */}
@@ -112,7 +115,9 @@ export function StoreStoreStatus() {
                 ? 'Your store is accepting work right now.'
                 : status === 'paused'
                   ? 'Your store is temporarily not accepting new orders.'
-                  : 'Your store is offline — an admin must bring it back online.'}
+                  : status === 'offline'
+                    ? 'Your store is offline — an admin must bring it back online.'
+                    : 'Loading the store status.'}
             </p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {latest

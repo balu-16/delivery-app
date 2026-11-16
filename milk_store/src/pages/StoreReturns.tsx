@@ -1,3 +1,4 @@
+import { firstFailedQuery, InlineLoadError, PageLoadError } from '@/components/PageLoadError'
 // §4 Returns & Quality Checks — failed-delivery orders awaiting return, recorded
 // parcels grouped per order, and the inspection drawer with persistent drafts and
 // per-return-row QC. Every quantity, batch expiry and outcome comes from the backend.
@@ -22,7 +23,6 @@ import { EmptyState, PageHeader, SearchInput, StatusPill, TabPills } from '@dair
 import { DataTable, Pagination, type Column } from '@dairydirect/shared/ui/DataTable'
 import { KpiCard } from '@dairydirect/shared/ui/KpiCard'
 import { ProductTile } from '@dairydirect/shared/assets/productIcons'
-import { SupportScene } from '@dairydirect/shared/assets/scenes'
 import { cn, fmtDate, fmtDateTime, fmtINR } from '@dairydirect/shared/lib/utils'
 import type { QualityDecision, ReturnParcel, ReturnReason } from '@dairydirect/shared/types'
 
@@ -123,7 +123,7 @@ function RecordReturnDialog({ open, onOpenChange, orders, storeId }: {
   }, [detail?.orderId])
 
   const items = detail?.items ?? []
-  const valid = !!orderId && reason.trim().length > 0 && items.length > 0
+  const valid = !!orderId && !detailQ.isError && !detailQ.isLoading && reason.trim().length > 0 && items.length > 0
 
   const submit = () => {
     if (!valid) return
@@ -169,7 +169,9 @@ function RecordReturnDialog({ open, onOpenChange, orders, storeId }: {
             <div className="border-b border-border/70 bg-muted/40 px-4 py-2.5 text-[13px] font-bold">
               Returned items {items.length > 0 && <span className="font-medium text-muted-foreground">— exact fulfilled quantities are recorded</span>}
             </div>
-            {detailQ.isLoading ? (
+            {detailQ.isError ? (
+              <InlineLoadError query={detailQ} label="order items" />
+            ) : detailQ.isLoading ? (
               <p className="px-4 py-6 text-center text-xs text-muted-foreground">Loading order items…</p>
             ) : items.length === 0 ? (
               <p className="px-4 py-6 text-center text-xs text-muted-foreground">
@@ -241,6 +243,7 @@ function InspectionDrawer({ storeId, orderId, onClose }: {
   }, [detailQ.data, draftQ.data])
 
   const detail = detailQ.data
+  const detailFailure = firstFailedQuery([detailQ, draftQ])
   const rows = detail?.returns ?? []
   const pending = rows.filter((row) => row.status === 'QUARANTINED')
   const allDecided = pending.length > 0 && pending.every((row) => !!decisions[row.returnId])
@@ -289,7 +292,7 @@ function InspectionDrawer({ storeId, orderId, onClose }: {
       }
       subtitle={detail ? `${detail.customerName} · ${detail.failureReason ? REASON_LABEL[mapReturnReason(detail.failureReason)] : 'Failed delivery'}` : 'Loading…'}
       footer={
-        pending.length > 0 ? (
+        !detailFailure && !draftQ.isLoading && pending.length > 0 ? (
           <div className="flex items-center justify-end gap-2">
             <Button variant="secondary" onClick={saveDraft} disabled={!detail}>Save as Draft</Button>
             <Tip tip={allDecided ? undefined : 'Each pending item needs a decision'}>
@@ -301,7 +304,9 @@ function InspectionDrawer({ storeId, orderId, onClose }: {
         ) : undefined
       }
     >
-      {detailQ.isLoading || !detail ? (
+      {detailFailure ? (
+        <InlineLoadError query={detailFailure} label="return inspection" />
+      ) : detailQ.isLoading || draftQ.isLoading || !detail ? (
         <p className="py-10 text-center text-xs text-muted-foreground">Loading return details…</p>
       ) : (
         <div className="space-y-4">
@@ -487,6 +492,9 @@ export function StoreReturns() {
     processed: 'Processed',
   }
 
+  const loadFailure = firstFailedQuery([eligibleQ, recordedQ, dash])
+  if (loadFailure) return <PageLoadError title="Returns & Quality Checks" artwork="returns" query={loadFailure} />
+
   return (
     <motion.div variants={stagger.container} initial="hidden" animate="show" className="space-y-5">
       <PageHeader
@@ -494,7 +502,7 @@ export function StoreReturns() {
         title="Returns &"
         titleAccent="Quality Checks"
         subtitle="Record returned parcels, inspect product quality and update stock status."
-        illustration={<SupportScene />}
+        artwork="returns"
         actions={
           <Button onClick={() => setRecordOpen(true)}><Undo2 className="h-4 w-4" /> Record Return</Button>
         }

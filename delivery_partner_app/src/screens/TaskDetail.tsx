@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Linking, Platform, StyleSheet, TextInput, View } from 'react-native';
 import { ApiError, riderApi, UploadError, type Task } from '../api';
 import { Button, Card, Chip, IconBox, PageTitle, Text } from '../components/Ui';
+import { SkeletonBlock } from '../components/Skeleton';
 import { uploadProof } from '../files';
 import { colors, fonts } from '../theme';
 import { formatMoney } from './liveHelpers';
@@ -29,6 +30,7 @@ export function TaskDetail({ task, enabled, busy, run }: { task: Task; enabled: 
   const [addressReason, setAddressReason] = useState('');
   const [contact, setContact] = useState<{ contactName: string; contactPhone: string } | null>(null);
   const [contactError, setContactError] = useState('');
+  const [contactLoading, setContactLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const allowed = enabled && !busy && !uploading;
   const destination = task.destination;
@@ -42,9 +44,11 @@ export function TaskDetail({ task, enabled, busy, run }: { task: Task; enabled: 
     finally { setUploading(false); }
   }
   async function showContact() {
-    setContactError('');
+    if (contactLoading) return;
+    setContactError(''); setContactLoading(true);
     try { const info = await riderApi.contact(task.id); if (!info) throw new Error('Contact details are not available for this delivery.'); setContact(info); }
     catch (failure) { setContactError(failure instanceof Error ? failure.message : 'Could not load contact details.'); }
+    finally { setContactLoading(false); }
   }
   return <>
     <PageTitle title={`Order ${task.orderNumber}`} subtitle={task.status.replaceAll('_', ' ')} />
@@ -57,7 +61,8 @@ export function TaskDetail({ task, enabled, busy, run }: { task: Task; enabled: 
       <Text style={styles.strong}>{destination.name || 'Customer'}</Text><Text style={styles.sub}>{customer || 'Address unavailable'}</Text>
     </View></View>
       {destination.lat !== null && destination.lng !== null ? <Button label="Navigate to customer" secondary compact onPress={() => openMap(destination.lat, destination.lng)} /> : null}
-      <View style={styles.space} /><Button label="Show customer contact" secondary compact disabled={!allowed} onPress={() => void showContact()} />
+      <View style={styles.space} /><Button label="Show customer contact" secondary compact disabled={!allowed || contactLoading} onPress={() => void showContact()} />
+      {contactLoading && !contact ? <View accessible accessibilityLabel="Loading customer contact" accessibilityState={{busy:true}}><SkeletonBlock width="65%" height={18} style={{marginTop:10}} /></View> : null}
       {contact ? <Button label={`Call ${contact.contactName}`} compact onPress={() => void Linking.openURL(`tel:${contact.contactPhone}`)} /> : null}
       {contactError ? <Text style={styles.error}>{contactError}</Text> : null}
     </Card>

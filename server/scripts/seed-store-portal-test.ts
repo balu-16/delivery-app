@@ -14,8 +14,10 @@ import { ConfigService } from '../src/modules/app-config/infrastructure/config-s
 import type { EventEnvelope } from '../src/platform/outbox/outbox.js';
 
 /**
- * Seeds the isolated store-portal test database (delivery_test_store only —
- * the script refuses any other target). Creates two stores, two Cognito-bound
+ * Seeds the development Aurora database `deliveryapp` only — the script
+ * refuses any other target. If the two fixed test stores already exist, it
+ * ensures the supplied manager identities are assigned and returns without
+ * inserting another catalog. Creates two stores, two Cognito-bound
  * managers, riders/customers, catalog + stock received through the inventory
  * contract, live pick tasks through the real ORDER_CONFIRMED consumer, a
  * COD-eligible rider with cash in hand, one failed-delivery order eligible
@@ -24,6 +26,32 @@ import type { EventEnvelope } from '../src/platform/outbox/outbox.js';
  * Env: DATABASE_URL (IAM delivery_runtime), STORE_MANAGER_SUB/EMAIL and
  * STORE_MANAGER2_SUB/EMAIL for the real Cognito manager identities.
  */
+
+async function ensureStoreManager(
+  db: DatabaseHandle,
+  sub: string,
+  email: string,
+  name: string,
+  storeIds: string[],
+): Promise<void> {
+  const found = await sql<{ id: string }>`SELECT id::text AS id FROM users
+    WHERE pool='WORKFORCE' AND cognito_sub=${sub}`.execute(db.db);
+  let userId = found.rows[0]?.id;
+  if (!userId) {
+    userId = uuidV7();
+    await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name,email_verified)
+      VALUES(${userId}::uuid,'WORKFORCE',${sub},${email.toLowerCase()},${name},true)`.execute(
+      db.db,
+    );
+  }
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${userId}::uuid,'STORE_MANAGER')
+    ON CONFLICT DO NOTHING`.execute(db.db);
+  for (const storeId of storeIds)
+    await sql`INSERT INTO store_staff(user_id,store_id,role)
+      VALUES(${userId}::uuid,${storeId}::uuid,'STORE_MANAGER') ON CONFLICT DO NOTHING`.execute(
+      db.db,
+    );
+}
 
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -54,10 +82,21 @@ async function main(): Promise<void> {
   const inventory = new PostgresInventoryManagement(db.db, identity);
   const reservations = new PostgresReservations(db.db);
 
-  const entity = uuidV7();
-  const city = uuidV7();
   const store1 = '018f0000-0000-7000-8000-000000000001';
   const store2 = '018f0000-0000-7000-8000-000000000002';
+  const existing = await sql<{
+    id: string;
+  }>`SELECT id::text AS id FROM stores WHERE id=${store1}::uuid`.execute(db.db);
+  if (existing.rows.length) {
+    await ensureStoreManager(db, managerSub, managerEmail, 'Test Manager A', [store1, store2]);
+    await ensureStoreManager(db, manager2Sub, manager2Email, 'Test Manager B', [store2]);
+    console.log(JSON.stringify({ seeded: false, alreadyPresent: true, stores: [store1, store2] }));
+    await db.close();
+    return;
+  }
+
+  const entity = uuidV7();
+  const city = uuidV7();
   const managerA = uuidV7();
   const managerB = uuidV7();
   const rider1 = uuidV7();

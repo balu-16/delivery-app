@@ -150,10 +150,10 @@ export function Subscriptions() {
 
       <motion.div variants={container.container} initial="hidden" animate="show" className="space-y-5">
         <motion.section variants={container.item} className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-          <KpiCard label="Active plans" value={planCount} icon={CheckCircle2} tint="green" format="num" />
-          <KpiCard label="Slots at store" value={slots.length} icon={CalendarClock} tint="blue" format="num" />
-          <KpiCard label="Failed runs (page)" value={failedRuns} icon={AlertTriangle} tint="red" format="num" highlight={failedRuns > 0} />
-          <KpiCard label="Partial runs (page)" value={partialRuns} icon={RefreshCcw} tint="amber" format="num" />
+          <KpiCard loading={plansQ.isLoading || plansQ.isPlaceholderData} unavailable={plansQ.isError && !plansQ.data} label="Active plans" value={planCount} icon={CheckCircle2} tint="green" format="num" />
+          <KpiCard loading={storesQ.isLoading || slotsQ.isLoading || slotsQ.isPlaceholderData} unavailable={(!storeId && !storesQ.isLoading) || (slotsQ.isError && !slotsQ.data)} label="Slots at store" value={slots.length} icon={CalendarClock} tint="blue" format="num" />
+          <KpiCard loading={runsQ.isLoading || runsQ.isPlaceholderData} unavailable={runsQ.isError && !runsQ.data} label="Failed runs (page)" value={failedRuns} icon={AlertTriangle} tint="red" format="num" highlight={failedRuns > 0} />
+          <KpiCard loading={runsQ.isLoading || runsQ.isPlaceholderData} unavailable={runsQ.isError && !runsQ.data} label="Partial runs (page)" value={partialRuns} icon={RefreshCcw} tint="amber" format="num" />
         </motion.section>
 
         {/* ── PLANS ── */}
@@ -166,7 +166,9 @@ export function Subscriptions() {
             <DataTable
               keyId={(r: PlanRow) => r.variant.id}
               rows={planRows}
-              loading={plansQ.isLoading}
+              loading={plansQ.isLoading || plansQ.isPlaceholderData || variantsQ.isLoading || variantsQ.isPlaceholderData}
+              error={(plansQ.isError && !plansQ.data) || (variantsQ.isError && !variantsQ.data)}
+              onRetry={() => { void plansQ.refetch(); void variantsQ.refetch() }}
               empty={<EmptyState icon={CheckCircle2} title="No catalog variants" body="Create catalog variants first." />}
               columns={[
                 {
@@ -211,8 +213,12 @@ export function Subscriptions() {
               </Button>
             </div>
             <div className="space-y-1.5 px-5 pb-5">
-              {slots.length === 0 && <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No slots for this store yet</p>}
-              {slots.map((s) => (
+              {storesQ.isLoading || slotsQ.isLoading || slotsQ.isPlaceholderData ? <div role="status" aria-label="Loading delivery slots" className="space-y-2">{[1, 2].map(i => <div key={i} className="skeleton h-14 rounded-xl" />)}</div>
+              : storesQ.isError && !storesQ.data ? <div role="alert" className="space-y-2 text-sm text-muted-foreground"><p>Could not load stores.</p><Button size="sm" variant="secondary" onClick={() => void storesQ.refetch()}>Try again</Button></div>
+              : slotsQ.isError && !slotsQ.data ? <div role="alert" className="space-y-2 text-sm text-muted-foreground"><p>Could not load delivery slots.</p><Button size="sm" variant="secondary" onClick={() => void slotsQ.refetch()}>Try again</Button></div>
+              : !storeId ? <p className="py-3 text-xs text-muted-foreground">Select a store to view delivery slots.</p>
+              : slots.length === 0 ? <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No slots for this store yet</p>
+              : slots.map((s) => (
                 <div key={s.id} className="flex items-center gap-3 rounded-xl border border-border/70 px-3 py-2.5">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-semibold">{s.name}</p>
@@ -230,8 +236,12 @@ export function Subscriptions() {
               <p className="mt-0.5 text-xs text-muted-foreground">No-generation days for the selected store</p>
             </div>
             <div className="space-y-1.5 px-5 pb-5">
-              {holidays.length === 0 && <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No holidays configured</p>}
-              {holidays.map((h) => (
+              {storesQ.isLoading || holidaysQ.isLoading || holidaysQ.isPlaceholderData ? <div role="status" aria-label="Loading holidays" className="space-y-2">{[1, 2].map(i => <div key={i} className="skeleton h-14 rounded-xl" />)}</div>
+              : storesQ.isError && !storesQ.data ? <div role="alert" className="space-y-2 text-sm text-muted-foreground"><p>Could not load stores.</p><Button size="sm" variant="secondary" onClick={() => void storesQ.refetch()}>Try again</Button></div>
+              : holidaysQ.isError && !holidaysQ.data ? <div role="alert" className="space-y-2 text-sm text-muted-foreground"><p>Could not load holidays.</p><Button size="sm" variant="secondary" onClick={() => void holidaysQ.refetch()}>Try again</Button></div>
+              : !storeId ? <p className="py-3 text-xs text-muted-foreground">Select a store to view holidays.</p>
+              : holidays.length === 0 ? <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No holidays configured</p>
+              : holidays.map((h) => (
                 <div key={h.date} className="flex items-center gap-3 rounded-xl border border-border/70 px-3 py-2.5">
                   <Badge tone="violet">{fmtDate(h.date)}</Badge>
                   <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{h.reason ?? 'Closed for subscriptions'}</span>
@@ -260,7 +270,9 @@ export function Subscriptions() {
             <DataTable
               keyId={(r) => r.id}
               rows={runs}
-              loading={runsQ.isLoading}
+              loading={runsQ.isLoading || runsQ.isPlaceholderData}
+              error={runsQ.isError && !runsQ.data}
+              onRetry={() => void runsQ.refetch()}
               empty={<EmptyState icon={CalendarClock} title="No runs recorded" body="Generation runs appear here once subscriptions generate." />}
               columns={[
                 { key: 'id', header: 'Run', render: (r: SubscriptionRun) => <span className="font-mono text-[13px] font-bold">{r.id.slice(0, 8)}…</span> },
@@ -290,7 +302,7 @@ export function Subscriptions() {
               onNext={() => {}}
               hasPrev={false}
               hasNext={!!runsQ.data?.nextCursor}
-              loading={runsQ.isLoading}
+              loading={runsQ.isLoading || runsQ.isPlaceholderData}
               label={runsQ.data?.nextCursor ? 'More runs available on the cursor feed' : 'End of runs feed'}
             />
           </Card>

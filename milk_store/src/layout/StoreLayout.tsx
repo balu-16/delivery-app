@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, ShoppingCart, Boxes, Undo2, UserCheck, Banknote, Store as StoreIcon, UsersRound, BellRing, ChevronDown } from 'lucide-react'
 import { AppShell, type AppShellProps } from '@dairydirect/shared/ui/shell/AppShell'
 import { Button } from '@dairydirect/shared/ui/base'
 import { useStoreAuth, useActiveStore } from '@/login/authStore'
-import { useStoreNotifications } from '../api/storeQueries'
+import { useActiveStoreId, useStoreNotifications } from '../api/storeQueries'
 import { useStoreNotificationActions } from '../api/storeMutations'
+import { searchStore } from '../api/storeApi'
+import { useDebouncedValue } from '@dairydirect/shared/hooks/misc'
 import { cn } from '@dairydirect/shared/lib/utils'
 import { STORE_NAV_PATH_IMPORTS } from '../routes'
 
@@ -45,24 +48,26 @@ function StoreSelector() {
   if (stores.length <= 1) {
     // single store → static label (no selector per spec)
     return (
-      <div className="flex h-10 items-center gap-2 rounded-xl border border-border bg-card px-3 text-[13px] font-semibold shadow-soft" aria-label="Assigned store">
-        <StoreIcon className="h-4 w-4 text-brand-600" />
-        {active.name} <span className="text-muted-foreground">({active.code})</span>
+      <div className="flex h-10 min-w-0 max-w-[150px] items-center gap-2 rounded-xl border border-border bg-card px-3 text-[13px] font-semibold shadow-soft sm:max-w-[280px]" aria-label="Assigned store" title={active.name}>
+        <StoreIcon className="h-4 w-4 shrink-0 text-brand-600" />
+        <span className="min-w-0 truncate">{active.name}</span>
+        <span className="hidden shrink-0 text-muted-foreground sm:inline">({active.code})</span>
       </div>
     )
   }
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <button
         onClick={() => setOpen(!open)}
-        className="flex h-10 items-center gap-2 rounded-xl border border-border bg-card px-3 text-[13px] font-semibold shadow-soft transition hover:border-brand-300"
+        className="flex h-10 min-w-0 max-w-[150px] items-center gap-2 rounded-xl border border-border bg-card px-3 text-[13px] font-semibold shadow-soft transition hover:border-brand-300 sm:max-w-[280px]"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label="Active store"
       >
-        <StoreIcon className="h-4 w-4 text-brand-600" />
-        {active.name} <span className="text-muted-foreground">({active.code})</span>
-        <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform', open && 'rotate-180')} />
+        <StoreIcon className="h-4 w-4 shrink-0 text-brand-600" />
+        <span className="min-w-0 truncate">{active.name}</span>
+        <span className="hidden shrink-0 text-muted-foreground sm:inline">({active.code})</span>
+        <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
         <>
@@ -98,26 +103,94 @@ function useStorePageTitle() {
   }, [location.pathname])
 }
 
+function StoreSearchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const storeId = useActiveStoreId()
+  const navigate = useNavigate()
+  const [q, setQ] = useState('')
+  const [type, setType] = useState<'ORDERS' | 'CUSTOMERS' | 'PRODUCTS'>('ORDERS')
+  const debounced = useDebouncedValue(q, 250)
+  const results = useQuery({
+    queryKey: ['store', 'search', storeId, type, debounced],
+    queryFn: () => searchStore(storeId!, type, debounced.trim()),
+    enabled: open && !!storeId && debounced.trim().length >= 2,
+  })
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-[80] grid place-items-start bg-black/40 px-4 pt-24" onClick={onClose}>
+      <div className="mx-auto w-full max-w-xl rounded-2xl border border-border bg-card p-4 shadow-lift" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Store search">
+        <div className="flex gap-2">
+          <input value={q} onChange={(event) => setQ(event.target.value)} autoFocus placeholder="Search this store…" aria-label="Search this store" className="h-10 flex-1 rounded-xl border border-input bg-card px-3 text-sm" />
+          <select value={type} onChange={(event) => setType(event.target.value as typeof type)} aria-label="Search type" className="h-10 rounded-xl border border-input bg-card px-2 text-sm">
+            <option value="ORDERS">Orders</option>
+            <option value="CUSTOMERS">Customers</option>
+            <option value="PRODUCTS">Products</option>
+          </select>
+        </div>
+        <ul className="mt-3 max-h-80 space-y-1 overflow-y-auto">
+          {(results.data?.items ?? []).map((item, index) => {
+            const order = item as { orderId?: string; orderNumber?: string; customerName?: string; status?: string }
+            const customer = item as { userId?: string; name?: string; email?: string }
+            const product = item as { variantId?: string; productName?: string; sku?: string }
+            const label = type === 'ORDERS'
+              ? `${order.orderNumber ?? order.orderId} · ${order.customerName ?? ''} · ${order.status ?? ''}`
+              : type === 'CUSTOMERS'
+                ? `${customer.name ?? 'Customer'} · ${customer.email ?? ''}`
+                : `${product.productName ?? 'Product'} · ${product.sku ?? ''}`
+            return (
+              <li key={`${type}-${index}`}>
+                <button
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted"
+                  onClick={() => {
+                    onClose()
+                    if (type === 'ORDERS') navigate('/orders-picking')
+                    else if (type === 'PRODUCTS') navigate('/inventory')
+                  }}
+                >
+                  {label}
+                </button>
+              </li>
+            )
+          })}
+          {debounced.trim().length >= 2 && !results.isLoading && (results.data?.items.length ?? 0) === 0 && (
+            <li className="px-3 py-4 text-sm text-muted-foreground">No matches in this store.</li>
+          )}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
 export function StoreLayout() {
   useStorePageTitle()
   const user = useStoreAuth((s) => s.user)
+  const idleExpiresAt = useStoreAuth((s) => s.idleExpiresAt)
   const navigate = useNavigate()
   const { active } = useActiveStoreDetails()
   const { data: storeNotifications = [] } = useStoreNotifications()
-  const { markNotificationRead, markAllRead } = useStoreNotificationActions()
+  const { markNotificationRead, markAllRead, broadcastLogout } = useStoreNotificationActions()
+  const [searchOpen, setSearchOpen] = useState(false)
+  const lastRefresh = useRef(0)
+  const onSessionActivity = useCallback(() => {
+    const now = Date.now()
+    if (now - lastRefresh.current < 60_000) return
+    lastRefresh.current = now
+    void useStoreAuth.getState().bootstrap()
+  }, [])
 
   const shell: AppShellProps = {
     sidebar: {
       items: STORE_NAV_ITEMS, homePath: '/dashboard', badge: 'Store Manager Portal',
-      variant: 'dark', prefetch: (path) => STORE_NAV_PATH_IMPORTS[path]?.(),
+      variant: 'light', prefetch: (path) => { void STORE_NAV_PATH_IMPORTS[path]?.().catch(() => {}) },
     },
     searchPlaceholder: 'Search orders by ID, customer, product…',
+    onSearchClick: () => setSearchOpen(true),
     userLabel: 'Store Manager',
     user: user ? { name: user.name, email: user.email, avatar: 0 } : null,
     onSignOut: () => {
       void useStoreAuth.getState().logout().then(() => {
         // Cross-tab logout: a removal event under the session key signs out other tabs.
         try { localStorage.setItem('dd_store_session', 'signout'); localStorage.removeItem('dd_store_session') } catch { /* private mode */ }
+        broadcastLogout()
         navigate('/login')
       })
     },
@@ -126,11 +199,14 @@ export function StoreLayout() {
     themeKey: 'dd_store_theme',
     sessionStorageKey: 'dd_store_session',
     onSessionExpire: () => { void useStoreAuth.getState().logout(); navigate('/login') },
+    sessionDeadline: idleExpiresAt,
+    onSessionActivity,
     topbarLeft: <StoreSelector />,
     bellTitle: 'Notifications',
     bellNotifications: storeNotifications.map((n) => ({ id: n.id, title: n.title, body: n.body, at: n.at, read: n.read, kind: n.kind })),
     onBellMarkAllRead: () => markAllRead(),
     onBellMarkRead: (id) => markNotificationRead(id),
+    overlay: <StoreSearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />,
   }
 
   return (

@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FormSkeleton } from '@/components/animations/Skeleton';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Screen } from '@/components/ui/Screen';
@@ -134,7 +135,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     <Image source={images.logoEmblem} style={styles.logo} contentFit="contain" />
     <AppText style={styles.title}>{title}</AppText>
     <AppText style={styles.subtitle}>Sign in to see your deliveries, dairy and wallet.</AppText>
-    {status === 'loading' ? <ActivityIndicator color={colors.green} /> : <ScrollView style={styles.formScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    {status === 'loading' ? <View style={styles.card}><FormSkeleton label="Restoring your account" /></View> : <ScrollView style={styles.formScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
     {status === 'unavailable' ? <View style={styles.card}>
       <AppText style={styles.body}>{error ?? 'The service is temporarily unavailable.'}</AppText>
       <Button label="Try again" onPress={() => void initialize()} fullWidth />

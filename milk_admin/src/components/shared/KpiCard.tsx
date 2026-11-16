@@ -11,7 +11,7 @@ export type KpiFormat = 'inr' | 'compact' | 'num' | 'pct' | 'raw'
 /** Animated KPI card: icon tile, count-up value, good-direction delta, optional sparkline. */
 export const KpiCard = memo(function KpiCard({
   label, value, format = 'num', delta, deltaGood = 'up', icon: Icon, tint = 'green',
-  sparkline, sparkColor, highlight, className, suffix,
+  sparkline, sparkColor, highlight, className, suffix, loading = false, unavailable = false,
 }: {
   label: string
   value: number
@@ -26,6 +26,8 @@ export const KpiCard = memo(function KpiCard({
   highlight?: boolean
   className?: string
   suffix?: string
+  loading?: boolean
+  unavailable?: boolean
 }) {
   const display = useCountUp(value)
   const fmt = (v: number) => {
@@ -64,7 +66,7 @@ export const KpiCard = memo(function KpiCard({
           <div className="truncate text-xs font-medium text-muted-foreground">{label}</div>
           <div className="mt-1.5 flex items-baseline gap-2">
             <span className="text-[23px] font-extrabold leading-none tracking-tight tabular sm:text-[25px]">
-              {format === 'compact' ? fmtCompact(value) : fmt(display)}{suffix}
+              {loading ? <span className="skeleton block h-6 w-20" role="status" aria-label={`Loading ${label}`} /> : unavailable ? '—' : <>{format === 'compact' ? fmtCompact(value) : fmt(display)}{suffix}</>}
             </span>
           </div>
         </div>
@@ -75,7 +77,7 @@ export const KpiCard = memo(function KpiCard({
         )}
       </div>
       <div className="mt-2.5 flex items-end justify-between gap-3">
-        {delta !== undefined && (
+        {!loading && !unavailable && delta !== undefined && (
           <span
             className={cn(
               'inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11.5px] font-bold tabular',
@@ -86,7 +88,7 @@ export const KpiCard = memo(function KpiCard({
             {fmtDelta(delta)}
           </span>
         )}
-        {sparkline && (
+        {!loading && !unavailable && sparkline && (
           <div className="h-11 w-28 shrink-0 opacity-90 transition-opacity group-hover:opacity-100">
             <Sparkline data={sparkline} color={sparkColor ?? (good === false ? '#E5484D' : '#2E7D1A')} height={44} />
           </div>

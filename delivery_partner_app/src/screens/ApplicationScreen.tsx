@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError, riderApi, UploadError, type Application, type OnboardingStore } from '../api';
 import { Brand } from '../components/Brand';
+import { CardListSkeleton } from '../components/Skeleton';
 import { Button, Card, IconBox, PageTitle, Text } from '../components/Ui';
 import { uploadDocument } from '../files';
 import { colors, fonts } from '../theme';
@@ -19,12 +20,14 @@ export function ApplicationScreen({ application, reload, signOut }: { applicatio
   const [uploadingType, setUploadingType] = useState<string | null>(null);
   const [stores, setStores] = useState<OnboardingStore[]>([]);
   const [storeError, setStoreError] = useState('');
+  const [storesLoading, setStoresLoading] = useState(true);
   const [storeRetry, setStoreRetry] = useState(0);
   const editable = application.status === 'PENDING' || application.status === 'REJECTED';
   useEffect(() => {
     let active = true;
     riderApi.onboardingStores().then((items) => { if (active) { setStores(items); setStoreError(''); } })
-      .catch(() => { if (active) setStoreError('Could not load stores. Please try again.'); });
+      .catch(() => { if (active) setStoreError('Could not load stores. Please try again.'); })
+      .finally(() => { if (active) setStoresLoading(false); });
     return () => { active = false; };
   }, [storeRetry]);
   async function perform(work: () => Promise<unknown>, documentType: string | null = null, refreshAfter = true) {
@@ -66,9 +69,9 @@ export function ApplicationScreen({ application, reload, signOut }: { applicatio
             <Text style={styles.storeMarker}>{selected ? 'Selected' : 'Choose'}</Text>
           </Pressable>;
         })}
-        {!stores.length && !storeError && <Text style={styles.sub}>Loading stores…</Text>}
+        {storesLoading && !stores.length ? <CardListSkeleton label="Loading stores" count={2} /> : !storesLoading && !stores.length && !storeError ? <Text style={styles.sub}>No stores are available right now.</Text> : null}
         {storeError ? <><Text accessibilityRole="alert" style={styles.danger}>{storeError}</Text>
-          <Button label="Try again" secondary compact onPress={() => setStoreRetry((value) => value + 1)} /></> : null}
+          <Button label="Try again" secondary compact onPress={() => { setStoresLoading(true); setStoreError(''); setStoreRetry((value) => value + 1); }} /></> : null}
       </Card>
       {editable && <Card><Text style={styles.strong}>Vehicle details</Text>
         <Text style={styles.label}>Vehicle type</Text><TextInput accessibilityLabel="Vehicle type" value={vehicle} onChangeText={setVehicle} placeholder="Bike or scooter" placeholderTextColor={colors.muted} style={styles.input} />

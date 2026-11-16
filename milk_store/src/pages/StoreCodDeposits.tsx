@@ -1,3 +1,4 @@
+import { firstFailedQuery, PageLoadError } from '@/components/PageLoadError'
 // §6 COD Cash Deposits — today's KPIs, rider cash handover form (the backend
 // derives the deposit reference and reconciliation outcome) and deposit history.
 import { useEffect, useMemo, useState } from 'react'
@@ -14,7 +15,6 @@ import { EmptyState, PageHeader, SearchInput } from '@dairydirect/shared/ui/misc
 import { DataTable, Pagination, type Column } from '@dairydirect/shared/ui/DataTable'
 import { KpiCard } from '@dairydirect/shared/ui/KpiCard'
 import { InitialAvatar } from '@dairydirect/shared/assets/avatars'
-import { PayoutsScene } from '@dairydirect/shared/assets/scenes'
 import { cn, fmtDateTime, fmtINR } from '@dairydirect/shared/lib/utils'
 import type { CodDeposit, DepositOutcome } from '@dairydirect/shared/types'
 
@@ -103,6 +103,9 @@ export function StoreCodDeposits() {
     { key: 'outcome', header: 'Outcome', render: (d) => <OutcomePill outcome={d.outcome} /> },
   ]
 
+  const loadFailure = firstFailedQuery([ridersQ, history])
+  if (loadFailure) return <PageLoadError title="COD Cash Deposits" artwork="codDeposits" query={loadFailure} />
+
   return (
     <motion.div variants={stagger.container} initial="hidden" animate="show" className="space-y-5">
       <PageHeader
@@ -110,7 +113,7 @@ export function StoreCodDeposits() {
         title="COD Cash"
         titleAccent="Deposits"
         subtitle="Record cash handed over by riders. The backend derives the deposit reference and reconciliation outcome."
-        illustration={<PayoutsScene />}
+        artwork="codDeposits"
       />
 
       <motion.section variants={stagger.item} className="grid gap-4 sm:grid-cols-2 xl:max-w-2xl">

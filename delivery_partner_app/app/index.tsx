@@ -1,12 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import {
   restoreSession,
   signOut,
   type PartnerIdentity,
 } from "../src/auth/session";
 import { Brand } from "../src/components/Brand";
+import { FormSkeleton } from "../src/components/Skeleton";
 import { Button, Text } from "../src/components/Ui";
 import { AuthGate } from "../src/screens/AuthGate";
 import { Onboarding } from "../src/screens/Onboarding";
@@ -58,7 +59,7 @@ export default function Index() {
     return (
       <View style={styles.center}>
         <Brand large />
-        <ActivityIndicator color={colors.green} style={{ marginTop: 22 }} />
+        <FormSkeleton label="Restoring your account" />
         <Text style={{ marginTop: 10, color: colors.secondary }}>
           Getting things ready…
         </Text>

@@ -5,7 +5,6 @@ import { cn, timeAgo } from '../../lib/utils'
 import { Kbd, Badge } from '../base'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownItem, DropdownSeparator, DropdownLabel, Popover, PopoverContent, PopoverTrigger } from '../overlays'
 import { useUI } from './ui'
-import { DEMO_NOW } from '../../mock-db/seed.ts'
 import { Avatar as FlatAvatar } from '../../assets/avatars'
 import type { ShellUser } from './AppShell'
 
@@ -49,7 +48,7 @@ export function NotificationsBell({ title = 'Notifications', notifications = [],
                   {!n.read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />}
                 </div>
                 <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{n.body}</p>
-                <p className="mt-1 text-[10px] font-medium text-muted-foreground">{timeAgo(n.at, DEMO_NOW)}</p>
+                <p className="mt-1 text-[10px] font-medium text-muted-foreground">{timeAgo(n.at, new Date())}</p>
               </div>
               {!n.read && (
                 <button onClick={() => onMarkRead?.(n.id)} className="ml-auto self-start text-[10px] font-semibold text-muted-foreground hover:text-foreground" aria-label={`Mark ${n.title} read`}>

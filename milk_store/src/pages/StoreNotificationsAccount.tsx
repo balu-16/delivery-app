@@ -1,3 +1,4 @@
+import { firstFailedQuery, PageLoadError } from '@/components/PageLoadError'
 // §9 Notifications & Account — notification inbox (tabs, search, per-row actions,
 // mark-all-read, deep links), preference switches persisted to the backend, and the
 // manager's own account card (reset password → existing /reset-password flow, sign out).
@@ -20,7 +21,6 @@ import { Avatar as PhotoAvatar } from '@dairydirect/shared/assets/avatars'
 import { EmptyState, PageHeader, SearchInput, TabPills } from '@dairydirect/shared/ui/misc'
 import { Pagination } from '@dairydirect/shared/ui/DataTable'
 import { KpiCard } from '@dairydirect/shared/ui/KpiCard'
-import { MeadowScene } from '@dairydirect/shared/assets/scenes'
 import { cn, timeAgo } from '@dairydirect/shared/lib/utils'
 import type { StoreNotification, StoreNotificationPrefs } from '@dairydirect/shared/types'
 
@@ -44,7 +44,7 @@ const PREF_ROWS: Array<{ key: keyof StoreNotificationPrefs; label: string; desc:
 export function StoreNotificationsAccount() {
   const stagger = useStagger()
   const navigate = useNavigate()
-  const { data, prefs, isLoading } = useStoreNotifications()
+  const { data, prefs, isLoading, notificationsQuery, prefsQuery } = useStoreNotifications()
   const actions = useStoreNotificationActions()
   const user = useStoreAuth((s) => s.user)
 
@@ -83,6 +83,7 @@ export function StoreNotificationsAccount() {
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const markRead = (n: StoreNotification) => { void actions.markNotificationRead(n.id) }
+  const markUnread = (n: StoreNotification) => { void actions.markNotificationUnread(n.id) }
   const markAll = () => { void actions.markAllRead() }
 
   const currentPrefs: StoreNotificationPrefs = localPrefs ?? prefs ?? {
@@ -102,6 +103,9 @@ export function StoreNotificationsAccount() {
     { value: 'system', label: 'System', count: counts.system },
   ]
 
+  const loadFailure = firstFailedQuery([notificationsQuery, prefsQuery])
+  if (loadFailure) return <PageLoadError title="Notifications & Account" artwork="notifications" query={loadFailure} />
+
   return (
     <motion.div variants={stagger.container} initial="hidden" animate="show" className="space-y-5">
       <PageHeader
@@ -109,7 +113,7 @@ export function StoreNotificationsAccount() {
         title="Notifications &"
         titleAccent="Account"
         subtitle="Review store notifications, tune what you are alerted about and manage your manager account."
-        illustration={<MeadowScene variant="settings" />}
+        artwork="notifications"
       />
 
       <motion.section variants={stagger.item} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -187,6 +191,9 @@ export function StoreNotificationsAccount() {
                           {!n.read && (
                             <DropdownItem onSelect={() => markRead(n)}><CheckCheck className="h-3.5 w-3.5" /> Mark read</DropdownItem>
                           )}
+                          {n.read && (
+                            <DropdownItem onSelect={() => markUnread(n)}>Mark unread</DropdownItem>
+                          )}
                           {n.link && (
                             <DropdownItem onSelect={() => navigate(n.link!)}><Eye className="h-3.5 w-3.5" /> Open link</DropdownItem>
                           )}
@@ -227,7 +234,7 @@ export function StoreNotificationsAccount() {
             <CardHeader><CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4 text-brand-600" /> My Account</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-4">
-                <PhotoAvatar index={user?.avatar ?? 0} name={user?.name ?? 'Manager'} size={56} />
+                <PhotoAvatar index={0} name={user?.name ?? 'Manager'} size={56} />
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[15px] font-bold">{user?.name ?? 'Store Manager'}</span>

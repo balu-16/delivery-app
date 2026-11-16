@@ -150,9 +150,21 @@ export class PostgresRiderApplications implements RiderApplications {
       WHERE rider_id=${userId}::uuid ORDER BY document_type,created_at DESC,id DESC`.execute(
       tx ?? this.db,
     );
+    const account = await sql<{
+      name: string;
+      email: string;
+      applied_at: Date;
+    }>`SELECT name, normalized_email AS email, created_at AS applied_at FROM users WHERE id=${userId}::uuid`.execute(
+      tx ?? this.db,
+    );
+    const person = account.rows[0];
     const row = profile.rows[0];
     return {
       userId,
+      name: person?.name ?? '',
+      email: person?.email ?? '',
+      phone: null,
+      appliedAt: (person?.applied_at ?? new Date()).toISOString(),
       status: row.status,
       vehicleType: row.vehicle_type,
       vehicleNo: row.vehicle_no,
@@ -263,8 +275,12 @@ export class PostgresRiderApplications implements RiderApplications {
         name: string;
         normalized_email: string;
         status: string;
+        vehicle_type: string | null;
+        vehicle_no: string | null;
+        applied_at: Date;
       }>`
-        SELECT u.id,u.name,u.normalized_email,p.status FROM rider_profiles p JOIN users u ON u.id=p.user_id
+        SELECT u.id,u.name,u.normalized_email,p.status,p.vehicle_type,p.vehicle_no,u.created_at AS applied_at
+        FROM rider_profiles p JOIN users u ON u.id=p.user_id
         JOIN user_roles ur ON ur.user_id=u.id AND ur.role='RIDER'
         WHERE u.pool='WORKFORCE' AND u.status='ACTIVE' AND p.home_store_id=${storeId}::uuid
           AND (${before ?? null}::uuid IS NULL OR u.id<${before ?? null}::uuid)
@@ -281,7 +297,11 @@ export class PostgresRiderApplications implements RiderApplications {
           userId: row.id,
           name: row.name,
           email: row.normalized_email,
+          phone: null,
+          appliedAt: row.applied_at.toISOString(),
           status: row.status,
+          vehicleType: row.vehicle_type,
+          vehicleNo: row.vehicle_no,
         })),
         nextCursor: rows.rows.length > 50 ? page.at(-1)!.id : null,
       };

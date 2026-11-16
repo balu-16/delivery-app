@@ -161,10 +161,10 @@ export function Inventory() {
       <motion.div variants={container.container} initial="hidden" animate="show" className="space-y-5">
         {/* ── KPI row ── */}
         <motion.section variants={container.item} className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-          <KpiCard label="Units across network" value={totalUnits} icon={Boxes} tint="green" format="num" />
-          <KpiCard label="Variants low somewhere" value={lowCount} icon={AlertTriangle} tint="amber" format="num" />
-          <KpiCard label="Stores reporting" value={stores.length} icon={Boxes} tint="blue" format="num" />
-          <KpiCard label="Shelf-life policies" value={shelfRows.length} icon={CalendarClock} tint="violet" format="num" />
+          <KpiCard loading={summaryQ.isLoading || summaryQ.isPlaceholderData} unavailable={summaryQ.isError && !summaryQ.data} label="Units across network" value={totalUnits} icon={Boxes} tint="green" format="num" />
+          <KpiCard loading={summaryQ.isLoading || summaryQ.isPlaceholderData} unavailable={summaryQ.isError && !summaryQ.data} label="Variants low somewhere" value={lowCount} icon={AlertTriangle} tint="amber" format="num" />
+          <KpiCard loading={storesQ.isLoading || storesQ.isPlaceholderData} unavailable={storesQ.isError && !storesQ.data} label="Stores reporting" value={stores.length} icon={Boxes} tint="blue" format="num" />
+          <KpiCard loading={shelfQ.isLoading || shelfQ.isPlaceholderData} unavailable={shelfQ.isError && !shelfQ.data} label="Shelf-life policies" value={shelfRows.length} icon={CalendarClock} tint="violet" format="num" />
         </motion.section>
 
         <motion.div variants={container.item}>
@@ -190,14 +190,20 @@ export function Inventory() {
               </div>
               <p className="text-xs text-muted-foreground">The stock report is per-store — pick a store to view its levels.</p>
             </div>
-            {!storeId ? (
+            {storesQ.isLoading && !storeId ? (
+              <div role="status" aria-label="Loading stores" className="skeleton h-32 rounded-card" />
+            ) : storesQ.isError && !storesQ.data ? (
+              <Card role="alert" className="space-y-2 p-6"><p>Could not load stores.</p><Button size="sm" variant="secondary" onClick={() => void storesQ.refetch()}>Try again</Button></Card>
+            ) : !storeId ? (
               <Card className="p-8"><EmptyState icon={SearchX} title="Pick a store" body="Choose a store to load its stock report." /></Card>
             ) : (
               <Card className="overflow-hidden">
                 <DataTable
                   keyId={(r) => r.variantId}
                   rows={reportRows}
-                  loading={reportQ.isLoading}
+                  loading={reportQ.isLoading || reportQ.isPlaceholderData}
+                  error={reportQ.isError && !reportQ.data}
+                  onRetry={() => void reportQ.refetch()}
                   empty={<EmptyState icon={SearchX} title="No stock rows" body="This store has no recorded stock yet." />}
                   columns={[
                     {
@@ -225,7 +231,7 @@ export function Inventory() {
                   onNext={() => reportPager.next(reportQ.data?.nextCursor ?? null)}
                   hasPrev={reportPager.hasPrev}
                   hasNext={!!reportQ.data?.nextCursor}
-                  loading={reportQ.isLoading}
+                  loading={reportQ.isLoading || reportQ.isPlaceholderData}
                   label={`Page ${reportPager.depth} · store stock feed`}
                 />
               </Card>
@@ -243,7 +249,9 @@ export function Inventory() {
               <DataTable
                 keyId={(r) => r.variantId}
                 rows={summary}
-                loading={summaryQ.isLoading}
+                loading={summaryQ.isLoading || summaryQ.isPlaceholderData}
+                error={summaryQ.isError && !summaryQ.data}
+                onRetry={() => void summaryQ.refetch()}
                 empty={<EmptyState icon={SearchX} title="No summary rows" body="Adjust the search to find variants." />}
                 columns={[
                   {
@@ -294,7 +302,9 @@ export function Inventory() {
               <DataTable
                 keyId={(r: LedgerRow) => r.id}
                 rows={ledgerRows}
-                loading={ledgerQ.isLoading}
+                loading={ledgerQ.isLoading || ledgerQ.isPlaceholderData}
+                error={ledgerQ.isError && !ledgerQ.data}
+                onRetry={() => void ledgerQ.refetch()}
                 empty={<EmptyState icon={SearchX} title="No movements" body="Adjust the filters to see the stock ledger." />}
                 columns={[
                   { key: 'when', header: 'When', render: (r: LedgerRow) => <span className="whitespace-nowrap text-[13px]">{fmtDateTime(r.createdAt)}</span> },
@@ -325,7 +335,7 @@ export function Inventory() {
                 onNext={() => ledgerPager.next(ledgerQ.data?.nextCursor ?? null)}
                 hasPrev={ledgerPager.hasPrev}
                 hasNext={!!ledgerQ.data?.nextCursor}
-                loading={ledgerQ.isLoading}
+                loading={ledgerQ.isLoading || ledgerQ.isPlaceholderData}
                 label={`Page ${ledgerPager.depth} · ledger feed`}
               />
             </Card>
@@ -348,7 +358,9 @@ export function Inventory() {
               <DataTable
                 keyId={(r) => r.categoryId}
                 rows={shelfRows}
-                loading={shelfQ.isLoading}
+                loading={shelfQ.isLoading || shelfQ.isPlaceholderData}
+                error={shelfQ.isError && !shelfQ.data}
+                onRetry={() => void shelfQ.refetch()}
                 empty={<EmptyState icon={CalendarClock} title="No shelf-life policies" body="Set the first policy for a category." />}
                 columns={[
                   { key: 'category', header: 'Category', render: (r: ShelfLifePolicy) => <span className="font-semibold">{categories.find((c) => c.id === r.categoryId)?.name ?? r.categoryId.slice(0, 8) + '…'}</span> },

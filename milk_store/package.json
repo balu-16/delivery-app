@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src shared/src --ext .ts,.tsx",
-    "test": "vitest run",
+    "test": "vitest run --dir tests",
+    "test:e2e": "playwright test",
     "analyze": "vite build --mode analyze",
     "svgo": "svgo -f public -r"
   },
@@ -40,6 +41,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@types/node": "^20.16.5",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
