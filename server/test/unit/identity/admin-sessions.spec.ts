@@ -227,6 +227,8 @@ describe('admin session environment', () => {
       PICKING_HANDOVER_SECRET: 'h'.repeat(32),
       ADMIN_SESSION_KEYS_JSON: JSON.stringify({ '1': key32 }),
       ADMIN_SESSION_KEY_VERSION: '1',
+      STORE_SESSION_KEYS_JSON: JSON.stringify({ '1': key32 }),
+      STORE_SESSION_KEY_VERSION: '1',
     });
     expect(production.ADMIN_SESSION_KEY_VERSION).toBe(1);
     expect(production.ADMIN_SESSION_IDLE_SECONDS).toBe(28800);

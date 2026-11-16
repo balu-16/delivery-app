@@ -145,6 +145,23 @@ export class StorePickTasksController {
       limit: q.limit,
     });
   }
+  @Get('pick-tasks/:id')
+  @ApiOperation({ operationId: 'storePickTask' })
+  @ApiOkResponse({ type: PickTaskView })
+  get(@CurrentPrincipal() p: Principal, @Param('id') id: string) {
+    return this.picking.get(p.userId, id);
+  }
+  @Post('pick-tasks/:id/release')
+  @ApiOperation({ operationId: 'storePickRelease' })
+  @PickIdempotencyHeader()
+  @ApiOkResponse({ type: PickTaskView })
+  release(
+    @CurrentPrincipal() p: Principal,
+    @Param('id') id: string,
+    @Headers('idempotency-key') keyHeader?: string,
+  ) {
+    return this.picking.release(p.userId, id, key(keyHeader));
+  }
   @Post('pick-tasks/:id/claim')
   @ApiOperation({ operationId: 'storePickClaim' })
   @PickIdempotencyHeader()

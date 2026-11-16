@@ -9,6 +9,8 @@ import { PLATFORM_DATABASE } from '../../platform/contracts/runtime.js';
 import type { DatabaseHandle } from '../../platform/database/database.js';
 import { AppConfigModule } from '../app-config/app-config.module.js';
 import { APP_CONFIG, type AppConfig } from '../app-config/contracts/config.js';
+import { IdentityModule } from '../identity/identity.module.js';
+import { IDENTITY_ACCESS, type IdentityAccess } from '../identity/contracts/identity.js';
 import {
   RIDER_ELIGIBILITY,
   RIDER_EARNINGS,
@@ -16,10 +18,12 @@ import {
   RIDER_CASH,
   COD_COLLECTIONS,
 } from './contracts/riders.js';
+import { STORE_COD_READS } from './contracts/store-cod.js';
 import { PostgresRiderEligibility } from './infrastructure/postgres-eligibility.js';
 import { PostgresRiderEarnings } from './infrastructure/postgres-rider-earnings.js';
 import { PostgresRiderOperations } from './infrastructure/postgres-rider-operations.js';
 import { PostgresRiderCash } from './infrastructure/postgres-rider-cash.js';
+import { PostgresStoreCodReads } from './infrastructure/postgres-store-cod.js';
 import { RidersMaintenance } from './infrastructure/maintenance.js';
 import { RiderSettings } from './infrastructure/settings.js';
 
@@ -31,8 +35,14 @@ import { RiderSettings } from './infrastructure/settings.js';
  * RIDER_EARNINGS in its own transaction.
  */
 @Module({
-  imports: [AppConfigModule],
+  imports: [AppConfigModule, IdentityModule],
   providers: [
+    {
+      provide: STORE_COD_READS,
+      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS, APP_CONFIG],
+      useFactory: (handle: DatabaseHandle, identity: IdentityAccess, config: AppConfig) =>
+        new PostgresStoreCodReads(handle.db, identity, config),
+    },
     {
       provide: RiderSettings,
       inject: [APP_CONFIG],
@@ -67,7 +77,14 @@ import { RiderSettings } from './infrastructure/settings.js';
     },
     { provide: RIDER_ELIGIBILITY, useExisting: PostgresRiderEligibility },
   ],
-  exports: [RIDER_OPERATIONS, RIDER_CASH, COD_COLLECTIONS, RIDER_EARNINGS, RIDER_ELIGIBILITY],
+  exports: [
+    RIDER_OPERATIONS,
+    RIDER_CASH,
+    COD_COLLECTIONS,
+    RIDER_EARNINGS,
+    RIDER_ELIGIBILITY,
+    STORE_COD_READS,
+  ],
 })
 export class RidersModule {}
 

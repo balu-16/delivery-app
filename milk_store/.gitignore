@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dev-dist/
+coverage/
+stats.html
+.env
+.env.local
+.env.*.local

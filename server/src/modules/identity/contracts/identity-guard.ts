@@ -13,7 +13,7 @@ import { PLATFORM_RATE_LIMITER, type RateLimiter } from '../../../platform/contr
 import { AUTH_POLICY, type AuthenticatedRequest, type RoutePolicy } from './http.js';
 import { TOKEN_VERIFIER, type TokenVerifier } from './identity.js';
 import { IDENTITY_AUTHORIZER, type IdentityAuthorizer } from './identity.js';
-import { ADMIN_SESSION_AUTHENTICATOR } from './admin-auth.js';
+import { ADMIN_SESSION_AUTHENTICATOR, STORE_SESSION_AUTHENTICATOR } from './admin-auth.js';
 import type { AdminSessionAuthenticator } from './admin-auth.js';
 import { AdminSessionForbidden, AdminSessionUnavailable } from './admin-auth.js';
 
@@ -50,6 +50,8 @@ export class IdentityGuard implements CanActivate {
     @Inject(PLATFORM_RATE_LIMITER) private readonly rateLimiter: RateLimiter,
     @Inject(ADMIN_SESSION_AUTHENTICATOR)
     private readonly adminSessions: AdminSessionAuthenticator,
+    @Inject(STORE_SESSION_AUTHENTICATOR)
+    private readonly storeSessions: AdminSessionAuthenticator,
   ) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const policy = this.reflector.getAllAndOverride<RoutePolicy>(AUTH_POLICY, [
@@ -59,23 +61,31 @@ export class IdentityGuard implements CanActivate {
     if (!policy) throw new ForbiddenException({ code: 'ROUTE_POLICY_MISSING' });
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const match = /^Bearer\s+(\S+)$/i.exec(request.headers.authorization ?? '');
+    // Each portal audience carries its own session cookie name, keeping the
+    // credentials (and their logout) independent; other audiences stay bearer-only.
     const sessionCookie =
-      policy.audience === 'admin' ? readCookie(request.headers.cookie, 'admin_session') : null;
-    // Presenting both credential kinds on an admin route is always a client defect.
+      policy.audience === 'admin'
+        ? readCookie(request.headers.cookie, 'admin_session')
+        : policy.audience === 'store'
+          ? readCookie(request.headers.cookie, 'store_session')
+          : null;
+    // Presenting both credential kinds on a portal route is always a client defect.
     if (match?.[1] && sessionCookie)
       throw new HttpException({ code: 'CONFLICTING_CREDENTIALS' }, 409);
     if (!match?.[1] && sessionCookie) {
+      const authenticator = policy.audience === 'store' ? this.storeSessions : this.adminSessions;
       let authenticated;
       try {
-        authenticated = await this.adminSessions.authenticate(sessionCookie);
+        authenticated = await authenticator.authenticate(sessionCookie);
       } catch (error: unknown) {
         throw translateAdminSessionError(error);
       }
       request.identity = authenticated.identity;
       request.principal = authenticated.principal;
-      // Cookie sessions are portal sessions: SUPER_ADMIN on every request,
-      // even where the route policy also admits SUPPORT_AGENT.
-      if (!authenticated.principal.roles.includes('SUPER_ADMIN'))
+      // Cookie sessions are portal sessions: the portal's single role on every
+      // request, even where the route policy also admits other audience roles.
+      const requiredRole = policy.audience === 'store' ? 'STORE_MANAGER' : 'SUPER_ADMIN';
+      if (!authenticated.principal.roles.includes(requiredRole))
         throw new ForbiddenException({ code: 'FORBIDDEN' });
       if (authenticated.rotation)
         context
@@ -83,7 +93,8 @@ export class IdentityGuard implements CanActivate {
           .getResponse<{ header(name: string, value: string): void }>()
           .header(
             'set-cookie',
-            adminSessionCookie(
+            portalSessionCookie(
+              policy.audience === 'store' ? 'store_session' : 'admin_session',
               authenticated.rotation.session.sessionId,
               new Date(authenticated.rotation.session.expiresAt),
               { secure: cookieSecure(request) },
@@ -180,17 +191,36 @@ export function cookieSecure(request: {
 }
 
 /** Host-only portal session cookie; Secure everywhere except loopback HTTP development. */
-export function adminSessionCookie(
+export function portalSessionCookie(
+  name: 'admin_session' | 'store_session',
   sessionId: string,
   absoluteExpiresAt: Date,
-  options?: { secure?: boolean; clear?: boolean },
+  options?: { secure?: boolean; clear?: boolean; browserSession?: boolean },
 ): string {
-  const attributes = [`admin_session=${sessionId}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
+  const attributes = [`${name}=${sessionId}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
   if (options?.clear) attributes.push('Max-Age=0', 'Expires=Thu, 01 Jan 1970 00:00:00 GMT');
-  else {
+  else if (!options?.browserSession) {
+    // "Remember me" opt-out: a browser-session cookie dies with the browser;
+    // a page refresh always survives either way.
     const maxAge = Math.max(0, Math.floor((absoluteExpiresAt.getTime() - Date.now()) / 1000));
     attributes.push(`Max-Age=${maxAge}`);
   }
   if (options?.secure ?? true) attributes.push('Secure');
   return attributes.join('; ');
+}
+
+export function adminSessionCookie(
+  sessionId: string,
+  absoluteExpiresAt: Date,
+  options?: { secure?: boolean; clear?: boolean },
+): string {
+  return portalSessionCookie('admin_session', sessionId, absoluteExpiresAt, options);
+}
+
+export function storeSessionCookie(
+  sessionId: string,
+  absoluteExpiresAt: Date,
+  options?: { secure?: boolean; clear?: boolean; browserSession?: boolean },
+): string {
+  return portalSessionCookie('store_session', sessionId, absoluteExpiresAt, options);
 }

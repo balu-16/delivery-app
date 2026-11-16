@@ -57,7 +57,16 @@ export class AdminAuthProviderError extends Error {
  */
 export interface AdminPortalAuthProvider {
   passwordLogin(email: string, password: string): Promise<AdminLoginOutcome>;
-  respondToChallenge(providerSession: string, newPassword: string): Promise<AdminAuthenticated>;
+  /**
+   * Completes NEW_PASSWORD_REQUIRED. `username` must be echoed back for
+   * ADMIN_* Cognito flows, which require it in ChallengeResponses even though
+   * the session already identifies the user.
+   */
+  respondToChallenge(
+    providerSession: string,
+    newPassword: string,
+    username?: string,
+  ): Promise<AdminAuthenticated>;
   forgotPassword(email: string): Promise<void>;
   confirmForgotPassword(
     email: string,
@@ -170,6 +179,15 @@ export interface AdminSessionAuthenticator {
 
 export const ADMIN_SESSIONS = Symbol('ADMIN_SESSIONS');
 export const ADMIN_SESSION_AUTHENTICATOR = Symbol('ADMIN_SESSION_AUTHENTICATOR');
+
+/**
+ * Store-manager portal bindings. Same contracts, different credentials: a
+ * dedicated Cognito client, session table, key ring, cookie and CSRF header,
+ * so store and admin sessions (and their revocation) never interact.
+ */
+export const STORE_PORTAL_AUTH_PROVIDER = Symbol('STORE_PORTAL_AUTH_PROVIDER');
+export const STORE_SESSIONS = Symbol('STORE_SESSIONS');
+export const STORE_SESSION_AUTHENTICATOR = Symbol('STORE_SESSION_AUTHENTICATOR');
 
 /** Refresh hit a provider outage: surfaced as 503 so the portal retries. */
 export class AdminSessionUnavailable extends Error {

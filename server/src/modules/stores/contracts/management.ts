@@ -9,3 +9,47 @@ export interface StoreStatusInput {
 export interface StoreManagement {
   setStatus(input: StoreStatusInput): Promise<void>;
 }
+
+/** Store facts + operating hours for the store-manager portal. */
+export interface StoreDetailsView {
+  storeId: string;
+  name: string;
+  status: 'ONLINE' | 'PAUSED' | 'OFFLINE';
+  pauseReason: string | null;
+  version: string;
+  /** Business timezone coordinates of the store pin, when present. */
+  location: { lat: number; lng: number } | null;
+  hourlyCapacity: number;
+  lastOrderBufferMinutes: number;
+  hours: { weekday: number; startMinute: number; endMinute: number }[];
+}
+
+export interface StoreStatusHistoryEntry {
+  version: string;
+  previousStatus: string;
+  status: string;
+  reason: string | null;
+  actorId: string | null;
+  occurredAt: string;
+}
+
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
+/**
+ * Store-scoped reads for the store-manager portal. Every call re-checks the
+ * caller's STORE_MANAGER assignment for the requested store.
+ */
+export interface StorePortalStoreReads {
+  details(actorId: string, storeId: string): Promise<StoreDetailsView>;
+  statusHistory(
+    actorId: string,
+    storeId: string,
+    cursor?: string,
+    limit?: number,
+  ): Promise<Page<StoreStatusHistoryEntry>>;
+}
+
+export const STORE_PORTAL_STORE_READS = Symbol('STORE_PORTAL_STORE_READS');

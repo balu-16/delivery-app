@@ -166,7 +166,11 @@ export class AdminAuthController {
     if (!state) throw new HttpException({ code: 'INVALID_CHALLENGE' }, 400);
     let outcome;
     try {
-      outcome = await this.provider.respondToChallenge(state.providerSession, body.newPassword);
+      outcome = await this.provider.respondToChallenge(
+        state.providerSession,
+        body.newPassword,
+        state.username,
+      );
     } catch (error: unknown) {
       throw this.providerError(error, { failure: 400, failureCode: 'INVALID_CHALLENGE' });
     }

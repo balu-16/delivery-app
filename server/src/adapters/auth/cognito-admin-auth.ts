@@ -60,6 +60,7 @@ export class CognitoAdminAuth implements AdminPortalAuthProvider {
   async respondToChallenge(
     providerSession: string,
     newPassword: string,
+    username?: string,
   ): Promise<AdminAuthenticated> {
     try {
       const result = await this.client.send(
@@ -68,7 +69,11 @@ export class CognitoAdminAuth implements AdminPortalAuthProvider {
           ClientId: this.clientId,
           ChallengeName: 'NEW_PASSWORD_REQUIRED',
           Session: providerSession,
-          ChallengeResponses: { NEW_PASSWORD: newPassword },
+          // ADMIN_* flows demand the USERNAME in ChallengeResponses even
+          // though the session already identifies the account.
+          ChallengeResponses: username
+            ? { NEW_PASSWORD: newPassword, USERNAME: username }
+            : { NEW_PASSWORD: newPassword },
         }),
         { abortSignal: AbortSignal.timeout(this.timeoutMs) },
       );

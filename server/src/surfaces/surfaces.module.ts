@@ -33,6 +33,8 @@ import { AdminWalletSurfaceModule } from './admin/wallet/p6.module.js';
 import { CustomerTrackingSurfaceModule } from './customer/tracking/p8.module.js';
 import { RiderDispatchSurfaceModule } from './rider/dispatch/p8.module.js';
 import { StoreDispatchSurfaceModule } from './store/dispatch/p8.module.js';
+import { StoreOpsSurfaceModule } from './store/ops/portal.module.js';
+import { StorePortalReadsSurfaceModule } from './store/portal/p10.module.js';
 import { AdminDispatchSurfaceModule } from './admin/dispatch/p8.module.js';
 import { AdminCommerceSurfaceModule } from './admin/orders/p6.module.js';
 import {
@@ -78,6 +80,8 @@ export class RiderSurfaceModule {}
     StorePickingSurfaceModule,
     StoreNotificationsSurfaceModule,
     StoreDispatchSurfaceModule,
+    StoreOpsSurfaceModule,
+    StorePortalReadsSurfaceModule,
   ],
 })
 export class StoreSurfaceModule {}

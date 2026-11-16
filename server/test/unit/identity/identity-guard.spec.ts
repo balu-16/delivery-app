@@ -66,8 +66,20 @@ function setup(bootstrap: boolean, decision: AuthenticatedLimitDecision) {
       throw new Error('SESSION_EXPIRED');
     },
   } as unknown as AdminSessionAuthenticator;
+  const storeSessions = {
+    authenticate: async (): Promise<never> => {
+      throw new Error('SESSION_EXPIRED');
+    },
+  } as unknown as AdminSessionAuthenticator;
   return {
-    guard: new IdentityGuard(reflector, verifier, authorizer, limiter, adminSessions),
+    guard: new IdentityGuard(
+      reflector,
+      verifier,
+      authorizer,
+      limiter,
+      adminSessions,
+      storeSessions,
+    ),
     context,
     calls,
     headers,

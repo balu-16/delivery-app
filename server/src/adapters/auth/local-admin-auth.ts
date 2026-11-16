@@ -60,19 +60,25 @@ export async function verifyLocalPassword(password: string, stored: string): Pro
  */
 export class LocalAdminAuthProvider implements AdminPortalAuthProvider {
   private readonly key: Uint8Array;
+  /** Defaults reproduce the admin portal; the store portal passes its own audience. */
+  private readonly audience: 'admin' | 'store';
+  private readonly issuer: string;
   constructor(
     private readonly db: Database,
     secret: string,
     private readonly issueAccessToken: (
       pool: Pool,
       sub: string,
-      audience: 'admin',
+      audience: 'admin' | 'store',
       tokenUse: 'access',
       lifetimeSeconds: number,
     ) => Promise<string>,
+    portal?: { audience: 'admin' | 'store'; issuer: string },
   ) {
     if (secret.length < 16) throw new Error('LOCAL_TOKEN_SECRET_TOO_SHORT');
     this.key = new TextEncoder().encode(secret);
+    this.audience = portal?.audience ?? 'admin';
+    this.issuer = portal?.issuer ?? 'local:admin-portal';
   }
 
   async passwordLogin(email: string, password: string): Promise<AdminLoginOutcome> {
@@ -84,7 +90,11 @@ export class LocalAdminAuthProvider implements AdminPortalAuthProvider {
     return { status: 'AUTHENTICATED', tokens: await this.tokens(row.sub) };
   }
 
-  async respondToChallenge(): Promise<AdminAuthenticated> {
+  async respondToChallenge(
+    _providerSession: string,
+    _newPassword: string,
+    _username?: string,
+  ): Promise<AdminAuthenticated> {
     // The local directory has no NEW_PASSWORD_REQUIRED state; passwords are
     // provisioned through scripts/set-local-admin-password.mjs.
     throw new AdminAuthProviderError('challenge_required');
@@ -113,8 +123,8 @@ export class LocalAdminAuthProvider implements AdminPortalAuthProvider {
     try {
       const { payload } = await jwtVerify(refreshToken, this.key, {
         algorithms: ['HS256'],
-        issuer: 'local:admin-portal',
-        audience: 'admin',
+        issuer: this.issuer,
+        audience: this.audience,
         clockTolerance: 60,
       });
       if (payload.token_use !== 'refresh' || typeof payload.sub !== 'string')
@@ -147,15 +157,21 @@ export class LocalAdminAuthProvider implements AdminPortalAuthProvider {
   private async tokens(sub: string): Promise<AuthTokens> {
     let accessToken: string;
     try {
-      accessToken = await this.issueAccessToken(this.pool, sub, 'admin', 'access', ACCESS_SECONDS);
+      accessToken = await this.issueAccessToken(
+        this.pool,
+        sub,
+        this.audience,
+        'access',
+        ACCESS_SECONDS,
+      );
     } catch {
       // Unknown or non-ACTIVE directory subject: keep responses generic.
       throw new AdminAuthProviderError('invalid_credentials');
     }
     const refreshToken = await new SignJWT({ token_use: 'refresh' })
       .setProtectedHeader({ alg: 'HS256' })
-      .setIssuer('local:admin-portal')
-      .setAudience('admin')
+      .setIssuer(this.issuer)
+      .setAudience(this.audience)
       .setSubject(sub)
       .setIssuedAt()
       .setExpirationTime(`${REFRESH_SECONDS}s`)

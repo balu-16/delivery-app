@@ -53,6 +53,10 @@ const envBaseSchema = z
     ADMIN_SESSION_KEY_VERSION: z.coerce.number().int().positive().default(1),
     ADMIN_SESSION_IDLE_SECONDS: z.coerce.number().int().min(60).max(86400).default(28800),
     ADMIN_SESSION_ABSOLUTE_SECONDS: z.coerce.number().int().min(300).max(2592000).default(604800),
+    STORE_SESSION_KEYS_JSON: z.string().default('{}'),
+    STORE_SESSION_KEY_VERSION: z.coerce.number().int().positive().default(1),
+    STORE_SESSION_IDLE_SECONDS: z.coerce.number().int().min(60).max(86400).default(1800),
+    STORE_SESSION_ABSOLUTE_SECONDS: z.coerce.number().int().min(300).max(2592000).default(604800),
     AWS_REGION: z.string().default('ap-south-1'),
     AWS_ACCOUNT_ID: optional,
     COGNITO_CUSTOMER_POOL_ID: optional,
@@ -276,49 +280,21 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
   } catch {
     fail('PICKING_CODE_KEYS_JSON', 'Invalid code key ring');
   }
-  try {
-    const ring: unknown = JSON.parse(env.ADMIN_SESSION_KEYS_JSON);
-    const entries =
-      ring !== null && typeof ring === 'object' && !Array.isArray(ring)
-        ? Object.entries(ring as Record<string, unknown>)
-        : null;
-    const wellFormed =
-      entries !== null &&
-      entries.every(([k, v]) => {
-        if (!/^[1-9]\d*$/.test(k) || typeof v !== 'string') return false;
-        try {
-          return Buffer.from(v, 'base64').length === 32;
-        } catch {
-          return false;
-        }
-      });
-    if (env.NODE_ENV === 'production') {
-      if (entries === null || !wellFormed || entries.length === 0)
-        fail(
-          'ADMIN_SESSION_KEYS_JSON',
-          'Required in production: positive key versions mapped to base64 32-byte AES-256 secrets',
-        );
-      else if (Object.values(ring as Record<string, string>).some((value) => value.length < 32))
-        fail(
-          'ADMIN_SESSION_KEYS_JSON',
-          'Production session secrets must be at least 32 characters',
-        );
-      else if (!Object.hasOwn(ring as object, String(env.ADMIN_SESSION_KEY_VERSION)))
-        fail('ADMIN_SESSION_KEY_VERSION', 'Current version must exist in the session key ring');
-    } else if (entries !== null && entries.length > 0) {
-      if (!wellFormed)
-        fail(
-          'ADMIN_SESSION_KEYS_JSON',
-          'Expected positive key versions mapped to base64 32-byte AES-256 secrets',
-        );
-      else if (!Object.hasOwn(ring as object, String(env.ADMIN_SESSION_KEY_VERSION)))
-        fail('ADMIN_SESSION_KEY_VERSION', 'Current version must exist in the session key ring');
-    }
-  } catch {
-    fail('ADMIN_SESSION_KEYS_JSON', 'Invalid session key ring');
+  // Both portals share one key-ring/window contract with their own env keys.
+  for (const portal of ['ADMIN', 'STORE'] as const) {
+    validateSessionKeyRing(
+      env,
+      fail,
+      `${portal}_SESSION_KEYS_JSON`,
+      `${portal}_SESSION_KEY_VERSION`,
+    );
+    validateSessionWindows(
+      env,
+      fail,
+      `${portal}_SESSION_IDLE_SECONDS`,
+      `${portal}_SESSION_ABSOLUTE_SECONDS`,
+    );
   }
-  if (env.ADMIN_SESSION_IDLE_SECONDS > env.ADMIN_SESSION_ABSOLUTE_SECONDS)
-    fail('ADMIN_SESSION_IDLE_SECONDS', 'Idle window must not exceed the absolute session window');
   if (env.PAYMENTS_PROVIDER === 'razorpay')
     need(['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET']);
   if (env.MAPS_PROVIDER === 'ola') need(['OLA_MAPS_API_KEY', 'OLA_MAPS_BASE_URL']);
@@ -429,6 +405,63 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
 
 export type Env = z.infer<typeof envSchema>;
 /** Parse the declared application keys while ignoring unrelated OS environment keys. */
+/** Key-ring contract shared by the admin and store portal session configs. */
+function validateSessionKeyRing(
+  env: Env,
+  fail: (key: keyof Env, message: string) => void,
+  keysJsonKey: keyof Env,
+  keyVersionKey: keyof Env,
+): void {
+  try {
+    const ring: unknown = JSON.parse(env[keysJsonKey] as string);
+    const entries =
+      ring !== null && typeof ring === 'object' && !Array.isArray(ring)
+        ? Object.entries(ring as Record<string, unknown>)
+        : null;
+    const wellFormed =
+      entries !== null &&
+      entries.every(([k, v]) => {
+        if (!/^[1-9]\d*$/.test(k) || typeof v !== 'string') return false;
+        try {
+          return Buffer.from(v, 'base64').length === 32;
+        } catch {
+          return false;
+        }
+      });
+    if (env.NODE_ENV === 'production') {
+      if (entries === null || !wellFormed || entries.length === 0)
+        fail(
+          keysJsonKey,
+          'Required in production: positive key versions mapped to base64 32-byte AES-256 secrets',
+        );
+      else if (Object.values(ring as Record<string, string>).some((value) => value.length < 32))
+        fail(keysJsonKey, 'Production session secrets must be at least 32 characters');
+      else if (!Object.hasOwn(ring as object, String(env[keyVersionKey])))
+        fail(keyVersionKey, 'Current version must exist in the session key ring');
+    } else if (entries !== null && entries.length > 0) {
+      if (!wellFormed)
+        fail(
+          keysJsonKey,
+          'Expected positive key versions mapped to base64 32-byte AES-256 secrets',
+        );
+      else if (!Object.hasOwn(ring as object, String(env[keyVersionKey])))
+        fail(keyVersionKey, 'Current version must exist in the session key ring');
+    }
+  } catch {
+    fail(keysJsonKey, 'Invalid session key ring');
+  }
+}
+
+function validateSessionWindows(
+  env: Env,
+  fail: (key: keyof Env, message: string) => void,
+  idleKey: keyof Env,
+  absoluteKey: keyof Env,
+): void {
+  if ((env[idleKey] as number) > (env[absoluteKey] as number))
+    fail(idleKey, 'Idle window must not exceed the absolute session window');
+}
+
 export function readEnv(source: NodeJS.ProcessEnv): Env {
   const keys = Object.keys(envBaseSchema.shape);
   const input = Object.fromEntries(

@@ -66,6 +66,8 @@ export interface NotificationViews {
   inbox(userId: string, cursor?: string, limit?: number): Promise<NotificationPage>;
   /** Another user's id is 404 RESOURCE_NOT_FOUND, never 403. */
   markRead(userId: string, notificationId: string): Promise<void>;
+  /** Clears read_at; already-unread rows are a no-op, another user's id is 404. */
+  markUnread(userId: string, notificationId: string): Promise<void>;
   markAllRead(userId: string): Promise<number>;
   unreadCount(userId: string): Promise<number>;
 }

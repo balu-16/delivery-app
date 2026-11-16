@@ -8,6 +8,7 @@ import {
 import { sql } from 'kysely';
 import type { Redis } from 'ioredis';
 import { ConfigService } from '../../../config/config.service.js';
+import type { Env } from '../../../config/env.schema.js';
 import type { Database } from '../../../platform/database/database.js';
 import {
   AdminAuthProviderError,
@@ -23,7 +24,13 @@ import {
   type AuthTokens,
 } from '../contracts/admin-auth.js';
 import { IDENTITY_AUTHORIZER, TOKEN_VERIFIER } from '../contracts/identity.js';
-import type { IdentityAuthorizer, TokenVerifier, VerifiedIdentity } from '../contracts/identity.js';
+import type {
+  Audience,
+  IdentityAuthorizer,
+  Role,
+  TokenVerifier,
+  VerifiedIdentity,
+} from '../contracts/identity.js';
 import { Inject, Injectable } from '@nestjs/common';
 import { ADMIN_PORTAL_AUTH_PROVIDER, ADMIN_SESSIONS } from '../contracts/admin-auth.js';
 import type {
@@ -37,6 +44,45 @@ const CLEANUP_BATCH = 100;
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 const VERSION_PREFIX_LENGTH = 1;
+
+/**
+ * Names every storage/env touchpoint that differs between the admin and store
+ * portals. Session rows share one schema; only the table, key ring, challenge
+ * namespace and surfaced error codes are per-portal, keeping the records (and
+ * their revocation) fully independent as required by the portal split.
+ */
+export interface PortalSessionNaming {
+  readonly table: string;
+  readonly challengePrefix: string;
+  readonly keysJsonKey: keyof Env;
+  readonly keyVersionKey: keyof Env;
+  readonly idleSecondsKey: keyof Env;
+  readonly absoluteSecondsKey: keyof Env;
+  readonly keyMissingCode: string;
+  readonly keysInvalidCode: string;
+}
+
+export const ADMIN_SESSION_NAMING: PortalSessionNaming = {
+  table: 'admin_sessions',
+  challengePrefix: 'admin:auth:challenge:',
+  keysJsonKey: 'ADMIN_SESSION_KEYS_JSON',
+  keyVersionKey: 'ADMIN_SESSION_KEY_VERSION',
+  idleSecondsKey: 'ADMIN_SESSION_IDLE_SECONDS',
+  absoluteSecondsKey: 'ADMIN_SESSION_ABSOLUTE_SECONDS',
+  keyMissingCode: 'ADMIN_SESSION_KEY_MISSING',
+  keysInvalidCode: 'ADMIN_SESSION_KEYS_INVALID',
+};
+
+export const STORE_SESSION_NAMING: PortalSessionNaming = {
+  table: 'store_sessions',
+  challengePrefix: 'store:auth:challenge:',
+  keysJsonKey: 'STORE_SESSION_KEYS_JSON',
+  keyVersionKey: 'STORE_SESSION_KEY_VERSION',
+  idleSecondsKey: 'STORE_SESSION_IDLE_SECONDS',
+  absoluteSecondsKey: 'STORE_SESSION_ABSOLUTE_SECONDS',
+  keyMissingCode: 'STORE_SESSION_KEY_MISSING',
+  keysInvalidCode: 'STORE_SESSION_KEYS_INVALID',
+};
 
 /** Wire format: keyVersion byte || 12-byte IV || 16-byte GCM tag || ciphertext. */
 export interface SealedTokens {
@@ -142,11 +188,20 @@ export class AdminSessionStore implements AdminSessions {
     private readonly db: Database,
     private readonly redis: Pick<Redis, 'set' | 'getdel'>,
     config: ConfigService,
+    /** Defaults reproduce the admin portal; the store portal passes its own naming. */
+    private readonly naming: PortalSessionNaming = ADMIN_SESSION_NAMING,
   ) {
-    this.keys = parseKeyRing(config.get('ADMIN_SESSION_KEYS_JSON'));
-    this.activeVersion = config.get('ADMIN_SESSION_KEY_VERSION');
-    this.idleSeconds = config.get('ADMIN_SESSION_IDLE_SECONDS');
-    this.absoluteSeconds = config.get('ADMIN_SESSION_ABSOLUTE_SECONDS');
+    // The naming keys are server-controlled constants, so the value-type unions
+    // are narrowed here once instead of threading generics through get().
+    this.keys = parseKeyRing(config.get(naming.keysJsonKey) as string, naming.keysInvalidCode);
+    this.activeVersion = config.get(naming.keyVersionKey) as number;
+    this.idleSeconds = config.get(naming.idleSecondsKey) as number;
+    this.absoluteSeconds = config.get(naming.absoluteSecondsKey) as number;
+  }
+
+  /** Table fragment is a server-controlled constant, never user input. */
+  private get rows() {
+    return sql.raw(this.naming.table);
   }
 
   async create(
@@ -163,7 +218,7 @@ export class AdminSessionStore implements AdminSessions {
       300,
       2592000,
     );
-    await sql`INSERT INTO admin_sessions
+    await sql`INSERT INTO ${this.rows}
       (id,user_id,provider,tokens,csrf_token_hash,idle_expires_at,absolute_expires_at)
       VALUES (${sessionHash(sessionId)},${userId}::uuid,${provider},${this.seal(tokens, csrfToken)},
         ${csrfTokenHash(csrfToken)},
@@ -181,7 +236,7 @@ export class AdminSessionStore implements AdminSessions {
     await this.cleanupDeleted();
     const result = await sql<SessionRow>`SELECT id,user_id::text AS user_id,provider,tokens,
       csrf_token_hash,idle_expires_at,absolute_expires_at,last_seen_at,revoked_at,rotated_from
-      FROM admin_sessions WHERE id=${hash}`.execute(this.db);
+      FROM ${this.rows} WHERE id=${hash}`.execute(this.db);
     const row = result.rows[0];
     if (!row || row.revoked_at) throw new Error('SESSION_EXPIRED');
     const now = Date.now();
@@ -204,7 +259,7 @@ export class AdminSessionStore implements AdminSessions {
   }
 
   async touch(rawSessionId: string): Promise<void> {
-    await sql`UPDATE admin_sessions
+    await sql`UPDATE ${this.rows}
       SET last_seen_at=clock_timestamp(),
           idle_expires_at=least(absolute_expires_at, clock_timestamp() + (${this.idleSeconds} * interval '1 second'))
       WHERE id=${sessionHash(rawSessionId)} AND revoked_at IS NULL`.execute(this.db);
@@ -217,7 +272,7 @@ export class AdminSessionStore implements AdminSessions {
     const parentHash = sessionHash(rawSessionId);
     // Atomic claim: the first caller revokes the parent; concurrent callers
     // (or another instance) observe revoked_at IS NOT NULL and stop.
-    const claimed = await sql<SessionRow & { claimed_revoked_at: Date }>`UPDATE admin_sessions
+    const claimed = await sql<SessionRow & { claimed_revoked_at: Date }>`UPDATE ${this.rows}
       SET revoked_at=clock_timestamp(), rotated_from=id
       WHERE id=${parentHash} AND revoked_at IS NULL
         AND idle_expires_at > clock_timestamp() AND absolute_expires_at > clock_timestamp()
@@ -237,7 +292,7 @@ export class AdminSessionStore implements AdminSessions {
         error instanceof AdminAuthProviderError && error.kind === 'provider_unavailable';
       if (!retryable) throw new Error('SESSION_EXPIRED', { cause: error });
       // Roll the claim back so the client can retry the refresh unchanged.
-      await sql`UPDATE admin_sessions SET revoked_at=NULL, rotated_from=NULL
+      await sql`UPDATE ${this.rows} SET revoked_at=NULL, rotated_from=NULL
         WHERE id=${parentHash} AND revoked_at=${parent.claimed_revoked_at.toISOString()}::timestamptz
           AND rotated_from=${parentHash}`.execute(this.db);
       throw new AdminAuthProviderError('provider_unavailable', error);
@@ -246,7 +301,7 @@ export class AdminSessionStore implements AdminSessions {
     assertTokenValue(fresh.refreshToken, 'REFRESH_TOKEN');
     const sessionId = randomBytes(32).toString('base64url');
     const csrfToken = randomBytes(32).toString('base64url');
-    await sql`INSERT INTO admin_sessions
+    await sql`INSERT INTO ${this.rows}
       (id,user_id,provider,tokens,csrf_token_hash,idle_expires_at,absolute_expires_at,rotated_from)
       VALUES (${sessionHash(sessionId)},${parent.user_id}::uuid,${parent.provider},
         ${this.seal(fresh, csrfToken)},
@@ -265,12 +320,12 @@ export class AdminSessionStore implements AdminSessions {
   }
 
   async revoke(rawSessionId: string): Promise<void> {
-    await sql`UPDATE admin_sessions SET revoked_at=clock_timestamp()
+    await sql`UPDATE ${this.rows} SET revoked_at=clock_timestamp()
       WHERE id=${sessionHash(rawSessionId)} AND revoked_at IS NULL`.execute(this.db);
   }
 
   async revokeAllForUser(userId: string): Promise<void> {
-    await sql`UPDATE admin_sessions SET revoked_at=clock_timestamp()
+    await sql`UPDATE ${this.rows} SET revoked_at=clock_timestamp()
       WHERE user_id=${userId}::uuid AND revoked_at IS NULL`.execute(this.db);
   }
 
@@ -278,7 +333,7 @@ export class AdminSessionStore implements AdminSessions {
     if (typeof presented !== 'string' || presented.length === 0 || presented.length > 200)
       return false;
     const result = await sql<{ csrf_token_hash: string }>`SELECT csrf_token_hash
-      FROM admin_sessions WHERE id=${sessionHash(rawSessionId)} AND revoked_at IS NULL`.execute(
+      FROM ${this.rows} WHERE id=${sessionHash(rawSessionId)} AND revoked_at IS NULL`.execute(
       this.db,
     );
     const stored = result.rows[0]?.csrf_token_hash;
@@ -289,7 +344,7 @@ export class AdminSessionStore implements AdminSessions {
   async putChallenge(challengeId: string, value: AdminChallengeState): Promise<void> {
     if (!/^[a-f0-9]{32}$/.test(challengeId)) throw new Error('CHALLENGE_ID_INVALID');
     await this.redis.set(
-      `admin:auth:challenge:${challengeId}`,
+      `${this.naming.challengePrefix}${challengeId}`,
       JSON.stringify(value),
       'EX',
       CHALLENGE_TTL_SECONDS,
@@ -298,7 +353,7 @@ export class AdminSessionStore implements AdminSessions {
 
   async takeChallenge(challengeId: string): Promise<AdminChallengeState | null> {
     if (!/^[a-f0-9]{32}$/.test(challengeId)) return null;
-    const raw = await this.redis.getdel(`admin:auth:challenge:${challengeId}`);
+    const raw = await this.redis.getdel(`${this.naming.challengePrefix}${challengeId}`);
     if (!raw) return null;
     try {
       const parsed: unknown = JSON.parse(raw);
@@ -318,14 +373,14 @@ export class AdminSessionStore implements AdminSessions {
 
   /** Opportunistic bounded delete; no scheduler is required for this table. */
   private async cleanupDeleted(): Promise<void> {
-    await sql`DELETE FROM admin_sessions WHERE id IN (
-      SELECT id FROM admin_sessions WHERE absolute_expires_at < clock_timestamp()
+    await sql`DELETE FROM ${this.rows} WHERE id IN (
+      SELECT id FROM ${this.rows} WHERE absolute_expires_at < clock_timestamp()
       ORDER BY absolute_expires_at LIMIT ${CLEANUP_BATCH})`.execute(this.db);
   }
 
   private seal(tokens: AuthTokens, csrfToken: string): Buffer {
     const key = this.keys.get(String(this.activeVersion));
-    if (!key) throw new Error('ADMIN_SESSION_KEY_MISSING');
+    if (!key) throw new Error(this.naming.keyMissingCode);
     return sealSessionTokens(
       {
         accessToken: assertTokenValue(tokens.accessToken, 'ACCESS_TOKEN'),
@@ -349,32 +404,32 @@ function clampWindow(value: number, min: number, max: number): number {
   return value;
 }
 
-function parseKeyRing(raw: string): Map<string, Buffer> {
+function parseKeyRing(raw: string, invalidCode: string): Map<string, Buffer> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error('ADMIN_SESSION_KEYS_INVALID');
+    throw new Error(invalidCode);
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
-    throw new Error('ADMIN_SESSION_KEYS_INVALID');
+    throw new Error(invalidCode);
   const ring = new Map<string, Buffer>();
   for (const [version, secret] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!/^[1-9]\d*$/.test(version) || typeof secret !== 'string')
-      throw new Error('ADMIN_SESSION_KEYS_INVALID');
+    if (!/^[1-9]\d*$/.test(version) || typeof secret !== 'string') throw new Error(invalidCode);
     const key = Buffer.from(secret, 'base64');
-    if (key.length !== 32) throw new Error('ADMIN_SESSION_KEYS_INVALID');
+    if (key.length !== 32) throw new Error(invalidCode);
     ring.set(version, key);
   }
   return ring;
 }
 
 /**
- * Shared cookie-authentication pipeline for IdentityGuard and
- * GET /v1/admin/auth/session: resolve the session, verify the provider access
+ * Shared cookie-authentication pipeline for IdentityGuard and the portal
+ * session bootstrap endpoints: resolve the session, verify the provider access
  * token (rotating through the encrypted refresh token on expiry), authorize
- * against the admin audience, enforce SUPER_ADMIN for every cookie-based
- * request and slide the idle window.
+ * against the portal audience, enforce the portal's single role for every
+ * cookie-based request and slide the idle window. Defaults reproduce the
+ * admin portal; the store portal passes audience 'store' + STORE_MANAGER.
  */
 @Injectable()
 export class AdminSessionAuthenticator {
@@ -383,6 +438,8 @@ export class AdminSessionAuthenticator {
     @Inject(ADMIN_SESSIONS) private readonly sessions: AdminSessionsPort,
     @Inject(TOKEN_VERIFIER) private readonly verifier: TokenVerifier,
     @Inject(IDENTITY_AUTHORIZER) private readonly identities: IdentityAuthorizer,
+    private readonly audience: Audience = 'admin',
+    private readonly requiredRole: Role = 'SUPER_ADMIN',
   ) {}
 
   async authenticate(rawSessionId: string) {
@@ -394,7 +451,7 @@ export class AdminSessionAuthenticator {
     let identity: VerifiedIdentity;
     let rotation: AdminSessionRotation | null = null;
     try {
-      identity = await this.verifier.verify(session.tokens.accessToken, 'admin', 'access');
+      identity = await this.verifier.verify(session.tokens.accessToken, this.audience, 'access');
     } catch {
       try {
         rotation = await this.sessions.rotate(rawSessionId, (refreshToken) =>
@@ -408,11 +465,11 @@ export class AdminSessionAuthenticator {
         if (error instanceof Error && error.message === 'SESSION_REPLACED') throw error;
         throw new Error('SESSION_EXPIRED', { cause: error });
       }
-      identity = await this.verifier.verify(rotation.tokens.accessToken, 'admin', 'access');
+      identity = await this.verifier.verify(rotation.tokens.accessToken, this.audience, 'access');
     }
     let principal;
     try {
-      principal = await this.identities.authorize(identity, 'admin');
+      principal = await this.identities.authorize(identity, this.audience);
     } catch (error: unknown) {
       const code =
         error instanceof Error &&
@@ -421,7 +478,7 @@ export class AdminSessionAuthenticator {
           : 'FORBIDDEN';
       throw new AdminSessionForbidden(code);
     }
-    if (!principal.roles.includes('SUPER_ADMIN')) throw new AdminSessionForbidden('FORBIDDEN');
+    if (!principal.roles.includes(this.requiredRole)) throw new AdminSessionForbidden('FORBIDDEN');
     // Rotation replaced the cookie id; touch the surviving session only.
     await this.sessions.touch(rotation ? rotation.session.sessionId : rawSessionId);
     return {

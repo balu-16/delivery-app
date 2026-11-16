@@ -24,11 +24,18 @@ import { ResilientIdentityAdmin } from '../../adapters/auth/resilient.js';
 import { LocalIdentityAdmin } from '../../adapters/auth/local-admin.js';
 import { LocalTokenAdapter } from '../../adapters/auth/local.js';
 import { LocalAdminAuthProvider } from '../../adapters/auth/local-admin-auth.js';
-import { AdminSessionAuthenticator, AdminSessionStore } from './infrastructure/admin-sessions.js';
+import {
+  AdminSessionAuthenticator,
+  AdminSessionStore,
+  STORE_SESSION_NAMING,
+} from './infrastructure/admin-sessions.js';
 import {
   ADMIN_PORTAL_AUTH_PROVIDER,
   ADMIN_SESSION_AUTHENTICATOR,
   ADMIN_SESSIONS,
+  STORE_PORTAL_AUTH_PROVIDER,
+  STORE_SESSION_AUTHENTICATOR,
+  STORE_SESSIONS,
   type AdminPortalAuthProvider,
   type AdminSessions as AdminSessionsPort,
 } from './contracts/admin-auth.js';
@@ -233,6 +240,58 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
         authorizer: IdentityAuthorizer,
       ) => new AdminSessionAuthenticator(provider, sessions, verifier, authorizer),
     },
+    {
+      provide: STORE_PORTAL_AUTH_PROVIDER,
+      inject: [PLATFORM_DATABASE, RuntimeConfig],
+      useFactory: (handle: DatabaseHandle, config: RuntimeConfig): AdminPortalAuthProvider =>
+        config.get('AUTH_PROVIDER') === 'local'
+          ? new LocalAdminAuthProvider(
+              handle.db,
+              config.get('LOCAL_JWT_SECRET'),
+              (pool, sub, audience, tokenUse, lifetimeSeconds) =>
+                new LocalTokenAdapter(config.get('LOCAL_JWT_SECRET'), handle.db).issue(
+                  pool,
+                  sub,
+                  audience,
+                  tokenUse,
+                  lifetimeSeconds,
+                ),
+              { audience: 'store', issuer: 'local:store-portal' },
+            )
+          : new CognitoAdminAuth(
+              new CognitoIdentityProviderClient({
+                region: config.get('AWS_REGION'),
+                maxAttempts: 1,
+              }),
+              config.get('COGNITO_WORKFORCE_POOL_ID'),
+              config.get('COGNITO_STORE_CLIENT_ID'),
+              config.get('COGNITO_TIMEOUT_MS'),
+            ),
+    },
+    {
+      provide: STORE_SESSIONS,
+      inject: [PLATFORM_DATABASE, PLATFORM_REDIS, RuntimeConfig],
+      useFactory: (handle: DatabaseHandle, redis: Redis, config: RuntimeConfig) =>
+        new AdminSessionStore(handle.db, redis, config, STORE_SESSION_NAMING),
+    },
+    {
+      provide: STORE_SESSION_AUTHENTICATOR,
+      inject: [STORE_PORTAL_AUTH_PROVIDER, STORE_SESSIONS, TOKEN_VERIFIER, IDENTITY_AUTHORIZER],
+      useFactory: (
+        provider: AdminPortalAuthProvider,
+        sessions: AdminSessionsPort,
+        verifier: TokenVerifier,
+        authorizer: IdentityAuthorizer,
+      ) =>
+        new AdminSessionAuthenticator(
+          provider,
+          sessions,
+          verifier,
+          authorizer,
+          'store',
+          'STORE_MANAGER',
+        ),
+    },
     IdentityGuard,
   ],
   exports: [
@@ -254,6 +313,9 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
     ADMIN_PORTAL_AUTH_PROVIDER,
     ADMIN_SESSIONS,
     ADMIN_SESSION_AUTHENTICATOR,
+    STORE_PORTAL_AUTH_PROVIDER,
+    STORE_SESSIONS,
+    STORE_SESSION_AUTHENTICATOR,
   ],
 })
 export class IdentityModule {}
@@ -264,6 +326,7 @@ import { PrivateMediaController } from '../../surfaces/rider/identity/private-me
 import { RiderIdentityController } from '../../surfaces/rider/identity/rider.controller.js';
 import { StoreIdentityController } from '../../surfaces/store/identity/store.controller.js';
 import { StoreRiderApplicationsController } from '../../surfaces/store/identity/rider-applications.controller.js';
+import { StoreAuthController } from '../../surfaces/store/auth/auth.controller.js';
 import { AdminIdentityController } from '../../surfaces/admin/identity/admin.controller.js';
 @Module({ imports: [IdentityModule], controllers: [CustomerIdentityController, DevAuthController] })
 export class CustomerIdentitySurfaceModule {}
@@ -276,7 +339,7 @@ export class PrivateMediaSurfaceModule {}
 export class RiderIdentitySurfaceModule {}
 @Module({
   imports: [IdentityModule, PrivateMediaSurfaceModule],
-  controllers: [StoreIdentityController, StoreRiderApplicationsController],
+  controllers: [StoreIdentityController, StoreRiderApplicationsController, StoreAuthController],
 })
 export class StoreIdentitySurfaceModule {}
 @Module({

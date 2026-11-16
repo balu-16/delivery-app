@@ -1,0 +1,6 @@
+export const wfAp2Id = 'wf-ap2'
+export const wfAp3Id = 'wf-ap3'
+export const wfAp4Id = 'wf-ap4'
+export const wfAp5Id = 'wf-ap5'
+export const wfAp6Id = 'wf-ap6'
+export const wfChnId = 'wf-chn'

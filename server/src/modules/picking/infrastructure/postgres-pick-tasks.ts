@@ -306,6 +306,51 @@ export class PostgresPickTasks implements PickTasks {
     });
   }
 
+  /** Single task with items and FEFO suggestions, authorized for the task's store. */
+  async get(actorId: string, taskId: string): Promise<PickTaskView> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskId))
+      throw new Error('RESOURCE_NOT_FOUND');
+    return this.run(undefined, async (tx) => {
+      const task = await loadTask(tx, taskId, false);
+      if (!task) throw new Error('RESOURCE_NOT_FOUND');
+      await assertStoreRole(this.identity, actorId, task.store_id, ['STORE_MANAGER'], tx);
+      return this.view(tx, task);
+    });
+  }
+
+  /**
+   * Manager release: returns a claimed-but-not-started task to the unclaimed
+   * queue. Started tasks keep their ownership discipline — managers use
+   * reassignment there so pick progress and the order's PICKING state stay
+   * consistent.
+   */
+  async release(actorId: string, taskId: string, reference: string): Promise<PickTaskView> {
+    assertOperationReference(reference);
+    return this.run(undefined, async (tx) => {
+      const task = await this.lockTask(tx, taskId);
+      await assertStoreRole(this.identity, actorId, task.store_id, ['STORE_MANAGER'], tx);
+      if (task.status !== 'ASSIGNED') throw new Error('PICK_TASK_STATE_INVALID');
+      if (!(await operation(tx, `release:${taskId}:${reference}`, 'RELEASE', { taskId })))
+        return this.view(tx, task);
+      await sql`UPDATE pick_tasks SET last_activity_at=clock_timestamp(),status='PENDING',assigned_to=NULL,version=version+1 WHERE id=${taskId}::uuid`.execute(
+        tx,
+      );
+      await taskHistory(tx, taskId, task.status, 'PENDING', actorId);
+      await taskEvent(
+        tx,
+        taskId,
+        task.order_id,
+        'picking.task_changed',
+        {
+          previous: task.status,
+          status: 'PENDING',
+        },
+        ['dispatch-trigger', 'notifications'],
+      );
+      return this.view(tx, await loadTask(tx, taskId, false));
+    });
+  }
+
   pickItem(...args: Parameters<PostgresPickActions['pickItem']>) {
     return this.actions.pickItem(...args);
   }

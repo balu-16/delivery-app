@@ -112,13 +112,37 @@ export async function itemEvent(
 export type TaskRow = {
   id: string;
   order_id: string;
+  order_number: string | null;
+  order_status: string;
+  customer_name: string;
   store_id: string;
   status: PickTaskStatus;
   assigned_to: string | null;
+  assigned_to_name: string | null;
   started_at: Date | null;
   sla_due_at: Date;
   completed_at: Date | null;
   version: string;
+  packing_bags: number | null;
+  packing_seal_code: string | null;
+  packing_cold_chain: boolean | null;
+  packing_packed_at: Date | null;
+  packing_packed_by_name: string | null;
+  handover_state: 'PENDING' | 'VERIFIED' | 'OVERRIDE' | null;
+  handover_rider_id: string | null;
+  handover_rider_name: string | null;
+  handover_attempts: number | null;
+  handover_locked_until: Date | null;
+  handover_verified_at: Date | null;
+  delivery_status: string | null;
+};
+
+export type SubstitutionCandidateRow = {
+  variantId: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  available: string;
 };
 
 export type ItemRow = {
@@ -128,24 +152,56 @@ export type ItemRow = {
   variant_id: string;
   substitute_variant_id: string | null;
   name_snapshot: string;
+  sku: string;
+  barcode: string | null;
   expected_qty: string;
   picked_qty: string;
   batch_id: string | null;
+  batch_code: string | null;
+  batch_expires_at: Date | null;
   status: PickItemStatus;
   short_reason: string | null;
+  substitution_candidates: SubstitutionCandidateRow[];
 };
 
 export function mapTask(row: TaskRow, items: ItemRow[]): PickTaskView {
   return {
     id: row.id,
     orderId: row.order_id,
+    orderNumber: row.order_number,
+    orderStatus: row.order_status,
+    customerName: row.customer_name,
     storeId: row.store_id,
     status: row.status,
     assignedTo: row.assigned_to,
+    assignedToName: row.assigned_to_name,
     startedAt: row.started_at?.toISOString() ?? null,
     slaDueAt: row.sla_due_at.toISOString(),
     completedAt: row.completed_at?.toISOString() ?? null,
     version: row.version,
+    packing:
+      row.packing_bags === null || row.packing_packed_at === null
+        ? null
+        : {
+            bags: row.packing_bags,
+            sealCode: row.packing_seal_code ?? '',
+            coldChain: row.packing_cold_chain ?? false,
+            packedAt: row.packing_packed_at.toISOString(),
+            packedBy: row.packing_packed_by_name,
+          },
+    handover:
+      row.handover_state === null
+        ? null
+        : {
+            state: row.handover_state,
+            riderId: row.handover_rider_id,
+            riderName: row.handover_rider_name,
+            attempts: row.handover_attempts ?? 0,
+            locked: Boolean(row.handover_locked_until && row.handover_locked_until > new Date()),
+            verifiedAt: row.handover_verified_at?.toISOString() ?? null,
+            deliveryStatus: row.delivery_status,
+          },
+    deliveryStatus: row.delivery_status,
     // Items arrive in walk order (bin location, then id) from the loader.
     items: items.filter((item) => item.task_id === row.id).map(mapItem),
   };
@@ -158,12 +214,17 @@ export function mapItem(item: ItemRow): PickItemView {
     variantId: item.variant_id,
     substituteVariantId: item.substitute_variant_id,
     name: item.name_snapshot,
+    sku: item.sku,
+    barcode: item.barcode,
     expectedQty: item.expected_qty,
     pickedQty: item.picked_qty,
     batchId: item.batch_id,
+    batchCode: item.batch_code,
+    batchExpiresAt: item.batch_expires_at?.toISOString() ?? null,
     status: item.status,
     shortReason: (item.short_reason as PickItemView['shortReason']) ?? null,
     fefoSuggestions: [],
+    substitutionCandidates: item.substitution_candidates,
   };
 }
 
@@ -172,10 +233,26 @@ export async function loadTask(
   taskId: string,
   lock: boolean,
 ): Promise<TaskRow | null> {
-  const rows =
-    await sql<TaskRow>`SELECT id,order_id,store_id,status,assigned_to,started_at,sla_due_at,completed_at,version::text FROM pick_tasks WHERE id=${taskId}::uuid ${lock ? sql`FOR UPDATE` : sql``}`.execute(
-      tx,
-    );
+  const rows = await sql<TaskRow>`SELECT t.id,t.order_id,o.order_number,o.status AS order_status,
+      COALESCE(cu.name,'') AS customer_name,t.store_id,t.status,t.assigned_to,au.name AS assigned_to_name,
+      t.started_at,t.sla_due_at,t.completed_at,t.version::text,
+      p.bags AS packing_bags,p.seal_code AS packing_seal_code,p.cold_chain AS packing_cold_chain,
+      p.packed_at AS packing_packed_at,pu.name AS packing_packed_by_name,
+      h.state AS handover_state,h.rider_id AS handover_rider_id,ru.name AS handover_rider_name,
+      h.attempts AS handover_attempts,h.locked_until AS handover_locked_until,h.verified_at AS handover_verified_at,
+      d.status AS delivery_status
+    FROM pick_tasks t
+    JOIN orders o ON o.id=t.order_id
+    LEFT JOIN users cu ON cu.id=o.user_id
+    LEFT JOIN users au ON au.id=t.assigned_to
+    LEFT JOIN packing_records p ON p.order_id=t.order_id
+    LEFT JOIN users pu ON pu.id=p.packed_by
+    LEFT JOIN handover_records h ON h.order_id=t.order_id
+    LEFT JOIN users ru ON ru.id=h.rider_id
+    LEFT JOIN LATERAL (
+      SELECT dt.status FROM delivery_tasks dt WHERE dt.order_id=t.order_id ORDER BY dt.created_at DESC LIMIT 1
+    ) d ON true
+    WHERE t.id=${taskId}::uuid ${lock ? sql`FOR UPDATE OF t` : sql``}`.execute(tx);
   return rows.rows[0] ?? null;
 }
 
@@ -187,14 +264,46 @@ export async function loadItems(
   if (!taskIds.length) return [];
   // Walk order: item id (store_inventory has no bin_location column yet; add
   // it with the catalog schema before enabling aisle-order picking).
-  const rows =
-    await sql<ItemRow>`SELECT i.id,i.task_id,i.order_item_id,i.variant_id,i.substitute_variant_id,i.name_snapshot,i.expected_qty::text AS "expected_qty",i.picked_qty::text AS "picked_qty",i.batch_id,i.status,i.short_reason
-      FROM pick_items i JOIN pick_tasks t ON t.id=i.task_id
+  const rows = await sql<
+    Omit<ItemRow, 'substitution_candidates'>
+  >`SELECT i.id,i.task_id,i.order_item_id,i.variant_id,i.substitute_variant_id,i.name_snapshot,
+        v.sku,v.barcode,i.expected_qty::text AS "expected_qty",i.picked_qty::text AS "picked_qty",i.batch_id,
+        b.batch_code,b.expires_at AS batch_expires_at,i.status,i.short_reason
+      FROM pick_items i
+      JOIN pick_tasks t ON t.id=i.task_id
+      JOIN catalog_variants v ON v.id=COALESCE(i.substitute_variant_id,i.variant_id)
+      LEFT JOIN inventory_batches b ON b.id=i.batch_id
       LEFT JOIN store_inventory s ON s.store_id=t.store_id AND s.variant_id=COALESCE(i.substitute_variant_id,i.variant_id)
       WHERE i.task_id=ANY(${taskIds.slice()}::uuid[]) ORDER BY i.task_id,s.bin_location ASC NULLS LAST,i.id ${lock ? sql`FOR UPDATE OF i` : sql``}`.execute(
-      tx,
-    );
-  return rows.rows;
+    tx,
+  );
+  const items: ItemRow[] = rows.rows.map((row) => ({ ...row, substitution_candidates: [] }));
+  const candidates = await sql<
+    SubstitutionCandidateRow & { item_id: string }
+  >`SELECT i.id AS item_id,
+      c.candidate_variant_id AS "variantId",v.name,v.sku,v.barcode,
+      COALESCE(si.on_hand-si.reserved,0)::text AS available
+    FROM pick_items i
+    JOIN pick_tasks t ON t.id=i.task_id
+    JOIN substitute_candidates c ON c.variant_id=i.variant_id
+    JOIN catalog_variants v ON v.id=c.candidate_variant_id AND v.deleted_at IS NULL
+    LEFT JOIN store_inventory si ON si.store_id=t.store_id AND si.variant_id=c.candidate_variant_id
+    WHERE i.task_id=ANY(${taskIds.slice()}::uuid[]) AND i.status='PENDING'
+    ORDER BY v.name,c.candidate_variant_id`.execute(tx);
+  const byItem = new Map<string, SubstitutionCandidateRow[]>();
+  for (const candidate of candidates.rows) {
+    const list = byItem.get(candidate.item_id) ?? [];
+    list.push({
+      variantId: candidate.variantId,
+      name: candidate.name,
+      sku: candidate.sku,
+      barcode: candidate.barcode,
+      available: candidate.available,
+    });
+    byItem.set(candidate.item_id, list);
+  }
+  for (const item of items) item.substitution_candidates = byItem.get(item.id) ?? [];
+  return items;
 }
 
 /** Opaque keyset cursor over (sla_due_at, id). */

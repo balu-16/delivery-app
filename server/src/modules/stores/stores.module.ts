@@ -5,7 +5,9 @@ import type { DatabaseHandle } from '../../platform/database/database.js';
 import { IdentityModule } from '../identity/identity.module.js';
 import { IDENTITY_ACCESS, type IdentityAccess } from '../identity/contracts/identity.js';
 import { PostgresStoreManagement } from './infrastructure/store-status.js';
+import { PostgresStorePortalReads } from './infrastructure/store-portal-reads.js';
 import { STORE_MANAGEMENT, ZONES } from './contracts/tokens.js';
+import { STORE_PORTAL_STORE_READS } from './contracts/management.js';
 import { STORE_AVAILABILITY, STORE_SIGNALS } from './contracts/signals.js';
 import { PostgresStoreAvailability } from './infrastructure/postgres-availability.js';
 import { PostgresZones } from './infrastructure/postgres-zones.js';
@@ -30,6 +32,12 @@ import { PostgresStoreAdministration } from './infrastructure/store-administrati
         new PostgresStoreAdministration(db.db, identity),
     },
     {
+      provide: STORE_PORTAL_STORE_READS,
+      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS],
+      useFactory: (db: DatabaseHandle, identity: IdentityAccess) =>
+        new PostgresStorePortalReads(db.db, identity),
+    },
+    {
       provide: ZONES,
       inject: [PLATFORM_DATABASE, IDENTITY_ACCESS],
       useFactory: (db: DatabaseHandle, identity: IdentityAccess) =>
@@ -51,6 +59,13 @@ import { PostgresStoreAdministration } from './infrastructure/store-administrati
         })),
     },
   ],
-  exports: [ZONES, STORE_MANAGEMENT, STORE_ADMINISTRATION, STORE_AVAILABILITY, STORE_SIGNALS],
+  exports: [
+    ZONES,
+    STORE_MANAGEMENT,
+    STORE_ADMINISTRATION,
+    STORE_PORTAL_STORE_READS,
+    STORE_AVAILABILITY,
+    STORE_SIGNALS,
+  ],
 })
 export class StoresModule {}

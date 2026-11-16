@@ -99,6 +99,8 @@ describe('production environment', () => {
     // 32-byte AES key, so use a real 44-character encoding of 32 bytes below.
     ADMIN_SESSION_KEYS_JSON: JSON.stringify({ '1': Buffer.alloc(32, 7).toString('base64') }),
     ADMIN_SESSION_KEY_VERSION: '1',
+    STORE_SESSION_KEYS_JSON: JSON.stringify({ '1': Buffer.alloc(32, 7).toString('base64') }),
+    STORE_SESSION_KEY_VERSION: '1',
   };
   it('accepts a complete non-local provider configuration', () => {
     expect(readEnv(production).NODE_ENV).toBe('production');

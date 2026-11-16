@@ -20,10 +20,14 @@ import { INVENTORY_PICK_GUIDANCE } from './contracts/pick-guidance.js';
 import { PostgresPickGuidance } from './infrastructure/pick-guidance.js';
 import { INVENTORY_ADJUSTMENTS } from './contracts/adjustments.js';
 import { PostgresAdjustments } from './infrastructure/adjustments.js';
+import { INVENTORY_COUNT_SESSIONS } from './contracts/count-sessions.js';
+import { PostgresCountSessions } from './infrastructure/postgres-count-sessions.js';
 import { IdentityModule } from '../identity/identity.module.js';
 import { IDENTITY_ACCESS, type IdentityAccess } from '../identity/contracts/identity.js';
 import { INVENTORY_AVAILABILITY } from './contracts/availability.js';
 import { INVENTORY_MANAGEMENT, INVENTORY_RESERVATIONS } from './contracts/inventory.js';
+import { INVENTORY_PORTAL_READS } from './contracts/portal-reads.js';
+import { PostgresInventoryPortalReads } from './infrastructure/postgres-portal-reads.js';
 import { PostgresInventoryAvailability } from './infrastructure/postgres-availability.js';
 import { PostgresInventoryManagement } from './infrastructure/management.js';
 import { PostgresReservations } from './infrastructure/reservations.js';
@@ -41,6 +45,12 @@ import { InventoryExpiry } from './infrastructure/expiry.js';
       inject: [PLATFORM_DATABASE, IDENTITY_ACCESS],
       useFactory: (db: DatabaseHandle, identity: IdentityAccess) =>
         new PostgresInventoryManagement(db.db, identity),
+    },
+    {
+      provide: INVENTORY_PORTAL_READS,
+      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS],
+      useFactory: (db: DatabaseHandle, identity: IdentityAccess) =>
+        new PostgresInventoryPortalReads(db.db, identity),
     },
     {
       provide: INVENTORY_RESERVATIONS,
@@ -82,6 +92,15 @@ import { InventoryExpiry } from './infrastructure/expiry.js';
       ) => new PostgresAdjustments(db.db, identity, config, factory),
     },
     {
+      provide: INVENTORY_COUNT_SESSIONS,
+      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS, INVENTORY_ADJUSTMENTS],
+      useFactory: (
+        db: DatabaseHandle,
+        identity: IdentityAccess,
+        adjustments: InventoryAdjustments,
+      ) => new PostgresCountSessions(db.db, identity, adjustments),
+    },
+    {
       provide: InventoryExpiry,
       inject: [PLATFORM_DATABASE],
       useFactory: (db: DatabaseHandle) => new InventoryExpiry(db.db),
@@ -100,8 +119,10 @@ import { InventoryExpiry } from './infrastructure/expiry.js';
   exports: [
     INVENTORY_AVAILABILITY,
     INVENTORY_MANAGEMENT,
+    INVENTORY_PORTAL_READS,
     INVENTORY_RESERVATIONS,
     INVENTORY_ADJUSTMENTS,
+    INVENTORY_COUNT_SESSIONS,
     INVENTORY_QUALITY,
     INVENTORY_RETURNS,
     INVENTORY_SHELF_LIFE,

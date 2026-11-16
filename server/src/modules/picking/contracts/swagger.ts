@@ -8,6 +8,13 @@ export class FefoBatchView {
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) expiresAt!: string | null;
   @ApiProperty({ pattern: '^\\d+$' }) availableQty!: string;
 }
+export class SubstitutionCandidateView {
+  @ApiProperty({ format: 'uuid' }) variantId!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() sku!: string;
+  @ApiProperty({ type: String, nullable: true }) barcode!: string | null;
+  @ApiProperty({ pattern: '^\\d+$' }) available!: string;
+}
 export class PickItemView {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() orderItemId!: string;
@@ -15,9 +22,14 @@ export class PickItemView {
   @ApiProperty({ type: String, nullable: true, format: 'uuid' }) substituteVariantId!:
     string | null;
   @ApiProperty({ maxLength: 300 }) name!: string;
+  @ApiProperty() sku!: string;
+  @ApiProperty({ type: String, nullable: true }) barcode!: string | null;
   @ApiProperty({ pattern: '^[1-9][0-9]{0,18}$' }) expectedQty!: string;
   @ApiProperty({ pattern: '^\\d+$' }) pickedQty!: string;
   @ApiProperty({ type: String, nullable: true, format: 'uuid' }) batchId!: string | null;
+  @ApiProperty({ type: String, nullable: true }) batchCode!: string | null;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) batchExpiresAt!:
+    string | null;
   @ApiProperty({ enum: ['PENDING', 'PICKED', 'SHORT', 'SUBSTITUTED'] }) status!: string;
   @ApiProperty({
     type: String,
@@ -26,18 +38,43 @@ export class PickItemView {
   })
   shortReason!: string | null;
   @ApiPropertyOptional({ type: [FefoBatchView] }) fefoSuggestions?: FefoBatchView[];
+  @ApiPropertyOptional({ type: [SubstitutionCandidateView] })
+  substitutionCandidates?: SubstitutionCandidateView[];
+}
+export class PackingView {
+  @ApiProperty() bags!: number;
+  @ApiProperty() sealCode!: string;
+  @ApiProperty() coldChain!: boolean;
+  @ApiProperty({ format: 'date-time' }) packedAt!: string;
+  @ApiProperty({ type: String, nullable: true }) packedBy!: string | null;
+}
+export class HandoverView {
+  @ApiProperty({ enum: ['PENDING', 'VERIFIED', 'OVERRIDE'] }) state!: string;
+  @ApiProperty({ type: String, nullable: true, format: 'uuid' }) riderId!: string | null;
+  @ApiProperty({ type: String, nullable: true }) riderName!: string | null;
+  @ApiProperty() attempts!: number;
+  @ApiProperty() locked!: boolean;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) verifiedAt!: string | null;
+  @ApiProperty({ type: String, nullable: true }) deliveryStatus!: string | null;
 }
 export class PickTaskView {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() orderId!: string;
+  @ApiProperty({ type: String, nullable: true }) orderNumber!: string | null;
+  @ApiProperty() orderStatus!: string;
+  @ApiProperty() customerName!: string;
   @ApiProperty({ format: 'uuid' }) storeId!: string;
   @ApiProperty({ enum: ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] })
   status!: string;
   @ApiProperty({ type: String, nullable: true, format: 'uuid' }) assignedTo!: string | null;
+  @ApiProperty({ type: String, nullable: true }) assignedToName!: string | null;
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) startedAt!: string | null;
   @ApiProperty({ format: 'date-time' }) slaDueAt!: string;
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) completedAt!: string | null;
   @ApiProperty({ pattern: '^[1-9]\\d*$' }) version!: string;
+  @ApiProperty({ type: PackingView, nullable: true }) packing!: PackingView | null;
+  @ApiProperty({ type: HandoverView, nullable: true }) handover!: HandoverView | null;
+  @ApiProperty({ type: String, nullable: true }) deliveryStatus!: string | null;
   @ApiProperty({ type: [PickItemView] }) items!: PickItemView[];
 }
 export class PickTaskPageView {

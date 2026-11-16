@@ -85,6 +85,22 @@ export class PostgresNotificationViews implements NotificationViews {
     }
   }
 
+  async markUnread(userId: string, notificationId: string): Promise<void> {
+    if (!UUID.test(userId) || !UUID.test(notificationId)) throw new Error('INVALID_INPUT');
+    const updated =
+      await sql`UPDATE notifications SET read_at=NULL WHERE id=${notificationId}::uuid AND user_id=${userId}::uuid AND channel='INBOX' AND status='SENT' AND read_at IS NOT NULL`.execute(
+        this.db,
+      );
+    if (Number(updated.numAffectedRows ?? 0) === 0) {
+      const owned = await sql<{
+        id: string;
+      }>`SELECT id FROM notifications WHERE id=${notificationId}::uuid AND user_id=${userId}::uuid AND channel='INBOX' AND status='SENT'`.execute(
+        this.db,
+      );
+      if (!owned.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
+    }
+  }
+
   async markAllRead(userId: string): Promise<number> {
     if (!UUID.test(userId)) throw new Error('INVALID_INPUT');
     const updated = await sql<{

@@ -5,15 +5,27 @@ export type PickTaskStatus = 'PENDING' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED
 export type PickItemStatus = 'PENDING' | 'PICKED' | 'SHORT' | 'SUBSTITUTED';
 export type ShortReason = 'OUT_OF_STOCK' | 'DAMAGED' | 'EXPIRED' | 'NOT_FOUND';
 
+export interface PickSubstitutionCandidateView {
+  variantId: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  available: string;
+}
+
 export interface PickItemView {
   id: string;
   orderItemId: string;
   variantId: string;
   substituteVariantId: string | null;
   name: string;
+  sku: string;
+  barcode: string | null;
   expectedQty: string;
   pickedQty: string;
   batchId: string | null;
+  batchCode: string | null;
+  batchExpiresAt: string | null;
   status: PickItemStatus;
   shortReason: ShortReason | null;
   /** Earliest eligible batch suggestion for perishables (FEFO, shelf-life filtered). */
@@ -23,18 +35,45 @@ export interface PickItemView {
     expiresAt: string | null;
     availableQty: string;
   }[];
+  /** Listed substitutes with current store availability (server still re-validates). */
+  substitutionCandidates: PickSubstitutionCandidateView[];
+}
+
+export interface PickPackingView {
+  bags: number;
+  sealCode: string;
+  coldChain: boolean;
+  packedAt: string;
+  packedBy: string | null;
+}
+
+export interface PickHandoverView {
+  state: 'PENDING' | 'VERIFIED' | 'OVERRIDE';
+  riderId: string | null;
+  riderName: string | null;
+  attempts: number;
+  locked: boolean;
+  verifiedAt: string | null;
+  deliveryStatus: string | null;
 }
 
 export interface PickTaskView {
   id: string;
   orderId: string;
+  orderNumber: string | null;
+  orderStatus: string;
+  customerName: string;
   storeId: string;
   status: PickTaskStatus;
   assignedTo: string | null;
+  assignedToName: string | null;
   startedAt: string | null;
   slaDueAt: string;
   completedAt: string | null;
   version: string;
+  packing: PickPackingView | null;
+  handover: PickHandoverView | null;
+  deliveryStatus: string | null;
   items: PickItemView[];
 }
 
@@ -114,6 +153,10 @@ export const PICK_TASKS = Symbol('PICK_TASKS');
 export interface PickTasks {
   /** Walk-ordered queue of tasks; pick lists sort by bin location then item id. */
   queue(actorId: string, input: QueueInput): Promise<PickTaskPage>;
+  /** Single task with items and FEFO suggestions, authorized for the task's store. */
+  get(actorId: string, taskId: string): Promise<PickTaskView>;
+  /** Manager release: returns a claimed-but-not-started task to the unclaimed queue. */
+  release(actorId: string, taskId: string, reference: string): Promise<PickTaskView>;
   heartbeat(actorId: string, taskId: string): Promise<void>;
   /** Self-claim under SKIP LOCKED; two pickers can never claim the same task. */
   claim(actorId: string, taskId: string, reference: string): Promise<ClaimResult>;
