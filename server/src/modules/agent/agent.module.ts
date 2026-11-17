@@ -30,6 +30,7 @@ import { AgentPrivacyModule } from './agent-privacy.module.js';
 import { AGENT_PRIVACY, type AgentPrivacy } from './contracts/privacy.js';
 import { CheckoutModule } from '../checkout/checkout.module.js';
 import { CHECKOUT, type CheckoutOperations } from '../checkout/contracts/checkout.js';
+import { AgentNudges } from './infrastructure/nudges.js';
 import { DispatchModule } from '../dispatch/dispatch.module.js';
 import { CUSTOMER_TRACKING, type CustomerTracking } from '../dispatch/contracts/tasks.js';
 import { ServiceabilityModule } from '../serviceability/serviceability.module.js';
@@ -89,8 +90,10 @@ import type { Serviceability } from '../serviceability/contracts/serviceability.
         serviceability: Serviceability,
       ) => {
         const threads = new AgentThreads(handle.db);
+        const nudges = new AgentNudges(handle.db, orders, cart, catalog, addresses, config);
         const graph = new AgentRuntime(runtime, config, redis, new AgentRuns(handle.db), threads, {
           db: handle.db,
+          nudges,
           addresses,
           cart,
           catalog,

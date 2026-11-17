@@ -73,7 +73,13 @@ export class AgentRuns {
       }
       // A LangGraph interrupt must be resolved before feeding another message to
       // the same checkpoint. Silently superseding it would leave the graph and
-      // the persisted draft disagreeing about the pending action.
+      // the persisted draft disagreeing about the pending action, so an active
+      // confirmation still blocks new messages (ADR 0004). Expired drafts are
+      // marked and no longer block: their card is disabled and the customer
+      // can continue chatting.
+      await sql`UPDATE agent_drafts SET status='expired',updated_at=clock_timestamp() WHERE thread_id=${input.threadId}::uuid AND user_id=${input.userId}::uuid AND status='pending' AND expires_at<=clock_timestamp()`.execute(
+        tx,
+      );
       const pending =
         await sql`SELECT id FROM agent_drafts WHERE thread_id=${input.threadId}::uuid AND user_id=${input.userId}::uuid AND status IN ('pending','approved') LIMIT 1`.execute(
           tx,
@@ -181,6 +187,9 @@ export class AgentRuns {
     outcome: 'completed' | 'failed' | 'aborted';
     errorCode?: string;
     latencyMs: number;
+    usage?: { inputTokens?: number; outputTokens?: number; thinkingTokens?: number };
+    model?: string;
+    toolCalls?: number;
   }): Promise<string> {
     return this.db.transaction().execute(async (tx) => {
       const found = await sql<{
@@ -197,7 +206,13 @@ export class AgentRuns {
       await sql`INSERT INTO agent_messages(id,thread_id,role,text,cards) VALUES(${id}::uuid,${input.threadId}::uuid,'assistant',${input.text},${JSON.stringify(input.cards as unknown as Json)}::jsonb)`.execute(
         tx,
       );
-      await sql`UPDATE agent_runs SET outcome=${input.outcome},error_code=${input.errorCode ?? null},assistant_message_id=${id}::uuid,latency_ms=${Math.max(0, Math.round(input.latencyMs))} WHERE id=${input.runId}::uuid`.execute(
+      // Reported usage replaces the opening reservations; a failed run keeps them.
+      await sql`UPDATE agent_runs SET outcome=${input.outcome},error_code=${input.errorCode ?? null},assistant_message_id=${id}::uuid,latency_ms=${Math.max(0, Math.round(input.latencyMs))},
+        input_tokens=COALESCE(${input.usage?.inputTokens ?? null},input_tokens),
+        output_tokens=COALESCE(${input.usage?.outputTokens ?? null},output_tokens),
+        thinking_tokens=COALESCE(${input.usage?.thinkingTokens ?? null},thinking_tokens),
+        model=COALESCE(${input.model ?? null},model),
+        tool_calls=COALESCE(${input.toolCalls ?? null},tool_calls) WHERE id=${input.runId}::uuid`.execute(
         tx,
       );
       await sql`UPDATE agent_threads SET last_message_at=clock_timestamp() WHERE id=${input.threadId}::uuid`.execute(

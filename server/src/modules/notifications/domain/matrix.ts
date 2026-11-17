@@ -349,6 +349,23 @@ export function planForEvent(event: MatrixEvent): NotificationPlan | null {
         '/offers',
       );
     }
+    case 'AGENT_REORDER_NUDGE': {
+      // Agent-generated restock nudge; PROMOTIONAL applies per-user
+      // preferences and quiet hours in the pipeline.
+      const userId = userIdOf(payload);
+      const variantId = uuidAt(payload, 'variantId');
+      const productName = stringAt(payload, 'productName');
+      if (!userId || !variantId || !productName) return null;
+      return plan(
+        'agent.reorder_nudge',
+        'PROMOTIONS',
+        'PROMOTIONAL',
+        ORDER_CHANNELS,
+        'USER',
+        { variantId, productName },
+        '/agent',
+      );
+    }
     default:
       return tolerantRiderPlan(event.eventType, payload);
   }

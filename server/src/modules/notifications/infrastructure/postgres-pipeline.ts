@@ -109,6 +109,7 @@ export class PostgresNotificationPipeline implements NotificationPipeline {
       'subscription.price_increase',
       'subscription.skipped',
       'marketing.campaign',
+      'AGENT_REORDER_NUDGE',
       'custody.escalated',
       'ops.anomaly',
       'payments.refund.failed',

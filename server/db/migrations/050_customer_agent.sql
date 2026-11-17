@@ -49,6 +49,7 @@ CREATE TABLE agent_runs (
   user_id uuid NOT NULL REFERENCES users(id), skill text, model text,
   client_message_id uuid, assistant_message_id uuid REFERENCES agent_messages(id) ON DELETE SET NULL,
   input_tokens integer NOT NULL DEFAULT 0, output_tokens integer NOT NULL DEFAULT 0,
+  thinking_tokens integer NOT NULL DEFAULT 0,
   tool_calls integer NOT NULL DEFAULT 0, latency_ms integer, outcome text,
   error_code text, estimated_cost text, created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   UNIQUE(thread_id, client_message_id)

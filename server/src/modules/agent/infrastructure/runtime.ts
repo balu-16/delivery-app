@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createAgent, modelFallbackMiddleware } from 'langchain';
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { HumanMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import pg from 'pg';
@@ -28,10 +28,19 @@ import { AgentDrafts } from './drafts.js';
 import { AgentOrderPlacement } from './placement.js';
 import { AgentActions } from './actions.js';
 import { messageDeltaText, sanitizeAgentText } from './guards.js';
+import { historyTrimming } from './middleware.js';
+import { createNudgeTools } from './nudge-tools.js';
+import type { AgentNudges } from './nudges.js';
 import type { AgentRuns } from './runs.js';
 import type { AgentThreads } from './threads.js';
 
 type Emit = (event: AgentEvent) => void;
+/** Token usage reported by the provider for the run's final model call. */
+interface RunUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  thinkingTokens?: number;
+}
 interface Dependencies {
   db: Database;
   addresses: AddressOperations;
@@ -43,6 +52,7 @@ interface Dependencies {
   checkout: CheckoutOperations;
   tracking: CustomerTracking;
   serviceability: Serviceability;
+  nudges: AgentNudges;
 }
 const RELEASE =
   "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end";
@@ -88,6 +98,7 @@ export class AgentRuntime {
     maxQuantity: number;
     ttl: number;
     maxOrderPaise: string;
+    maxHistoryTokens: number;
   }) {
     const { model, fallback } = await createAssistantModel(this.config);
     const kit = new AgentToolKit(context.maxCalls);
@@ -114,21 +125,35 @@ export class AgentRuntime {
         },
         kit,
       ),
+      ...createNudgeTools(this.deps, { userId: context.userId, threadId: context.threadId }, kit),
     ];
-    return createAgent({
+    const notes = await this.threads.systemNotes(context.userId, context.threadId);
+    const graph = createAgent({
       model,
       tools,
       checkpointer: this.checkpointer,
       systemPrompt: prompt,
-      middleware: fallback ? [modelFallbackMiddleware(fallback)] : [],
+      middleware: [
+        historyTrimming(
+          context.maxHistoryTokens,
+          notes.map((note) => note.text),
+        ),
+        ...(fallback ? [modelFallbackMiddleware(fallback)] : []),
+      ],
     });
+    return {
+      graph,
+      kit,
+      modelLabel: `${this.config.get('LLM_PROVIDER')}/${this.config.get('LLM_MODEL')}`,
+    };
   }
 
   private async relay(
     stream: AsyncIterable<unknown>,
     signal: AbortSignal,
     emit: Emit,
-  ): Promise<void> {
+  ): Promise<RunUsage> {
+    let usage: RunUsage | undefined;
     for await (const chunk of stream) {
       if (signal.aborted) throw new Error('RUN_ABORTED');
       if (!Array.isArray(chunk) || chunk.length < 2) continue;
@@ -143,12 +168,30 @@ export class AgentRuntime {
           emit(event);
       } else if (mode === 'messages' && Array.isArray(value)) {
         const message = value[0] as
-          { content?: unknown; getType?: () => string; _getType?: () => string } | undefined;
+          | {
+              content?: unknown;
+              getType?: () => string;
+              _getType?: () => string;
+              usage_metadata?: {
+                input_tokens?: number;
+                output_tokens?: number;
+                output_token_details?: { reasoning?: number };
+              } | null;
+            }
+          | undefined;
         if ((message?.getType?.() ?? message?._getType?.()) !== 'ai') continue;
+        const meta = message?.usage_metadata;
+        if (meta)
+          usage = {
+            inputTokens: meta.input_tokens,
+            outputTokens: meta.output_tokens,
+            thinkingTokens: meta.output_token_details?.reasoning ?? 0,
+          };
         const delta = messageDeltaText(message);
         if (delta) emit({ event: 'message.delta', data: { text: delta } });
       }
     }
+    return usage ?? {};
   }
 
   async cancel(userId: string, threadId: string): Promise<void> {
@@ -229,16 +272,25 @@ export class AgentRuntime {
       answer = '';
     const cards: AgentCard[] = [];
     try {
-      const [dailyTurns, dailyTokens, maxCalls, maxSteps, maxQuantity, ttl, maxOrderPaise] =
-        await Promise.all([
-          this.appConfig.get('agent_daily_turn_limit_per_user'),
-          this.appConfig.get('agent_daily_token_budget_per_user'),
-          this.appConfig.get('agent_max_tool_calls_per_turn'),
-          this.appConfig.get('agent_max_steps_per_run'),
-          this.appConfig.get('agent_max_qty_per_line'),
-          this.appConfig.get('agent_confirm_ttl_seconds'),
-          this.appConfig.get('agent_max_order_value_paise'),
-        ]);
+      const [
+        dailyTurns,
+        dailyTokens,
+        maxCalls,
+        maxSteps,
+        maxQuantity,
+        ttl,
+        maxOrderPaise,
+        maxHistoryTokens,
+      ] = await Promise.all([
+        this.appConfig.get('agent_daily_turn_limit_per_user'),
+        this.appConfig.get('agent_daily_token_budget_per_user'),
+        this.appConfig.get('agent_max_tool_calls_per_turn'),
+        this.appConfig.get('agent_max_steps_per_run'),
+        this.appConfig.get('agent_max_qty_per_line'),
+        this.appConfig.get('agent_confirm_ttl_seconds'),
+        this.appConfig.get('agent_max_order_value_paise'),
+        this.appConfig.get('agent_history_max_tokens'),
+      ]);
       const result = await this.runs.begin({
         ...input,
         text,
@@ -262,15 +314,16 @@ export class AgentRuntime {
       }
       runId = result.runId;
       emit({ event: 'run.started', data: { runId } });
-      const graph = await this.createGraph({ ...input, maxCalls, maxQuantity, ttl, maxOrderPaise });
-      const notes = await this.threads.systemNotes(input.userId, input.threadId);
+      const { graph, kit, modelLabel } = await this.createGraph({
+        ...input,
+        maxCalls,
+        maxQuantity,
+        ttl,
+        maxOrderPaise,
+        maxHistoryTokens,
+      });
       const stream = await graph.stream(
-        {
-          messages: [
-            ...notes.map((note) => new SystemMessage({ content: note.text, id: note.id })),
-            new HumanMessage({ content: text, id: input.clientMessageId }),
-          ],
-        },
+        { messages: [new HumanMessage({ content: text, id: input.clientMessageId })] },
         {
           configurable: { thread_id: input.threadId },
           streamMode: ['messages', 'custom'],
@@ -278,7 +331,7 @@ export class AgentRuntime {
           signal,
         },
       );
-      await this.relay(stream as AsyncIterable<unknown>, signal, (event) => {
+      const usage = await this.relay(stream as AsyncIterable<unknown>, signal, (event) => {
         if (event.event === 'card') cards.push(event.data);
         if (event.event === 'message.delta') {
           answer += event.data.text;
@@ -294,6 +347,9 @@ export class AgentRuntime {
         cards,
         outcome: 'completed',
         latencyMs: Date.now() - started,
+        usage,
+        model: modelLabel,
+        toolCalls: kit.used,
       });
       emit({ event: 'message.done', data: { messageId } });
       emit({ event: 'run.ended', data: {} });
@@ -336,16 +392,25 @@ export class AgentRuntime {
       answer = '';
     const cards: AgentCard[] = [];
     try {
-      const [dailyTurns, dailyTokens, maxCalls, maxSteps, maxQuantity, ttl, maxOrderPaise] =
-        await Promise.all([
-          this.appConfig.get('agent_daily_turn_limit_per_user'),
-          this.appConfig.get('agent_daily_token_budget_per_user'),
-          this.appConfig.get('agent_max_tool_calls_per_turn'),
-          this.appConfig.get('agent_max_steps_per_run'),
-          this.appConfig.get('agent_max_qty_per_line'),
-          this.appConfig.get('agent_confirm_ttl_seconds'),
-          this.appConfig.get('agent_max_order_value_paise'),
-        ]);
+      const [
+        dailyTurns,
+        dailyTokens,
+        maxCalls,
+        maxSteps,
+        maxQuantity,
+        ttl,
+        maxOrderPaise,
+        maxHistoryTokens,
+      ] = await Promise.all([
+        this.appConfig.get('agent_daily_turn_limit_per_user'),
+        this.appConfig.get('agent_daily_token_budget_per_user'),
+        this.appConfig.get('agent_max_tool_calls_per_turn'),
+        this.appConfig.get('agent_max_steps_per_run'),
+        this.appConfig.get('agent_max_qty_per_line'),
+        this.appConfig.get('agent_confirm_ttl_seconds'),
+        this.appConfig.get('agent_max_order_value_paise'),
+        this.appConfig.get('agent_history_max_tokens'),
+      ]);
       const result = await this.runs.beginResume({
         ...input,
         dailyTurns,
@@ -368,7 +433,14 @@ export class AgentRuntime {
       }
       runId = result.runId;
       emit({ event: 'run.started', data: { runId } });
-      const graph = await this.createGraph({ ...input, maxCalls, maxQuantity, ttl, maxOrderPaise });
+      const { graph, kit, modelLabel } = await this.createGraph({
+        ...input,
+        maxCalls,
+        maxQuantity,
+        ttl,
+        maxOrderPaise,
+        maxHistoryTokens,
+      });
       const stream = await graph.stream(
         new Command({ resume: { draftId: input.draftId, decision: input.decision } }),
         {
@@ -378,7 +450,7 @@ export class AgentRuntime {
           signal,
         },
       );
-      await this.relay(stream as AsyncIterable<unknown>, signal, (event) => {
+      const usage = await this.relay(stream as AsyncIterable<unknown>, signal, (event) => {
         if (event.event === 'card') cards.push(event.data);
         if (event.event === 'message.delta') {
           answer += event.data.text;
@@ -394,6 +466,9 @@ export class AgentRuntime {
         cards,
         outcome: 'completed',
         latencyMs: Date.now() - started,
+        usage,
+        model: modelLabel,
+        toolCalls: kit.used,
       });
       emit({ event: 'message.done', data: { messageId } });
       emit({ event: 'run.ended', data: {} });

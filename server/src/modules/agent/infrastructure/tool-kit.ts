@@ -26,6 +26,10 @@ export class AgentToolKit {
   private count = 0;
   private readonly calls = new Map<string, number>();
   constructor(private readonly maxCalls: number) {}
+  /** Tool invocations so far in this run, for usage accounting. */
+  get used(): number {
+    return this.count;
+  }
   define<S extends z.ZodRawShape>(
     name: string,
     description: string,

@@ -1,0 +1,5 @@
+# Pending drafts block new messages until expiry
+
+- While a draft is `pending` or `approved`, a new chat message is rejected with `DRAFT_PENDING` instead of being silently superseded. The confirmation card stays actionable (approve/reject), so the customer always has a way forward in the same screen.
+- Rationale: the spec's supersession (§7.3.5) would require resuming the interrupted LangGraph graph with a synthetic reject, paying a full model turn to say "cancelled", and then running the real turn — two model calls and a stale-card UI state per supersede, with a window where the graph and the draft disagree. Silent discards are also explicitly forbidden by the handoff.
+- Expiry releases the block: `AgentRuns.begin` opportunistically marks `pending` drafts past `expires_at` as `expired` before checking, so after `agent_confirm_ttl_seconds` (300s default) the customer can simply continue chatting and the old card renders disabled. `approved`-but-unexecuted drafts (crash between staging and execution) still block and are covered by the runbook recovery step.
