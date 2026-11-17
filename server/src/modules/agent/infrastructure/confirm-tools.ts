@@ -6,9 +6,10 @@ import type { OrderOperations } from '../../orders/contracts/orders.js';
 import type { CheckoutOperations } from '../../checkout/contracts/checkout.js';
 import type { CartService } from '../../cart/contracts/cart.js';
 import type { AddressOperations } from '../../addresses/contracts/addresses.js';
+import type { Support } from '../../support/contracts/support.js';
 import { AgentDrafts, STALE_DRAFT } from './drafts.js';
 import { AgentOrderPlacement, orderDraft } from './placement.js';
-import { sanitizeAgentText } from './guards.js';
+import { draftHash, sanitizeAgentText } from './guards.js';
 import type { AgentToolKit } from './tool-kit.js';
 
 interface Context {
@@ -22,6 +23,7 @@ interface Dependencies {
   checkout: CheckoutOperations;
   cart: CartService;
   addresses: AddressOperations;
+  support: Support;
 }
 const cancelPayload = z
   .object({
@@ -31,6 +33,9 @@ const cancelPayload = z
     version: z.string(),
     reason: z.string(),
   })
+  .strict();
+const refundPayload = z
+  .object({ orderId: z.string().uuid(), orderNumber: z.string(), reason: z.string() })
   .strict();
 
 /** The interrupt carries a server-stored draft. Execution uses only that draft. */
@@ -242,6 +247,101 @@ export function createConfirmTools(
             payload: staged.payload,
           }),
         };
+      },
+    ),
+    kit.define(
+      'request_refund',
+      'Prepare a refund request for a customer-owned order when the customer asks for money back. Approval raises a support request; support decides the refund. Never promise the refund itself.',
+      z.object({
+        orderId: z.string().uuid().describe('Customer-owned order id'),
+        reason: z.string().min(1).max(200).describe('Reason given by the customer'),
+      }),
+      async (input, runtime) => {
+        let draft = await drafts.byCall(context.userId, context.threadId, runtime.toolCallId);
+        if (!draft) {
+          const order = await deps.orders.byId(input.orderId, { userId: context.userId });
+          if (!order) throw new Error('ORDER_NOT_FOUND');
+          const reason = sanitizeAgentText(input.reason, 200);
+          if (!reason) throw new Error('INVALID_INPUT');
+          draft = await drafts.prepare({
+            userId: context.userId,
+            threadId: context.threadId,
+            toolCallId: runtime.toolCallId,
+            type: 'refund_request',
+            payload: { orderId: order.orderId, orderNumber: order.orderNumber, reason },
+            expiresAt: new Date(Date.now() + context.confirmTtlSeconds * 1000),
+          });
+        }
+        const payload = refundPayload.parse(draft.payload);
+        const expiresAt = draft.expires_at.toISOString();
+        runtime.writer?.({
+          event: 'card',
+          data: {
+            cardId: draft.id,
+            type: 'refund_confirm',
+            payload: {
+              draftId: draft.id,
+              expiresAt,
+              status: draft.status,
+              title: `Request a refund for order ${payload.orderNumber}?`,
+              description:
+                'This raises a support request. Our support team reviews it and decides the refund.',
+            },
+          },
+        });
+        runtime.writer?.({
+          event: 'draft.required',
+          data: { draftId: draft.id, type: 'refund_request', expiresAt },
+        });
+        const response: unknown = interrupt({
+          draftId: draft.id,
+          type: 'refund_request',
+          expiresAt,
+        });
+        const decision = z
+          .object({ draftId: z.string().uuid(), decision: z.enum(['approve', 'reject']) })
+          .strict()
+          .parse(response);
+        if (decision.draftId !== draft.id) throw new Error('DRAFT_INVALID');
+        const staged = await drafts.stageDecision({
+          userId: context.userId,
+          threadId: context.threadId,
+          draftId: draft.id,
+          decision: decision.decision,
+        });
+        if (staged.status !== 'approved') return { status: staged.status, result: staged.result };
+        // Outside the staging transaction; support_operations replays by reference and the
+        // guard re-verifies the stored draft inside the ticket transaction.
+        const ticketId = await deps.support.create(
+          context.userId,
+          {
+            category: 'refund_request',
+            orderId: payload.orderId,
+            body: `Refund request for order ${payload.orderNumber}: ${payload.reason}`,
+            reference: `agent:${context.threadId}:${draft.id}`.slice(0, 150),
+          },
+          {
+            beforeCreate: async (tx) => {
+              const rows = await sql<{
+                status: string;
+                payload: unknown;
+                payload_hash: string;
+                expires_at: Date;
+              }>`SELECT status,payload,payload_hash,expires_at FROM agent_drafts WHERE id=${draft.id}::uuid AND user_id=${context.userId}::uuid AND thread_id=${context.threadId}::uuid FOR UPDATE`.execute(
+                tx,
+              );
+              const row = rows.rows[0];
+              if (
+                !row ||
+                row.status !== 'approved' ||
+                draftHash(row.payload) !== row.payload_hash ||
+                row.expires_at.getTime() <= Date.now()
+              )
+                throw new Error('DRAFT_INVALID');
+            },
+          },
+        );
+        return { status: 'executed', result: { ticketId, ticketStatus: 'OPEN', request: true } };
       },
     ),
   ];

@@ -5,13 +5,20 @@ import { isGraphBubbleUp } from '@langchain/langgraph';
 const safeErrors = [
   'ADDRESS_REQUIRED',
   'ADDRESS_NOT_FOUND',
+  'ADDRESS_LIMIT_REACHED',
   'ORDER_NOT_FOUND',
   'CART_NOT_FOUND',
+  'CART_NOT_READY',
   'ADDRESS_NOT_SERVICEABLE',
   'INVENTORY_INSUFFICIENT',
   'CONCURRENT_MODIFICATION',
   'INVALID_QUANTITY',
-  'SUBSCRIPTIONS_DISABLED',
+  'INVALID_PINCODE',
+  'INVALID_CONTACT_PHONE',
+  'QUOTE_EXPIRED',
+  'COD_NOT_ELIGIBLE',
+  'AGENT_ORDER_LIMIT',
+  'THREAD_ARCHIVED',
   'RATE_LIMITED',
 ];
 /** Shared validation, loop guard, status events and safe error envelope for tools. */

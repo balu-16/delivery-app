@@ -20,7 +20,7 @@ export function AssistantCard({ card, locale, busy, onDecision, onAction }: Prop
   const status = text(payload.status);
   const approved = status === 'approved';
   const disabled = busy || expired || (!!status && status !== 'pending' && !approved);
-  const confirm = ['address_confirm', 'order_confirm', 'cancel_confirm', 'subscription_confirm'].includes(card.type);
+  const confirm = ['address_confirm', 'order_confirm', 'cancel_confirm', 'refund_confirm', 'subscription_confirm'].includes(card.type);
   const items = Array.isArray(payload.items) ? payload.items : [];
   return <View style={styles.card} accessibilityLabel={text(payload.title) || card.type.replaceAll('_', ' ')}>
     {!!text(payload.title) && <Text style={styles.title}>{text(payload.title)}</Text>}

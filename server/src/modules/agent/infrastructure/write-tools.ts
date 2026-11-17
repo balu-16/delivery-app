@@ -136,6 +136,114 @@ export function createWriteTools(deps: Dependencies, context: Context, kit: Agen
       async (input, runtime) => setAgentCartQuantity(deps, context, input, runtime.toolCallId),
     ),
     kit.define(
+      'clear_cart',
+      'Empty the cart only when the customer asks to clear it or to remove everything. Never use this to make room for a new order without asking.',
+      z.object({}),
+      async (_input, runtime) => {
+        if (!runtime.toolCallId || runtime.toolCallId.length > 200)
+          throw new Error('INVALID_INPUT');
+        const hash = hashCanonical({ op: 'clear_cart' });
+        return deps.db.transaction().execute(async (tx) => {
+          const user =
+            await sql`SELECT id FROM users WHERE id=${context.userId}::uuid AND status='ACTIVE' FOR UPDATE`.execute(
+              tx,
+            );
+          if (!user.rows.length) throw new Error('ACCOUNT_DISABLED');
+          await requireAgentPermission(context.userId, tx);
+          const thread = await sql<{
+            status: string;
+          }>`SELECT status FROM agent_threads WHERE id=${context.threadId}::uuid AND user_id=${context.userId}::uuid FOR UPDATE`.execute(
+            tx,
+          );
+          if (!thread.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
+          if (thread.rows[0].status !== 'active') throw new Error('THREAD_ARCHIVED');
+          const prior = await sql<{
+            request_hash: string;
+            result: Json;
+          }>`SELECT request_hash,result FROM agent_tool_operations WHERE thread_id=${context.threadId}::uuid AND user_id=${context.userId}::uuid AND tool_call_id=${runtime.toolCallId}`.execute(
+            tx,
+          );
+          if (prior.rows[0]) {
+            if (prior.rows[0].request_hash !== hash) throw new Error('IDEMPOTENCY_KEY_REUSED');
+            return prior.rows[0].result;
+          }
+          const cart = await deps.cart.get(context.userId, tx);
+          const cleared = Boolean(cart && cart.lines.length);
+          const result: { cleared: boolean; removedItems: number } = cleared
+            ? { cleared: true, removedItems: cart!.lines.length }
+            : { cleared: false, removedItems: 0 };
+          if (cleared)
+            await deps.cart.deleteCart(context.userId, { expectedVersion: cart!.version, tx });
+          await sql`INSERT INTO agent_tool_operations(thread_id,tool_call_id,user_id,request_hash,result) VALUES(${context.threadId}::uuid,${runtime.toolCallId},${context.userId}::uuid,${hash},${JSON.stringify(result)}::jsonb)`.execute(
+            tx,
+          );
+          if (cleared) {
+            await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,${context.userId}::uuid,'AGENT_CART_CLEARED','cart',${cart!.cartId},${JSON.stringify({ source: 'AGENT', threadId: context.threadId })}::jsonb)`.execute(
+              tx,
+            );
+          }
+          return result as unknown as Json;
+        });
+      },
+    ),
+    kit.define(
+      'select_address_for_order',
+      'Point the current cart at a saved address. This may switch the serving store and re-evaluate the cart items. Use the ids returned by list_addresses only.',
+      z.object({ addressId: z.string().uuid().describe('A saved address id from list_addresses') }),
+      async (input, runtime) => {
+        if (!runtime.toolCallId || runtime.toolCallId.length > 200)
+          throw new Error('INVALID_INPUT');
+        const addresses = await deps.addresses.list(context.userId);
+        if (!addresses.some((address) => address.id === input.addressId))
+          throw new Error('ADDRESS_NOT_FOUND');
+        const hash = hashCanonical({ op: 'select_address', addressId: input.addressId });
+        return deps.db.transaction().execute(async (tx) => {
+          const user =
+            await sql`SELECT id FROM users WHERE id=${context.userId}::uuid AND status='ACTIVE' FOR UPDATE`.execute(
+              tx,
+            );
+          if (!user.rows.length) throw new Error('ACCOUNT_DISABLED');
+          await requireAgentPermission(context.userId, tx);
+          const thread = await sql<{
+            status: string;
+          }>`SELECT status FROM agent_threads WHERE id=${context.threadId}::uuid AND user_id=${context.userId}::uuid FOR UPDATE`.execute(
+            tx,
+          );
+          if (!thread.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
+          if (thread.rows[0].status !== 'active') throw new Error('THREAD_ARCHIVED');
+          const prior = await sql<{
+            request_hash: string;
+            result: Json;
+          }>`SELECT request_hash,result FROM agent_tool_operations WHERE thread_id=${context.threadId}::uuid AND user_id=${context.userId}::uuid AND tool_call_id=${runtime.toolCallId}`.execute(
+            tx,
+          );
+          if (prior.rows[0]) {
+            if (prior.rows[0].request_hash !== hash) throw new Error('IDEMPOTENCY_KEY_REUSED');
+            return prior.rows[0].result;
+          }
+          const cart = await deps.cart.getOrCreateActiveCart(context.userId, input.addressId, tx);
+          const result = {
+            addressId: cart.addressId,
+            storeId: cart.storeId,
+            version: cart.version,
+            items: cart.lines.map((line) => ({
+              variantId: line.variantId,
+              name: sanitizeAgentText(line.productName, 160),
+              quantity: line.quantity,
+            })),
+            issues: cart.issues.map((issue) => ({ code: issue.code })),
+          } as unknown as Json;
+          await sql`INSERT INTO agent_tool_operations(thread_id,tool_call_id,user_id,request_hash,result) VALUES(${context.threadId}::uuid,${runtime.toolCallId},${context.userId}::uuid,${hash},${JSON.stringify(result)}::jsonb)`.execute(
+            tx,
+          );
+          await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,${context.userId}::uuid,'AGENT_CART_ADDRESS','cart',${cart.cartId},${JSON.stringify({ source: 'AGENT', threadId: context.threadId, addressId: input.addressId })}::jsonb)`.execute(
+            tx,
+          );
+          return result;
+        });
+      },
+    ),
+    kit.define(
       'report_order_issue',
       'Create a support ticket when a customer asks to report a missing, damaged, wrong or late item, or asks for a person.',
       z.object({
@@ -156,6 +264,33 @@ export function createWriteTools(deps: Dependencies, context: Context, kit: Agen
           context.userId,
           {
             category: input.category,
+            ...(input.orderId ? { orderId: input.orderId } : {}),
+            body,
+            reference: `agent:${context.threadId}:${runtime.toolCallId}`.slice(0, 150),
+          },
+          { beforeCreate: (tx) => requireAgentPermission(context.userId, tx) },
+        );
+        return { ticketId: id, status: 'OPEN' };
+      },
+    ),
+    kit.define(
+      'escalate_to_human',
+      'Bring in a human support agent when the customer asks for a person, is upset, or the request cannot be handled by the app or this chat. Summarise the issue briefly without personal details.',
+      z.object({
+        orderId: z.string().uuid().optional().describe('The relevant order id, if known'),
+        summary: z
+          .string()
+          .min(1)
+          .max(1000)
+          .describe('Short sanitised summary of what the customer needs'),
+      }),
+      async (input, runtime) => {
+        const body = sanitizeAgentText(input.summary, 1000);
+        if (!body) throw new Error('INVALID_INPUT');
+        const id = await deps.support.create(
+          context.userId,
+          {
+            category: 'escalation',
             ...(input.orderId ? { orderId: input.orderId } : {}),
             body,
             reference: `agent:${context.threadId}:${runtime.toolCallId}`.slice(0, 150),

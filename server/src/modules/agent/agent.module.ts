@@ -30,6 +30,11 @@ import { AgentPrivacyModule } from './agent-privacy.module.js';
 import { AGENT_PRIVACY, type AgentPrivacy } from './contracts/privacy.js';
 import { CheckoutModule } from '../checkout/checkout.module.js';
 import { CHECKOUT, type CheckoutOperations } from '../checkout/contracts/checkout.js';
+import { DispatchModule } from '../dispatch/dispatch.module.js';
+import { CUSTOMER_TRACKING, type CustomerTracking } from '../dispatch/contracts/tasks.js';
+import { ServiceabilityModule } from '../serviceability/serviceability.module.js';
+import { SERVICEABILITY } from '../serviceability/contracts/tokens.js';
+import type { Serviceability } from '../serviceability/contracts/serviceability.js';
 
 @Module({
   imports: [
@@ -43,6 +48,8 @@ import { CHECKOUT, type CheckoutOperations } from '../checkout/contracts/checkou
     SupportModule,
     AgentPrivacyModule,
     CheckoutModule,
+    DispatchModule,
+    ServiceabilityModule,
   ],
   providers: [
     {
@@ -61,6 +68,8 @@ import { CHECKOUT, type CheckoutOperations } from '../checkout/contracts/checkou
         SUPPORT,
         AGENT_PRIVACY,
         CHECKOUT,
+        CUSTOMER_TRACKING,
+        SERVICEABILITY,
       ],
       useFactory: (
         runtime: ConfigService,
@@ -76,6 +85,8 @@ import { CHECKOUT, type CheckoutOperations } from '../checkout/contracts/checkou
         support: Support,
         privacy: AgentPrivacy,
         checkout: CheckoutOperations,
+        tracking: CustomerTracking,
+        serviceability: Serviceability,
       ) => {
         const threads = new AgentThreads(handle.db);
         const graph = new AgentRuntime(runtime, config, redis, new AgentRuns(handle.db), threads, {
@@ -87,6 +98,8 @@ import { CHECKOUT, type CheckoutOperations } from '../checkout/contracts/checkou
           wallet,
           support,
           checkout,
+          tracking,
+          serviceability,
         });
         return new CustomerAgentService(
           new AgentConfiguration(runtime, config),

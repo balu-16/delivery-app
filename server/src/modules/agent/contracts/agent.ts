@@ -5,6 +5,7 @@ export type AgentCardType =
   | 'order_confirm'
   | 'order_status'
   | 'cancel_confirm'
+  | 'refund_confirm'
   | 'subscription_confirm'
   | 'quick_replies'
   | 'info';

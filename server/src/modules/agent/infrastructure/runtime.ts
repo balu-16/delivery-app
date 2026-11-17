@@ -17,6 +17,8 @@ import type { WalletViews } from '../../wallet/contracts/wallet.js';
 import type { Support } from '../../support/contracts/support.js';
 import type { CheckoutOperations } from '../../checkout/contracts/checkout.js';
 import type { AgentCard, AgentEvent, AgentLocale } from '../contracts/agent.js';
+import type { CustomerTracking } from '../../dispatch/contracts/tasks.js';
+import type { Serviceability } from '../../serviceability/contracts/serviceability.js';
 import { createAssistantModel } from './llm/llm.factory.js';
 import { createReadTools } from './read-tools.js';
 import { AgentToolKit } from './tool-kit.js';
@@ -39,6 +41,8 @@ interface Dependencies {
   wallet: WalletViews;
   support: Support;
   checkout: CheckoutOperations;
+  tracking: CustomerTracking;
+  serviceability: Serviceability;
 }
 const RELEASE =
   "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end";
@@ -88,7 +92,11 @@ export class AgentRuntime {
     const { model, fallback } = await createAssistantModel(this.config);
     const kit = new AgentToolKit(context.maxCalls);
     const tools = [
-      ...createReadTools(this.deps, { userId: context.userId, locale: context.locale }, kit),
+      ...createReadTools(
+        { ...this.deps, appConfig: this.appConfig },
+        { userId: context.userId, locale: context.locale },
+        kit,
+      ),
       ...createWriteTools(
         this.deps,
         { userId: context.userId, threadId: context.threadId, maxQuantity: context.maxQuantity },
