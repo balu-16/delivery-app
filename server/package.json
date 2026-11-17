@@ -23,6 +23,7 @@
     "test:migrations": "node --experimental-vm-modules node_modules/jest/bin/jest.js --selectProjects integration --testPathPatterns migration --runInBand",
     "migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts up",
     "migrate:down": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts --down",
+    "agent:evals:live": "node --env-file-if-exists=.env --import tsx scripts/agent-live-evals.ts",
     "agent:checkpoints": "node --env-file-if-exists=.env --import tsx scripts/agent-checkpoints.ts",
     "seed": "node --env-file-if-exists=.env --import tsx scripts/seed.ts",
     "openapi:export": "pnpm build && node scripts/openapi-export.mjs",

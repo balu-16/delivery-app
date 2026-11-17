@@ -1,22 +1,28 @@
 # Customer assistant handoff (work in progress)
 
-The assistant is not ready to enable or deploy. Both `AGENT_ENABLED` and the remote `agent_enabled` flag default off. No production migration, model credential, native build, or EAS build has been applied for this work.
+The assistant is not ready to enable or deploy. Both `AGENT_ENABLED` and the remote `agent_enabled` flag default off. No production migration, native build, or EAS build has been applied for this work. Model credentials live only in the git-ignored `server/.env` (0600) and must be rotated before any production use.
 
 ## What is present
 
-- Customer chat and streaming client, English/Hindi/Telugu strings, server-owned cards, consent, conversation deletion, and a feature-gated Home entry.
-- A pinned LangChain/LangGraph runtime with an intentionally limited scripted fake model. The fake is a test double; it does not provide general natural-language understanding.
-- Customer-owned product, cart, order, wallet, and support tools, plus code for confirmation-gated checkout and cancellation. These reuse the existing domain contracts; online payments, map selection, wallet top-up and subscription activation remain unchanged.
-- Additive migration `050_customer_agent.sql`, an explicit checkpoint-schema setup command, and agent-data cleanup hooks. These have not been applied to the application database.
+- Customer chat and streaming client (English/Hindi/Telugu), server-owned cards incl. `refund_confirm`, consent + privacy controls, feature-gated Home entry.
+- Pinned LangChain/LangGraph runtime: prebuilt agent, Postgres checkpointer, interrupt/resume confirmations, `trimMessages` history window, model fallback middleware, provider factory for fake/anthropic/bedrock/openai/google/openai_compatible/nvidia with per-provider thinking (`LLM_THINKING`; NVIDIA `chat_template_kwargs.enable_thinking`, Google `thinkingLevel=high`, OpenRouter via `OPENROUTER_REASONING`).
+- 16 customer tools wrapping existing domain use-cases (see `TOOLS.md`): shopping, cart, addresses (parse + app-screen handoff), checkout/cancel confirmations, refund requests, escalation, tracking, serviceability, policy text, wallet, nudge opt-in.
+- Reorder-nudge worker (opt-in, weekly cap, dedupe) registered for the worker role; notification templates in migration `051`.
+- Migrations `050` (agent schema + `thinking_tokens`) and `051` (templates); checkpoint setup script; runtime grants script. **Not applied to the application database.**
+
+## Verification already done (17 November 2026)
+
+- Unit 388+ green; AWS integration suites (confirmation + nudges) 12/12 on a disposable Aurora fixture; OpenAPI + client types regenerated; server lint/boundary/manifest and app tests green.
+- Live factory smoke for NVIDIA and Google with thinking on (synthetic prompt only); Gemma thinking parts verified filtered from customer-visible text.
 
 ## Work required before launch
 
-1. Complete and review the remaining capabilities from `customer-app-agent-prompt.md`: typed-address continuation and serviceability, robust interrupted-run recovery, refund-request confirmation, subscription tools that respect the existing flag, reorder/recipes/substitutions/coupon/policy tools, and opt-in nudges. Add bounded conversation trimming, prompt-injection defenses, cost accounting, evaluation scenarios and the remaining accessibility/UX flows.
-2. Fix the AWS Organizations policy that explicitly denies `rds-db:connect` and `elasticache:Connect` for the development test role. Retry the isolated Aurora and Valkey integration suite, including migration, runtime grants, consent revocation, account erasure, race conditions, duplicate requests, expired drafts, checkout, cancellation and reconnect recovery. Do not use customer data as test fixtures.
-3. Regenerate and validate the customer OpenAPI contract and client types after the API is finalized. Finish lint, typecheck, unit, integration and security checks on AWS.
-4. Test the feature in Expo Go against the development server. Only after that testing and the owner's explicit approval may a native or EAS build be started.
-5. In a separately reviewed deployment, run the application migration, run `pnpm agent:checkpoints` with the appropriate migration identity, and apply runtime grants. Confirm backup, rollback and retention behavior before setting a real provider and enabling both feature switches.
+1. **Expo Go end-to-end on the owner's phone** (server on :13080 with the switches enabled locally, synthetic customer). Only after that test and the owner's explicit approval may a native or EAS build start.
+2. Review the live-eval reports in `artifacts/agent-evals/` and pick the production provider/model; rotate both provider keys before enabling anything beyond testing.
+3. In a separately reviewed deployment: apply migration `050` + `051`, run `pnpm agent:checkpoints` with the migration identity, apply `pnpm grant:runtime`, confirm backup/rollback/retention, then set `LLM_PROVIDER`/`LLM_MODEL`/`LLM_THINKING` and enable `AGENT_ENABLED` + the remote `agent_enabled` flag.
+4. Confirm the chosen provider's data-retention terms before real customer traffic (NVIDIA trial terms restrict production use; Google free tier may reuse prompts).
+5. Remaining hardening backlog: adversarial eval growth (Section 20 items in `EDGE_CASES.md` marked ⏳), nudge "ignored" auto-stop, client resync validation, retention/erasure integration pass.
 
-## AWS test constraint
+## AWS test notes
 
-The existing AWS test role can run ephemeral Lambda checks, but the organization policy denies IAM database/cache connections. The attempted Aurora test stopped at authentication, before creating a disposable database. No local database, Docker, or local test runner is used for this work.
+The old Organizations deny on IAM database/cache connections no longer applies for the current identity. Aurora master IAM requires the `AWS_PROFILE=default AWS_CONFIG_FILE=` override; the restricted `delivery-runtime` profile still only holds `rds-db:connect` for `delivery_runtime`. Tests always use disposable `delivery_p13_*` databases and synthetic data — never the real customer tables.
