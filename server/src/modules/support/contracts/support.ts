@@ -1,3 +1,5 @@
+import type { TransactionContext } from '../../../platform/database/database.js';
+
 export const SUPPORT = Symbol('SUPPORT');
 export type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
 export interface Support {
@@ -10,6 +12,7 @@ export interface Support {
       mediaIds?: string[];
       reference?: string;
     },
+    guard?: { beforeCreate(tx: TransactionContext): Promise<void> },
   ): Promise<string>;
   list(
     actorId: string,

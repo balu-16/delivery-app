@@ -1,0 +1,47 @@
+const en = {
+  title: 'Assistant', close: 'Close', newChat: 'New chat', input: 'Ask about your order or products', send: 'Send', stop: 'Stop',
+  greeting: 'How can I help today?', consentTitle: 'Meet your AI assistant', consentBody: 'Your messages and relevant order details are shared with our AI provider to help answer your request. You can stop using the assistant at any time.',
+  agree: 'Agree and continue', decline: 'Not now', loading: 'Loading your conversation…', thinking: 'Thinking…', error: 'The assistant is unavailable. Please try again.', retry: 'Try again',
+  stopped: 'Response stopped.', approve: 'Confirm', reject: 'Cancel', change: 'Change', expired: 'This confirmation has expired.', pending: 'Confirming…',
+  draftPending: 'Confirm or cancel the pending action first. If it has expired, start a new chat.',
+  openCart: 'Open cart', openOrders: 'Open orders', openAddresses: 'Open addresses', feedbackUp: 'Helpful', feedbackDown: 'Not helpful',
+  sent: 'Message sent', completed: 'Assistant reply finished', offline: 'Check your connection and try again.',
+  tax: 'Tax', discount: 'Discount', total: 'Total', wallet: 'Wallet', promotionalBalance: 'Promotional balance', dueOnDelivery: 'Due on delivery',
+  privacy: 'AI assistant privacy', privacyDetail: 'Manage consent and conversation history', privacyBody: 'You can withdraw consent and delete assistant conversations separately. Deleting conversations does not cancel orders or support requests.',
+  consentOn: 'AI assistant consent is active.', consentOff: 'AI assistant consent is not active.', withdraw: 'Withdraw consent', withdrawConfirm: 'The assistant will stop using your information. Your conversations remain until you delete them.',
+  deleteChats: 'Delete assistant conversations', deleteChatsConfirm: 'Permanently delete all your assistant conversations?', keep: 'Keep', privacyError: 'Could not update assistant privacy. Please try again.',
+  chatsDeleted: 'Assistant conversations deleted.', consentWithdrawn: 'AI assistant consent withdrawn.',
+  earlier: 'Load earlier messages', loadingEarlier: 'Loading earlier messages…',
+} as const;
+type Dictionary = { [K in keyof typeof en]: string };
+const hi: Dictionary = {
+  title: 'सहायक', close: 'बंद करें', newChat: 'नई बातचीत', input: 'अपने ऑर्डर या उत्पादों के बारे में पूछें', send: 'भेजें', stop: 'रोकें',
+  greeting: 'आज मैं आपकी कैसे मदद कर सकता हूँ?', consentTitle: 'अपने AI सहायक से मिलें', consentBody: 'आपके अनुरोध में मदद के लिए आपके संदेश और संबंधित ऑर्डर की जानकारी हमारे AI प्रदाता के साथ साझा की जाएगी। आप किसी भी समय सहायक का उपयोग बंद कर सकते हैं।',
+  agree: 'सहमत होकर आगे बढ़ें', decline: 'अभी नहीं', loading: 'बातचीत लोड हो रही है…', thinking: 'सोच रहा है…', error: 'सहायक अभी उपलब्ध नहीं है। कृपया फिर से कोशिश करें।', retry: 'फिर से कोशिश करें',
+  stopped: 'जवाब रोक दिया गया।', approve: 'पुष्टि करें', reject: 'रद्द करें', change: 'बदलें', expired: 'इस पुष्टि की समय सीमा समाप्त हो गई है।', pending: 'पुष्टि हो रही है…',
+  draftPending: 'पहले लंबित कार्रवाई की पुष्टि करें या उसे रद्द करें। समय सीमा समाप्त हो गई हो तो नई बातचीत शुरू करें।',
+  openCart: 'कार्ट खोलें', openOrders: 'ऑर्डर खोलें', openAddresses: 'पते खोलें', feedbackUp: 'मददगार', feedbackDown: 'मददगार नहीं',
+  sent: 'संदेश भेजा गया', completed: 'सहायक का जवाब पूरा हुआ', offline: 'अपना कनेक्शन जांचें और फिर कोशिश करें।',
+  tax: 'कर', discount: 'छूट', total: 'कुल', wallet: 'वॉलेट', promotionalBalance: 'प्रमोशनल बैलेंस', dueOnDelivery: 'डिलीवरी पर देय',
+  privacy: 'AI सहायक की निजता', privacyDetail: 'सहमति और बातचीत प्रबंधित करें', privacyBody: 'आप सहमति वापस ले सकते हैं और बातचीत अलग से मिटा सकते हैं। बातचीत मिटाने से ऑर्डर या सहायता अनुरोध रद्द नहीं होंगे।',
+  consentOn: 'AI सहायक की सहमति सक्रिय है।', consentOff: 'AI सहायक की सहमति सक्रिय नहीं है।', withdraw: 'सहमति वापस लें', withdrawConfirm: 'सहायक आपकी जानकारी का उपयोग बंद कर देगा। बातचीत तब तक रहेगी जब तक आप उसे मिटाते नहीं हैं।',
+  deleteChats: 'सहायक की बातचीत मिटाएं', deleteChatsConfirm: 'सहायक के साथ सभी बातचीत हमेशा के लिए मिटाएं?', keep: 'रहने दें', privacyError: 'सहायक की निजता सेटिंग अपडेट नहीं हो सकी। कृपया फिर कोशिश करें।',
+  chatsDeleted: 'सहायक की बातचीत मिटा दी गई।', consentWithdrawn: 'AI सहायक की सहमति वापस ले ली गई।',
+  earlier: 'पुराने संदेश देखें', loadingEarlier: 'पुराने संदेश लोड हो रहे हैं…',
+};
+const te: Dictionary = {
+  title: 'సహాయకుడు', close: 'మూసివేయి', newChat: 'కొత్త సంభాషణ', input: 'మీ ఆర్డర్ లేదా ఉత్పత్తుల గురించి అడగండి', send: 'పంపు', stop: 'ఆపు',
+  greeting: 'ఈ రోజు మీకు ఎలా సహాయం చేయగలను?', consentTitle: 'మీ AI సహాయకుడిని పరిచయం చేస్తున్నాం', consentBody: 'మీ అభ్యర్థనకు సహాయం చేయడానికి మీ సందేశాలు మరియు సంబంధిత ఆర్డర్ వివరాలు మా AI ప్రొవైడర్‌తో పంచుకోబడతాయి. మీరు ఎప్పుడైనా సహాయకుడిని ఉపయోగించడం ఆపవచ్చు.',
+  agree: 'అంగీకరించి కొనసాగించు', decline: 'ఇప్పుడు కాదు', loading: 'సంభాషణ లోడ్ అవుతోంది…', thinking: 'ఆలోచిస్తోంది…', error: 'సహాయకుడు ప్రస్తుతం అందుబాటులో లేరు. దయచేసి మళ్లీ ప్రయత్నించండి.', retry: 'మళ్లీ ప్రయత్నించు',
+  stopped: 'సమాధానం ఆపబడింది.', approve: 'నిర్ధారించు', reject: 'రద్దు చేయి', change: 'మార్చు', expired: 'ఈ నిర్ధారణ గడువు ముగిసింది.', pending: 'నిర్ధారిస్తోంది…',
+  draftPending: 'ముందుగా పెండింగ్‌లో ఉన్న చర్యను నిర్ధారించండి లేదా రద్దు చేయండి. గడువు ముగిసితే కొత్త సంభాషణ ప్రారంభించండి.',
+  openCart: 'కార్ట్ తెరువు', openOrders: 'ఆర్డర్లు తెరువు', openAddresses: 'చిరునామాలు తెరువు', feedbackUp: 'ఉపయోగపడింది', feedbackDown: 'ఉపయోగపడలేదు',
+  sent: 'సందేశం పంపబడింది', completed: 'సహాయకుడి సమాధానం పూర్తయింది', offline: 'మీ కనెక్షన్ తనిఖీ చేసి మళ్లీ ప్రయత్నించండి.',
+  tax: 'పన్ను', discount: 'తగ్గింపు', total: 'మొత్తం', wallet: 'వాలెట్', promotionalBalance: 'ప్రమోషనల్ బ్యాలెన్స్', dueOnDelivery: 'డెలివరీ సమయంలో చెల్లించాల్సింది',
+  privacy: 'AI సహాయకుడి గోప్యత', privacyDetail: 'సమ్మతి మరియు సంభాషణలను నిర్వహించండి', privacyBody: 'మీరు సమ్మతిని వెనక్కి తీసుకోవచ్చు మరియు సంభాషణలను విడిగా తొలగించవచ్చు. సంభాషణలను తొలగించడం వల్ల ఆర్డర్లు లేదా సహాయ అభ్యర్థనలు రద్దు కావు.',
+  consentOn: 'AI సహాయకుడికి సమ్మతి ఉంది.', consentOff: 'AI సహాయకుడికి సమ్మతి లేదు.', withdraw: 'సమ్మతిని వెనక్కి తీసుకోండి', withdrawConfirm: 'సహాయకుడు మీ సమాచారాన్ని ఉపయోగించడం ఆపుతాడు. మీరు తొలగించే వరకు సంభాషణలు అలాగే ఉంటాయి.',
+  deleteChats: 'సహాయకుడి సంభాషణలను తొలగించండి', deleteChatsConfirm: 'సహాయకుడితో జరిగిన అన్ని సంభాషణలను శాశ్వతంగా తొలగించాలా?', keep: 'ఉంచండి', privacyError: 'సహాయకుడి గోప్యతను నవీకరించలేకపోయాము. మళ్లీ ప్రయత్నించండి.',
+  chatsDeleted: 'సహాయకుడి సంభాషణలు తొలగించబడ్డాయి.', consentWithdrawn: 'AI సహాయకుడికి సమ్మతి వెనక్కి తీసుకోబడింది.',
+  earlier: 'మునుపటి సందేశాలను చూడండి', loadingEarlier: 'మునుపటి సందేశాలు లోడ్ అవుతున్నాయి…',
+};
+export function agentStrings(locale?: string | null): Dictionary { return locale === 'hi' ? hi : locale === 'te' ? te : en; }

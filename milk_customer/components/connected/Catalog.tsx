@@ -2,8 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View, type GestureResponderEvent, type PressableInstance } from 'react-native';
-import { router } from 'expo-router';
+import { AppState, Pressable, ScrollView, StyleSheet, TextInput, View, type GestureResponderEvent, type PressableInstance } from 'react-native';
+import { router, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CardListSkeleton, ProductGridSkeleton } from '@/components/animations/Skeleton';
 import { PressableScale } from '@/components/animations/PressableScale';
@@ -21,6 +21,8 @@ import { AddressPanel } from './AddressPanel';
 import { Card, ErrorBanner, Heading, formatPaise, shared } from './Shared';
 import { useProductPhoto } from './useProductPhoto';
 import { PushSettings } from './PushNotifications';
+import { agentClient } from '@/src/agent/client';
+import { agentStrings } from '@/src/agent/strings';
 
 type DisplayItem = CatalogItem | CatalogPreviewItem;
 function isDiscounted(item: DisplayItem): boolean {
@@ -62,6 +64,8 @@ export function Catalog({ home = false }: { home?: boolean }) {
   const insets = useSafeAreaInsets();
   const { profile, addresses, selectedAddress, products, cursor, loadCatalog, pendingPlacement, cart, notifications, loadAccount, readNotifications, favorites, catalogLoad, accountLoad } = useCustomer();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [assistantAvailability, setAssistantAvailability] = useState<{ userId: string; enabled: boolean } | null>(null);
+  const assistantEnabled = !!profile?.userId && assistantAvailability?.userId === profile.userId && assistantAvailability.enabled;
   const [addressOpen, setAddressOpen] = useState(false), [selected, setSelected] = useState<DisplayItem | null>(null), [query, setQuery] = useState(''), [results, setResults] = useState<{addressId: string; items: CatalogItem[]; kind:'search' | 'category' | 'favorites'; key:string; nextCursor:string | null} | null>(null), [searchError, setSearchError] = useState(''), [searching, setSearching] = useState(false);
   const [categories, setCategories] = useState<{addressId:string; items:{id:string;name:string}[]} | null>(null);
   const [browseContext, setBrowseContext] = useState<{addressId:string; fresh:boolean} | null>(null);
@@ -70,6 +74,15 @@ export function Catalog({ home = false }: { home?: boolean }) {
   const previewLoading = previewState?.attempt !== previewAttempt;
   const previewError = !previewLoading && !!previewState?.error;
   const requestNumber = useRef(0);
+  useEffect(() => {
+    if (!home || !profile?.userId) return;
+    let active = true;
+    const userId = profile.userId;
+    const refresh = () => { void agentClient.config(profile.locale === 'hi' || profile.locale === 'te' ? profile.locale : 'en').then(result => { if (active) setAssistantAvailability({ userId, enabled: result.enabled }); }).catch(() => { if (active) setAssistantAvailability({ userId, enabled: false }); }); };
+    refresh();
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') refresh(); });
+    return () => { active = false; subscription.remove(); };
+  }, [home, profile?.userId, profile?.locale]);
   useEffect(() => {
     if (selectedAddress) return;
     let active = true;
@@ -101,7 +114,7 @@ export function Catalog({ home = false }: { home?: boolean }) {
   };
   const search = () => { const key = query.trim(); if (!selectedAddress) { setPreviewSearch(key); return; } if (!key) {requestNumber.current++;setResults(null);setSearching(false);return;} void browse('search',key); };
   return <Screen><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[shared.scroll, { paddingTop: insets.top + 12 }]} keyboardShouldPersistTaps="handled">
-    <View style={styles.header}><PressableScale onPress={() => setAddressOpen(true)} style={styles.location}><Ionicons name="location" color={colors.green} size={17} /><AppText style={styles.locationText} numberOfLines={1}>{selectedAddressValue?.line1 ?? 'Select delivery address'}</AppText><Ionicons name="chevron-down" color={colors.green} size={15} /></PressableScale><View style={shared.row}><Pressable onPress={() => {setNotificationsOpen(true);void loadAccount();}} accessibilityRole="button" accessibilityLabel="Notifications"><Ionicons name="notifications-outline" size={24} color={colors.brownDark} /></Pressable><Pressable onPress={() => router.push('/profile')} accessibilityRole="button" accessibilityLabel="Profile"><Ionicons name="person-circle-outline" size={27} color={colors.brownDark} /></Pressable></View></View>
+    <View style={styles.header}><PressableScale onPress={() => setAddressOpen(true)} style={styles.location}><Ionicons name="location" color={colors.green} size={17} /><AppText style={styles.locationText} numberOfLines={1}>{selectedAddressValue?.line1 ?? 'Select delivery address'}</AppText><Ionicons name="chevron-down" color={colors.green} size={15} /></PressableScale><View style={shared.row}>{home && assistantEnabled && <Pressable onPress={() => router.push('/agent' as Href)} accessibilityRole="button" accessibilityLabel={agentStrings(profile?.locale).title} hitSlop={10}><Ionicons name="chatbubble-ellipses-outline" size={24} color={colors.brownDark} /></Pressable>}<Pressable onPress={() => {setNotificationsOpen(true);void loadAccount();}} accessibilityRole="button" accessibilityLabel="Notifications"><Ionicons name="notifications-outline" size={24} color={colors.brownDark} /></Pressable><Pressable onPress={() => router.push('/profile')} accessibilityRole="button" accessibilityLabel="Profile"><Ionicons name="person-circle-outline" size={27} color={colors.brownDark} /></Pressable></View></View>
     <ErrorBanner />
     {(pendingPlacement || (!!cart && cart.addressId !== selectedAddress)) && <View style={{gap:8}}><AppText style={shared.muted}>{pendingPlacement ? 'Check your pending order before adding more items.' : 'Review your cart for this address before adding more items.'}</AppText><Button label="Go to cart" size="sm" variant="soft" onPress={() => router.push('/cart')} /></View>}
     {home ? <><Heading title={`Hello${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}`} sub="Fresh dairy for your day" /><View style={styles.hero}><Image source={images.homeHero} style={StyleSheet.absoluteFill} contentFit="cover" /><LinearGradient pointerEvents="none" colors={['rgba(255,248,235,0.98)','rgba(255,248,235,0.82)','rgba(255,248,235,0)']} start={{x:0,y:0.5}} end={{x:1,y:0.5}} style={StyleSheet.absoluteFill} /><View style={styles.heroText}><AppText style={styles.heroTitle}>Freshness at your door</AppText><AppText style={shared.body}>Browse what is available at your address.</AppText></View></View><Pressable onPress={() => router.push('/cart')} accessibilityRole="button" accessibilityLabel="View offers for your cart"><LinearGradient colors={['#FBE6CC','#F5CF9E']} start={{x:0,y:0}} end={{x:1,y:1}} style={styles.offer}><Ionicons name="pricetag-outline" size={24} color={colors.brown} /><View style={{flex:1}}><AppText style={shared.label}>Offers for your cart</AppText><AppText style={shared.muted}>Check available savings at checkout</AppText></View><Ionicons name="arrow-forward" color={colors.brown} size={18} /></LinearGradient></Pressable></> : <Heading title="Products" sub="Available at your delivery address" />}

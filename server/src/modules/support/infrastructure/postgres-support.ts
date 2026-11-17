@@ -89,6 +89,7 @@ export class PostgresSupport implements Support {
       mediaIds?: string[];
       reference?: string;
     },
+    guard?: { beforeCreate(tx: TransactionContext): Promise<void> },
   ): Promise<string> {
     const max = await this.config.get('supportMessageMaxLength'),
       body = clean(input.body, max),
@@ -97,6 +98,7 @@ export class PostgresSupport implements Support {
     await this.verifyMedia(actorId, ids);
     return transactionWithRetry(this.db, async (tx) => {
       await lockActiveAccount(actorId, tx);
+      await guard?.beforeCreate(tx);
       const replay = await this.operation(tx, actorId, 'ticket.create', input.reference, input);
       if (replay) return replay;
       const allowed =

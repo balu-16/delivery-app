@@ -26,6 +26,18 @@ const feeSlabs = z
 
 const definitions = {
   ...phaseDefinitions,
+  agent_max_tool_calls_per_turn: z.number().int().min(1).max(100).default(12),
+  agent_max_steps_per_run: z.number().int().min(1).max(200).default(30),
+  agent_daily_turn_limit_per_user: z.number().int().min(1).max(10000).default(20),
+  agent_daily_token_budget_per_user: z.number().int().min(1).max(10000000).default(50000),
+  agent_confirm_ttl_seconds: z.number().int().min(30).max(86400).default(300),
+  agent_max_order_value_paise: paise.default('500000'),
+  agent_max_qty_per_line: z.number().int().min(1).max(1000).default(10),
+  agent_history_max_tokens: z.number().int().min(256).max(100000).default(8000),
+  agent_thread_retention_days: z.number().int().min(1).max(365).default(30),
+  agent_proactive_nudges_enabled: z.boolean().default(false),
+  agent_nudge_max_per_week: z.number().int().min(0).max(7).default(1),
+  agent_trusted_mode_enabled: z.literal(false).default(false),
   inventoryReservationTtlSeconds: z.number().int().positive().default(900),
   inventoryAdjustmentApprovalUnits: z.number().int().positive().default(100),
   inventoryExpirySoonDays: z

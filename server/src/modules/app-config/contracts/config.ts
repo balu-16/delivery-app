@@ -17,6 +17,18 @@ export interface FeeTaxRule {
   split: 'CGST_SGST' | 'IGST';
 }
 export interface ConfigValues extends PhaseConfigValues {
+  agent_max_tool_calls_per_turn: number;
+  agent_max_steps_per_run: number;
+  agent_daily_turn_limit_per_user: number;
+  agent_daily_token_budget_per_user: number;
+  agent_confirm_ttl_seconds: number;
+  agent_max_order_value_paise: string;
+  agent_max_qty_per_line: number;
+  agent_history_max_tokens: number;
+  agent_thread_retention_days: number;
+  agent_proactive_nudges_enabled: boolean;
+  agent_nudge_max_per_week: number;
+  agent_trusted_mode_enabled: false;
   inventoryReservationTtlSeconds: number;
   inventoryAdjustmentApprovalUnits: number;
   inventoryExpirySoonDays: number;
@@ -126,6 +138,7 @@ export interface AppConfig {
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
 export const FEATURE_FLAG_KEYS = [
+  'agent_enabled',
   'wallet_enabled',
   'cod_enabled',
   'subscriptions_enabled',

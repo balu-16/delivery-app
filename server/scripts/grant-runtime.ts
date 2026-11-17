@@ -96,10 +96,23 @@ async function main(): Promise<void> {
       'user_roles',
       'admin_sessions',
       'store_sessions',
+      'address_creation_operations',
+      'agent_threads',
+      'agent_nudge_preferences',
     ];
     await client.query(`REVOKE DELETE ON ALL TABLES IN SCHEMA public FROM ${quoted}`);
     for (const table of deletable)
       await client.query(`GRANT DELETE ON TABLE public."${table}" TO ${quoted}`);
+    // Checkpointer tables are installed separately; never let the runtime run
+    // checkpointer migrations, but permit deletion of conversation data.
+    const existing = new Set(relations.rows.map((relation) => relation.name));
+    for (const table of ['checkpoints', 'checkpoint_blobs', 'checkpoint_writes'])
+      if (existing.has(table))
+        await client.query(`GRANT DELETE ON TABLE public."${table}" TO ${quoted}`);
+    if (existing.has('checkpoint_migrations'))
+      await client.query(
+        `REVOKE INSERT, UPDATE, DELETE ON TABLE public.checkpoint_migrations FROM ${quoted}`,
+      );
     await client.query(`REVOKE ALL ON TABLE public.pgmigrations FROM ${quoted}`);
     const immutable = await client.query<{ name: string }>(
       `SELECT DISTINCT c.relname AS name FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND NOT t.tgisinternal AND (t.tgname LIKE '%immutable' OR t.tgname LIKE '%append_only')`,

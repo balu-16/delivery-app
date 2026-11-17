@@ -4,6 +4,7 @@ import type { Database, TransactionContext } from '../../../platform/database/da
 import type { SubscriptionObligations } from '../../subscriptions/contracts/subscriptions.js';
 import type { TrackingPrivacy } from '../../tracking/contracts/privacy.js';
 import type { Payouts } from '../../payouts/contracts/payouts.js';
+import type { AgentPrivacy } from '../../agent/contracts/privacy.js';
 
 export interface ErasureSupport {
   anonymizeUser(userId: string, tx: TransactionContext): Promise<void>;
@@ -21,6 +22,7 @@ export class ErasureProcessor {
     private readonly support: ErasureSupport,
     private readonly media: ErasureMedia,
     private readonly tracking?: TrackingPrivacy,
+    private readonly agent?: AgentPrivacy,
   ) {}
 
   async runOne(): Promise<boolean> {
@@ -91,6 +93,7 @@ export class ErasureProcessor {
       if (row.has_earnings || (await this.payouts.hasUnsettledPayout(request.user_id, tx)))
         blockers.push('PAYOUT_DUE');
       if (row.last_super) blockers.push('LAST_SUPER_ADMIN');
+      if (await this.agent?.hasActiveRuns(request.user_id, tx)) blockers.push('AGENT_RUN_ACTIVE');
       if (blockers.length) {
         await sql`UPDATE erasure_requests SET status='BLOCKED',blockers=${JSON.stringify(blockers)}::jsonb,retry_after=clock_timestamp()+interval '1 minute',updated_at=clock_timestamp() WHERE id=${request.id}::uuid`.execute(
           tx,
@@ -98,6 +101,7 @@ export class ErasureProcessor {
         return;
       }
       await this.media.fenceForErasure(request.user_id, tx);
+      await this.agent?.eraseForUser(request.user_id, tx);
       await this.tracking?.fence(request.user_id, tx);
       await this.support.anonymizeUser(request.user_id, tx);
       const deliveries = await sql<{

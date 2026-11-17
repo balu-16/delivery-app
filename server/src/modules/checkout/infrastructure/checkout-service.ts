@@ -24,6 +24,7 @@ import type {
   CheckoutOperations,
   CheckoutPaymentView,
   CheckoutPlaceRequest,
+  CheckoutPlacementGuard,
   CheckoutPlaceResult,
   CheckoutQuoteRequest,
   CheckoutQuoteResult,
@@ -128,6 +129,7 @@ export class CheckoutService implements CheckoutOperations {
     userId: string,
     input: CheckoutPlaceRequest,
     owner?: IdempotencyOwner,
+    guard?: CheckoutPlacementGuard,
   ): Promise<CheckoutPlaceResult> {
     if (
       owner &&
@@ -145,7 +147,9 @@ export class CheckoutService implements CheckoutOperations {
         if (owner) await idempotency!.extendLocked(tx, owner);
         return { existing } as const;
       }
+      await guard?.beforePlace(tx);
       const placed = await this.saga.place(userId, input, tx);
+      await guard?.afterPlace(tx, { order: placed.order, confirmed: placed.confirmed });
       if (owner) await idempotency!.extendLocked(tx, owner);
       return { placed } as const;
     });

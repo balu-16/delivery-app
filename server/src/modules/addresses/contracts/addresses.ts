@@ -1,4 +1,5 @@
 export interface AddressDraft {
+  label?: 'HOME' | 'WORK' | 'OTHER';
   line1: string;
   line2?: string;
   landmark?: string;
@@ -24,6 +25,7 @@ export interface AddressRepository {
     draft: AddressDraft,
     maxCount: number,
     makeDefault: boolean,
+    reference?: string,
   ): Promise<Address>;
   update(
     userId: string,
@@ -36,7 +38,12 @@ export interface AddressRepository {
 }
 export interface AddressOperations {
   list(userId: string): Promise<Address[]>;
-  create(userId: string, draft: AddressDraft, makeDefault?: boolean): Promise<AddressWriteResult>;
+  create(
+    userId: string,
+    draft: AddressDraft,
+    makeDefault?: boolean,
+    reference?: string,
+  ): Promise<AddressWriteResult>;
   update(
     userId: string,
     id: string,

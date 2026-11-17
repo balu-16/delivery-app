@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Share, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText } from '@/components/ui/AppText';
 import { BottomSheet } from '@/components/ui/BottomSheet';
@@ -16,14 +16,19 @@ import { colors, fonts } from '@/constants/theme';
 import { customerApi, customerDetailsApi, type ReferralView, type SupportMessage, type SupportTicket } from '@/src/api/customer';
 import { accessToken } from '@/src/auth/session';
 import { useCustomer } from '@/src/store/customer';
+import { agentClient } from '@/src/agent/client';
+import { agentStrings } from '@/src/agent/strings';
 
-type Panel = 'wallet' | 'notifications' | 'support' | 'edit' | 'referral' | null;
+type Panel = 'wallet' | 'notifications' | 'support' | 'edit' | 'referral' | 'ai_privacy' | null;
 const date = (value: string) => { const d = new Date(value); return Number.isNaN(d.getTime()) ? value : new Intl.DateTimeFormat('en-IN', {day:'numeric', month:'short', year:'numeric', timeZone:'Asia/Kolkata'}).format(d); };
 function Row({icon, label, detail, onPress}: {icon: React.ComponentProps<typeof Ionicons>['name']; label:string; detail:string; onPress:()=>void}) { return <Pressable onPress={onPress} accessibilityRole="button"><Card><View style={shared.row}><Ionicons name={icon} size={22} color={colors.green} /><View style={{flex:1}}><AppText style={shared.label}>{label}</AppText><AppText style={shared.muted}>{detail}</AppText></View><Ionicons name="chevron-forward" size={18} color={colors.muted} /></View></Card></Pressable>; }
 export default function Profile() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{open?:string}>();
   const {profile, wallet, ledger, notifications, loadAccount, readNotifications, logout, accountLoad} = useCustomer();
+  const assistantText = agentStrings(profile?.locale);
+  const [assistantPrivacyAvailable, setAssistantPrivacyAvailable] = useState(false), [assistantConsent, setAssistantConsent] = useState(false);
+  const [privacyNotice, setPrivacyNotice] = useState('');
   const [panel, setPanel] = useState<Panel>(null), [addresses, setAddresses] = useState(false), [name, setName] = useState('');
   const activePanel:Panel = params.open === 'notifications' ? 'notifications' : panel;
   const [tickets, setTickets] = useState<SupportTicket[]>([]), [ticket, setTicket] = useState<SupportTicket | null>(null), [messages, setMessages] = useState<SupportMessage[]>([]), [text, setText] = useState('');
@@ -33,7 +38,12 @@ export default function Profile() {
   const [ticketLoading, setTicketLoading] = useState(false), [ticketError, setTicketError] = useState(false);
   const ticketRequest = useRef(0), referralRequest = useRef(0), ticketsRequest = useRef(0);
   const request = useRef<{text:string; ticketId:string | null; key:string} | null>(null);
-  useFocusEffect(useCallback(() => { void loadAccount(); }, [loadAccount]));
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void loadAccount();
+    void agentClient.consentStatus().then(state => { if (active) { setAssistantConsent(state.accepted); setAssistantPrivacyAvailable(true); } }).catch(() => { if (active) setAssistantPrivacyAvailable(false); });
+    return () => { active = false; };
+  }, [loadAccount]));
   const show = (next: Panel) => { setError(''); setPanel(next); if (next === 'edit') setName(profile?.name ?? ''); if (next === 'support') { ticketRequest.current++; setTicket(null); setTicketLoading(false); setTicketError(false); setText(''); void fetchTickets(); } if (next === 'referral') {const requestId=++referralRequest.current;setReferral(null);setLoadingReferral(true);void accessToken().then(token => customerDetailsApi.referral(token)).then(value => {if (requestId === referralRequest.current) setReferral(value);}).catch(() => {if (requestId === referralRequest.current) setError('Could not load referral rewards. Please try again.');}).finally(() => {if (requestId === referralRequest.current) setLoadingReferral(false);});} };
   const fetchTickets = async () => { const requestId=++ticketsRequest.current; setTicketsState(state => state === 'success' ? state : 'loading'); try { const result = await customerDetailsApi.tickets(await accessToken()); if (requestId === ticketsRequest.current) {setTickets(result.items);setTicketsState('success');} } catch { if (requestId === ticketsRequest.current) {setTicketsState(state => state === 'success' ? state : 'error');setError('Could not load support requests.');} } };
   const openTicket = async (value: SupportTicket) => { const requestId=++ticketRequest.current;setTicket(value);setMessages([]);setTicketLoading(true);setTicketError(false);setError('');try { const result = await customerDetailsApi.ticket(await accessToken(), value.id); if (requestId === ticketRequest.current) {setTicket(result.ticket);setMessages(result.messages);setText('');} } catch { if (requestId === ticketRequest.current) {setTicketError(true);setError('Could not load this request.');} } finally { if (requestId === ticketRequest.current) setTicketLoading(false); } };
@@ -51,6 +61,21 @@ export default function Profile() {
     finally { setWorking(false); }
   };
   const saveName = async () => { if (!name.trim() || working) return; setWorking(true); setError(''); try { const token = await accessToken(); await customerDetailsApi.updateProfile(token, name.trim()); const updated = await customerApi.profile(token); useCustomer.setState({profile:updated}); setPanel(null); } catch { setError('Could not update your profile. Please try again.'); } finally { setWorking(false); } };
+  const manageAssistantPrivacy = (action: 'withdraw' | 'delete') => {
+    if (working) return;
+    const title = action === 'withdraw' ? assistantText.withdraw : assistantText.deleteChats;
+    const message = action === 'withdraw' ? assistantText.withdrawConfirm : assistantText.deleteChatsConfirm;
+    Alert.alert(title, message, [
+      { text: assistantText.keep, style: 'cancel' },
+      { text: title, style: 'destructive', onPress: () => {
+        setWorking(true); setError(''); setPrivacyNotice('');
+        void (action === 'withdraw' ? agentClient.revokeConsent() : agentClient.removeAll())
+          .then(() => { if (action === 'withdraw') setAssistantConsent(false); setPrivacyNotice(action === 'withdraw' ? assistantText.consentWithdrawn : assistantText.chatsDeleted); })
+          .catch(() => setError(assistantText.privacyError))
+          .finally(() => setWorking(false));
+      } },
+    ]);
+  };
   return <Screen><ScrollView contentContainerStyle={[shared.scroll,{paddingTop:insets.top+12}]} showsVerticalScrollIndicator={false}>
     <Heading title="Your account" sub="Everything you need, in one place" /><ErrorBanner />
     <Card><View style={shared.row}><View style={styles.avatar}><Ionicons name="person" size={28} color={colors.green} /></View><View style={{flex:1}}><AppText style={styles.name}>{profile?.name || 'Customer'}</AppText><AppText style={shared.muted}>{profile?.email}</AppText></View><Button label="Edit" size="sm" variant="soft" onPress={() => show('edit')} /></View></Card>
@@ -59,10 +84,12 @@ export default function Profile() {
     <Row icon="gift-outline" label="Refer a friend" detail="Share the freshness and earn a reward" onPress={() => show('referral')} />
     <Row icon="notifications-outline" label="Notifications" detail={accountLoad.notifications === 'success' ? `${notifications.filter(n => !n.readAt).length} unread` : accountLoad.notifications === 'error' ? 'Notifications unavailable' : 'Loading notifications…'} onPress={() => show('notifications')} />
     <Row icon="chatbubbles-outline" label="Help and support" detail="View and send support requests" onPress={() => show('support')} />
+    {assistantPrivacyAvailable && <Row icon="shield-checkmark-outline" label={assistantText.privacy} detail={assistantText.privacyDetail} onPress={() => show('ai_privacy')} />}
     <Button label="Sign out" variant="outline" fullWidth onPress={() => void logout()} />
-  </ScrollView><AddressPanel visible={addresses} onClose={() => setAddresses(false)} /><BottomSheet visible={!!activePanel} onClose={() => {ticketRequest.current++;referralRequest.current++;setTicketLoading(false);setLoadingReferral(false);setPanel(null);router.setParams({open:undefined});}} title={activePanel === 'wallet' ? 'Wallet' : activePanel === 'notifications' ? 'Notifications' : activePanel === 'support' ? 'Help and support' : activePanel === 'referral' ? 'Refer a friend' : 'Edit profile'} keyboardAware={activePanel === 'edit' || activePanel === 'support'}>
+  </ScrollView><AddressPanel visible={addresses} onClose={() => setAddresses(false)} /><BottomSheet visible={!!activePanel} onClose={() => {ticketRequest.current++;referralRequest.current++;setTicketLoading(false);setLoadingReferral(false);setPanel(null);router.setParams({open:undefined});}} title={activePanel === 'wallet' ? 'Wallet' : activePanel === 'notifications' ? 'Notifications' : activePanel === 'support' ? 'Help and support' : activePanel === 'referral' ? 'Refer a friend' : activePanel === 'ai_privacy' ? assistantText.privacy : 'Edit profile'} keyboardAware={activePanel === 'edit' || activePanel === 'support'}>
     <View style={{gap:12}}><ErrorBanner />{!!error && <AppText style={{color:colors.danger}}>{error}</AppText>}
       {activePanel === 'edit' && <><TextInput style={shared.input} value={name} onChangeText={setName} placeholder="Your name" maxLength={100} accessibilityLabel="Your name" /><Button label="Save" fullWidth onPress={() => void saveName()} loading={working} disabled={!name.trim()} /></>}
+      {activePanel === 'ai_privacy' && <><AppText style={shared.body}>{assistantText.privacyBody}</AppText><AppText style={shared.muted}>{assistantConsent ? assistantText.consentOn : assistantText.consentOff}</AppText>{!!privacyNotice && <AppText accessibilityLiveRegion="polite" style={shared.body}>{privacyNotice}</AppText>}{assistantConsent && <Button label={assistantText.withdraw} fullWidth variant="outline" disabled={working} onPress={() => manageAssistantPrivacy('withdraw')} />}<Button label={assistantText.deleteChats} fullWidth variant="outline" disabled={working} onPress={() => manageAssistantPrivacy('delete')} /></>}
       {activePanel === 'wallet' && <>
         {accountLoad.wallet === 'idle' || accountLoad.wallet === 'loading' ? <CardListSkeleton label="Loading wallet balance" count={1} /> : accountLoad.wallet === 'error' ? <><AppText style={shared.muted}>Could not load your wallet.</AppText><Button label="Try again" size="sm" variant="soft" onPress={() => void loadAccount()} /></> : <Card><AppText style={shared.label}>Cash balance {wallet ? formatPaise(wallet.cashPaise) : '—'}</AppText><AppText style={shared.label}>Promotional balance {wallet ? formatPaise(wallet.promoPaise) : '—'}</AppText></Card>}
         <AppText style={shared.label}>Recent activity</AppText>{accountLoad.ledger === 'idle' || accountLoad.ledger === 'loading' ? <CardListSkeleton label="Loading wallet activity" count={2} /> : accountLoad.ledger === 'error' ? <><AppText style={shared.muted}>Could not load wallet activity.</AppText><Button label="Try again" size="sm" variant="soft" onPress={() => void loadAccount()} /></> : ledger.length ? ledger.map(item => <View key={item.id} style={styles.line}><View style={{flex:1}}><AppText style={shared.body}>{item.reason.replaceAll('_',' ').toLowerCase()}</AppText><AppText style={shared.muted}>{date(item.createdAt)} · {item.bucket}</AppText></View><AppText style={shared.label}>{formatPaise(item.deltaPaise)}</AppText></View>) : <AppText style={shared.muted}>No activity to show.</AppText>}

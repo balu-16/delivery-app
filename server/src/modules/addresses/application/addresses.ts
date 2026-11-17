@@ -32,13 +32,13 @@ export class Addresses {
   list(userId: string) {
     return this.repository.list(userId);
   }
-  async create(userId: string, draft: AddressDraft, makeDefault = false) {
+  async create(userId: string, draft: AddressDraft, makeDefault = false, reference?: string) {
     validateAddress(draft);
     const max = await this.maxAddresses();
     if (!Number.isSafeInteger(max) || max < 1) throw new Error('INVALID_ADDRESS_LIMIT');
     const confirmation = await this.confirmation(draft);
     return {
-      address: await this.repository.create(userId, draft, max, makeDefault),
+      address: await this.repository.create(userId, draft, max, makeDefault, reference),
       ...confirmation,
     };
   }

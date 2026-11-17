@@ -61,6 +61,15 @@ export interface CheckoutPlaceResult {
   readonly confirmation: 'CONFIRMED' | 'PENDING_PAYMENT';
 }
 
+/** Internal callers may fence and record an approval in the placement transaction. */
+export interface CheckoutPlacementGuard {
+  beforePlace(tx: TransactionContext): Promise<void>;
+  afterPlace(
+    tx: TransactionContext,
+    result: { order: OrderView; confirmed: boolean },
+  ): Promise<void>;
+}
+
 export interface ScheduledOrderInput {
   userId: string;
   subscriptionId: string;
@@ -99,6 +108,7 @@ export interface CheckoutOperations {
     userId: string,
     input: CheckoutPlaceRequest,
     owner?: IdempotencyOwner,
+    guard?: CheckoutPlacementGuard,
   ): Promise<CheckoutPlaceResult>;
   /** Durable gateway create for an attempt created inside the placement tx. */
   completePaymentSetup(

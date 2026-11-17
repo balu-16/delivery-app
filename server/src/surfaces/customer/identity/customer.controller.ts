@@ -48,8 +48,9 @@ class ProfileDto {
   locale?: string;
 }
 class ConsentDto {
-  @ApiProperty({ enum: ['terms', 'privacy'] }) @IsIn(['terms', 'privacy']) type!:
-    'terms' | 'privacy';
+  @ApiProperty({ enum: ['terms', 'privacy', 'ai_assistant'] })
+  @IsIn(['terms', 'privacy', 'ai_assistant'])
+  type!: 'terms' | 'privacy' | 'ai_assistant';
   @ApiProperty({ minLength: 1, maxLength: 40 }) @IsString() @Length(1, 40) version!: string;
 }
 class BootstrapDto {
@@ -136,6 +137,22 @@ export class CustomerIdentityController {
     await customerCommand(() =>
       this.identity.acceptConsent(principal.userId, body.type, body.version, request.ip ?? null),
     );
+  }
+  @Get('me/consents/ai-assistant')
+  @ApiOperation({ operationId: 'customerAiConsentStatus' })
+  async aiConsentStatus(
+    @CurrentPrincipal() principal: Principal,
+  ): Promise<{ accepted: boolean; version: string }> {
+    const version = '1';
+    return {
+      accepted: await this.identity.hasConsent(principal.userId, 'ai_assistant', version),
+      version,
+    };
+  }
+  @Delete('me/consents/ai-assistant')
+  @ApiOperation({ operationId: 'customerAiConsentRevoke' })
+  async revokeAiConsent(@CurrentPrincipal() principal: Principal): Promise<void> {
+    await this.identity.revokeAiConsent(principal.userId);
   }
   @Delete('me') @ApiResponse({ status: 200, type: RequestIdResponseDto }) async erase(
     @CurrentPrincipal() principal: Principal,

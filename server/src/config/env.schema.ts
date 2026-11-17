@@ -26,6 +26,27 @@ const envBaseSchema = z
     AUTH_PROVIDER: z.enum(['local', 'cognito']).default('local'),
     PAYMENTS_PROVIDER: z.enum(['fake', 'razorpay']).default('fake'),
     MAPS_PROVIDER: z.enum(['fake', 'ola']).default('fake'),
+    AGENT_ENABLED: z.enum(['true', 'false']).default('false'),
+    AGENT_ROUTING: z.enum(['on', 'off']).default('on'),
+    LLM_PROVIDER: z
+      .enum(['', 'fake', 'anthropic', 'bedrock', 'openai', 'google', 'openai_compatible', 'nvidia'])
+      .default(''),
+    LLM_MODEL: optional,
+    LLM_FAST_MODEL: optional,
+    LLM_FALLBACK_MODEL: optional,
+    LLM_BASE_URL: optional,
+    OPENROUTER_REASONING: z.enum(['provider_default', 'on', 'off']).default('provider_default'),
+    LLM_THINKING: z.enum(['', 'off', 'on']).default(''),
+    LLM_TEMPERATURE: z.coerce.number().min(0).max(2).default(0),
+    LLM_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(1).max(8192).default(1024),
+    LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
+    LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+    ANTHROPIC_API_KEY: optional,
+    OPENAI_API_KEY: optional,
+    GOOGLE_API_KEY: optional,
+    NVIDIA_API_KEY: optional,
+    LANGSMITH_TRACING: z.enum(['true', 'false']).default('false'),
+    LANGSMITH_API_KEY: optional,
     STORAGE_PROVIDER: z.enum(['local', 's3']).default('local'),
     EMAIL_PROVIDER: z.enum(['smtp', 'ses']).default('smtp'),
     PUSH_PROVIDER: z.enum(['fake', 'fcm']).default('fake'),
@@ -124,6 +145,37 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
     keys.forEach((key) => {
       if (!set(String(env[key]))) fail(key, 'Required for the selected provider');
     });
+  if (env.AGENT_ENABLED === 'true' && env.NODE_ENV === 'production' && env.LLM_PROVIDER === 'fake')
+    fail('LLM_PROVIDER', 'The fake assistant model is not permitted in production');
+  if (env.OPENROUTER_REASONING !== 'provider_default') {
+    let isOpenRouter = false;
+    try {
+      const endpoint = new URL(env.LLM_BASE_URL);
+      isOpenRouter =
+        endpoint.protocol === 'https:' &&
+        ['openrouter.ai', 'us.openrouter.ai', 'eu.openrouter.ai'].includes(endpoint.hostname);
+    } catch {
+      /* Report the same validation error for missing or malformed URLs. */
+    }
+    if (env.LLM_PROVIDER !== 'openai_compatible' || !isOpenRouter)
+      fail(
+        'OPENROUTER_REASONING',
+        'Explicit OpenRouter reasoning requires an HTTPS OpenRouter base URL and the openai_compatible provider',
+      );
+  }
+  if (env.LLM_THINKING === 'on' && !['nvidia', 'google'].includes(env.LLM_PROVIDER))
+    fail(
+      'LLM_THINKING',
+      'Thinking is supported only for the nvidia and google assistant providers',
+    );
+  if (env.LLM_PROVIDER === 'nvidia' && env.LLM_BASE_URL) {
+    try {
+      if (new URL(env.LLM_BASE_URL).protocol !== 'https:')
+        fail('LLM_BASE_URL', 'The assistant base URL must use HTTPS');
+    } catch {
+      fail('LLM_BASE_URL', 'Invalid URL');
+    }
+  }
   if (env.HTTP_HEADERS_TIMEOUT_MS > env.HTTP_REQUEST_TIMEOUT_MS)
     fail('HTTP_HEADERS_TIMEOUT_MS', 'Header deadline must not exceed the request receive deadline');
   for (const [key, protocols] of [

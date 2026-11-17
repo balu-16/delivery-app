@@ -3,9 +3,11 @@ import type { PlatformSchema } from '../../../platform/database/database.js';
 import { uuidV7 } from '../../../common/ids/ids.js';
 import type { Address, AddressDraft, AddressRepository } from '../contracts/addresses.js';
 import type { AddressSubscriptions } from '../../subscriptions/contracts/subscriptions.js';
+import { hashCanonical } from '../../../common/idempotency/idempotency.js';
 
 type DB = Kysely<PlatformSchema> | Transaction<PlatformSchema>;
 interface AddressRow {
+  label: 'HOME' | 'WORK' | 'OTHER' | null;
   id: string;
   line1: string;
   line2: string | null;
@@ -18,11 +20,12 @@ interface AddressRow {
   is_default: boolean;
   version: string;
 }
-const columns = sql`id, line1, line2, landmark, pincode, contact_name, contact_phone,
+const columns = sql`id, label, line1, line2, landmark, pincode, contact_name, contact_phone,
   ST_Y(point::geometry) AS latitude, ST_X(point::geometry) AS longitude, is_default, version::text`;
 function map(row: AddressRow): Address {
   return {
     id: row.id,
+    ...(row.label === null ? {} : { label: row.label }),
     line1: row.line1,
     ...(row.line2 === null ? {} : { line2: row.line2 }),
     ...(row.landmark === null ? {} : { landmark: row.landmark }),
@@ -65,9 +68,25 @@ export class PostgresAddresses implements AddressRepository {
     draft: AddressDraft,
     maxCount: number,
     makeDefault: boolean,
+    reference?: string,
   ): Promise<Address> {
     return this.db.transaction().execute(async (tx) => {
       await lockOwner(tx, userId);
+      const requestHash = reference ? hashCanonical({ draft, makeDefault }) : undefined;
+      if (reference) {
+        if (reference.length > 150) throw new Error('INVALID_INPUT');
+        const previous = await sql<{
+          request_hash: string;
+          address_id: string;
+        }>`SELECT request_hash,address_id FROM address_creation_operations WHERE user_id=${userId}::uuid AND reference=${reference}`.execute(
+          tx,
+        );
+        if (previous.rows[0]) {
+          if (previous.rows[0].request_hash !== requestHash)
+            throw new Error('IDEMPOTENCY_KEY_REUSED');
+          return find(tx, userId, previous.rows[0].address_id);
+        }
+      }
       const count = await sql<{
         count: string;
       }>`SELECT count(*)::text AS count FROM addresses WHERE user_id = ${userId} AND deleted_at IS NULL`.execute(
@@ -82,10 +101,14 @@ export class PostgresAddresses implements AddressRepository {
           tx,
         );
       const id = uuidV7();
-      await sql`INSERT INTO addresses (id, user_id, line1, line2, landmark, pincode, contact_name, contact_phone, point, is_default)
-        VALUES (${id}, ${userId}, ${draft.line1.trim()}, ${draft.line2 ?? null}, ${draft.landmark ?? null}, ${draft.pincode}, ${draft.contactName.trim()}, ${draft.contactPhone}, ST_SetSRID(ST_MakePoint(${draft.point.lng}, ${draft.point.lat}), 4326)::geography, ${isDefault})`.execute(
+      await sql`INSERT INTO addresses (id, user_id, label, line1, line2, landmark, pincode, contact_name, contact_phone, point, is_default)
+        VALUES (${id}, ${userId}, ${draft.label ?? null}, ${draft.line1.trim()}, ${draft.line2 ?? null}, ${draft.landmark ?? null}, ${draft.pincode}, ${draft.contactName.trim()}, ${draft.contactPhone}, ST_SetSRID(ST_MakePoint(${draft.point.lng}, ${draft.point.lat}), 4326)::geography, ${isDefault})`.execute(
         tx,
       );
+      if (reference && requestHash)
+        await sql`INSERT INTO address_creation_operations(user_id,reference,request_hash,address_id) VALUES(${userId}::uuid,${reference},${requestHash},${id}::uuid)`.execute(
+          tx,
+        );
       return find(tx, userId, id);
     });
   }
@@ -99,7 +122,7 @@ export class PostgresAddresses implements AddressRepository {
       await lockOwner(tx, userId);
       const old = await find(tx, userId, id);
       if (old.version !== expectedVersion) throw new Error('CONCURRENT_MODIFICATION');
-      await sql`UPDATE addresses SET line1=${draft.line1.trim()}, line2=${draft.line2 ?? null}, landmark=${draft.landmark ?? null}, pincode=${draft.pincode}, contact_name=${draft.contactName.trim()}, contact_phone=${draft.contactPhone}, point=ST_SetSRID(ST_MakePoint(${draft.point.lng}, ${draft.point.lat}), 4326)::geography, version=version+1, updated_at=clock_timestamp() WHERE id=${id} AND user_id=${userId} AND deleted_at IS NULL`.execute(
+      await sql`UPDATE addresses SET label=COALESCE(${draft.label ?? null},label), line1=${draft.line1.trim()}, line2=${draft.line2 ?? null}, landmark=${draft.landmark ?? null}, pincode=${draft.pincode}, contact_name=${draft.contactName.trim()}, contact_phone=${draft.contactPhone}, point=ST_SetSRID(ST_MakePoint(${draft.point.lng}, ${draft.point.lat}), 4326)::geography, version=version+1, updated_at=clock_timestamp() WHERE id=${id} AND user_id=${userId} AND deleted_at IS NULL`.execute(
         tx,
       );
       return find(tx, userId, id);

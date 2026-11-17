@@ -3,6 +3,9 @@ minimumReleaseAgeExclude:
   - '@nestjs/core@12.4.0'
   - '@nestjs/platform-fastify@12.4.0'
   - '@nestjs/swagger@12.1.1'
+  - '@langchain/langgraph-checkpoint-postgres@1.1.4'
+  - '@langchain/langgraph-checkpoint@1.2.3'
+  - '@langchain/langgraph-sdk@1.17.0'
 allowBuilds:
   '@firebase/util': false
   '@scarf/scarf': false

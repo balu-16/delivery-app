@@ -73,10 +73,16 @@ export interface IdentityAuthorizer {
   bootstrap(identity: VerifiedIdentity, referralCode?: string): Promise<Principal>;
   acceptConsent(
     userId: string,
-    type: 'terms' | 'privacy',
+    type: 'terms' | 'privacy' | 'ai_assistant',
     version: string,
     ip: string | null,
   ): Promise<void>;
+  hasConsent(
+    userId: string,
+    type: 'terms' | 'privacy' | 'ai_assistant',
+    version: string,
+  ): Promise<boolean>;
+  revokeAiConsent(userId: string): Promise<void>;
 }
 export const IDENTITY_AUTHORIZER = Symbol('IDENTITY_AUTHORIZER');
 export interface UserProfiles {

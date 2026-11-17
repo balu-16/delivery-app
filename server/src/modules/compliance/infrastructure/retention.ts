@@ -1,16 +1,20 @@
 import { sql } from 'kysely';
 import type { Database } from '../../../platform/database/database.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
+import type { AgentPrivacy } from '../../agent/contracts/privacy.js';
 /** Retain notification dedupe tombstones and financial/operation references indefinitely. */
 export class ComplianceRetention {
   constructor(
     private readonly db: Database,
     private readonly config: AppConfig,
+    private readonly agent?: AgentPrivacy,
   ) {}
   async runOnce(): Promise<void> {
     const batch = await this.config.get('retentionBatchSize');
     const days = await this.config.get('notificationRetentionDays');
     const hours = await this.config.get('responseCacheRetentionHours');
+    if (this.agent)
+      await this.agent.purgeExpired(await this.config.get('agent_thread_retention_days'), batch);
     await sql`WITH old AS (SELECT id FROM notifications WHERE retention_anonymized_at IS NULL AND status IN ('SENT','FAILED','SKIPPED') AND created_at < clock_timestamp()-${days}*interval '1 day' ORDER BY created_at,id LIMIT ${batch} FOR UPDATE SKIP LOCKED)
       UPDATE notifications n SET payload='{}'::jsonb,error=NULL,retention_anonymized_at=clock_timestamp() FROM old WHERE n.id=old.id`.execute(
       this.db,

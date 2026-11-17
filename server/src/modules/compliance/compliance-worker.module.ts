@@ -25,6 +25,8 @@ import { FraudReviewScanner } from './infrastructure/fraud-review.js';
 import { ComplianceRetention } from './infrastructure/retention.js';
 import { ExportWorker } from './infrastructure/export-worker.js';
 import { ErasureProcessor } from './infrastructure/erasure-processor.js';
+import { AgentPrivacyModule } from '../agent/agent-privacy.module.js';
+import { AGENT_PRIVACY, type AgentPrivacy } from '../agent/contracts/privacy.js';
 const ERASURE_PROCESSOR = Symbol('ERASURE_PROCESSOR');
 const EXPORT_WORKER = Symbol('EXPORT_WORKER');
 const RETENTION = Symbol('RETENTION');
@@ -90,7 +92,7 @@ export class ComplianceWorkerModule {
   static register(imports: ModuleMetadata['imports']): DynamicModule {
     return {
       module: ComplianceWorkerModule,
-      imports,
+      imports: [...(imports ?? []), AgentPrivacyModule],
       providers: [
         {
           provide: ERASURE_PROCESSOR,
@@ -101,6 +103,7 @@ export class ComplianceWorkerModule {
             P11_PRIVACY,
             PRIVATE_UPLOADS,
             TRACKING_PRIVACY,
+            AGENT_PRIVACY,
           ],
           useFactory: (
             db: DatabaseHandle,
@@ -109,7 +112,8 @@ export class ComplianceWorkerModule {
             support: P11Privacy,
             media: PrivateMediaErasure,
             tracking: TrackingPrivacy,
-          ) => new ErasureProcessor(db.db, subscriptions, payouts, support, media, tracking),
+            agent: AgentPrivacy,
+          ) => new ErasureProcessor(db.db, subscriptions, payouts, support, media, tracking, agent),
         },
         {
           provide: EXPORT_WORKER,
@@ -123,9 +127,9 @@ export class ComplianceWorkerModule {
         },
         {
           provide: RETENTION,
-          inject: [PLATFORM_DATABASE, APP_CONFIG],
-          useFactory: (db: DatabaseHandle, config: AppConfig) =>
-            new ComplianceRetention(db.db, config),
+          inject: [PLATFORM_DATABASE, APP_CONFIG, AGENT_PRIVACY],
+          useFactory: (db: DatabaseHandle, config: AppConfig, agent: AgentPrivacy) =>
+            new ComplianceRetention(db.db, config, agent),
         },
         {
           provide: FRAUD_SCANNER,

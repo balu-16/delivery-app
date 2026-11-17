@@ -96,14 +96,14 @@ export class IdentityService {
   }
   async acceptConsent(
     userId: string,
-    type: 'terms' | 'privacy',
+    type: 'terms' | 'privacy' | 'ai_assistant',
     version: string,
     ip: string | null,
   ): Promise<void> {
     if (!/^[a-zA-Z0-9._-]{1,40}$/.test(version)) throw new Error('INVALID_CONSENT_VERSION');
     await this.db.transaction().execute(async (tx) => {
       const result =
-        await sql`INSERT INTO consents(user_id,type,version,ip) SELECT id,${type},${version},${ip}::inet FROM users WHERE id=${userId}::uuid AND status='ACTIVE' ON CONFLICT DO NOTHING`.execute(
+        await sql`INSERT INTO consents(user_id,type,version,ip) SELECT id,${type},${version},${ip}::inet FROM users WHERE id=${userId}::uuid AND status='ACTIVE' ON CONFLICT (user_id,type,version) DO UPDATE SET revoked_at=NULL,accepted_at=clock_timestamp(),ip=EXCLUDED.ip WHERE consents.revoked_at IS NOT NULL`.execute(
           tx,
         );
       if (result.numAffectedRows)
@@ -112,12 +112,29 @@ export class IdentityService {
         );
     });
   }
-  async hasConsent(userId: string, type: 'terms' | 'privacy', version: string): Promise<boolean> {
+  async hasConsent(
+    userId: string,
+    type: 'terms' | 'privacy' | 'ai_assistant',
+    version: string,
+  ): Promise<boolean> {
     const result = await sql<{
       ok: boolean;
-    }>`SELECT EXISTS(SELECT 1 FROM consents WHERE user_id=${userId}::uuid AND type=${type} AND version=${version}) AS ok`.execute(
+    }>`SELECT EXISTS(SELECT 1 FROM consents WHERE user_id=${userId}::uuid AND type=${type} AND version=${version} AND revoked_at IS NULL) AS ok`.execute(
       this.db,
     );
     return result.rows[0]?.ok === true;
+  }
+  async revokeAiConsent(userId: string): Promise<void> {
+    await this.db.transaction().execute(async (tx) => {
+      await sql`SELECT id FROM users WHERE id=${userId}::uuid FOR UPDATE`.execute(tx);
+      const changed =
+        await sql`UPDATE consents SET revoked_at=clock_timestamp(), ip=NULL WHERE user_id=${userId}::uuid AND type='ai_assistant' AND revoked_at IS NULL`.execute(
+          tx,
+        );
+      if (changed.numAffectedRows)
+        await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES (${uuidV7()}::uuid,${userId}::uuid,'CONSENT_REVOKED','user',${userId},${JSON.stringify({ type: 'ai_assistant' })}::jsonb)`.execute(
+          tx,
+        );
+    });
   }
 }

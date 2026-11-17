@@ -11,6 +11,7 @@ export function distanceMetres(a: Coordinates, b: Coordinates): number {
   return 12_742_000 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
 }
 export interface AddressInput {
+  label?: 'HOME' | 'WORK' | 'OTHER';
   line1: string;
   line2?: string;
   landmark?: string;
@@ -34,6 +35,8 @@ export function validateIndiaPoint(point: Coordinates): void {
   }
 }
 export function validateAddress(input: AddressInput): void {
+  if (input.label !== undefined && !['HOME', 'WORK', 'OTHER'].includes(input.label))
+    throw new Error('INVALID_ADDRESS');
   validateIndiaPoint(input.point);
   if (!/^\d{6}$/.test(input.pincode)) throw new Error('INVALID_PINCODE');
   if (!/^\+[1-9]\d{7,14}$/.test(input.contactPhone)) throw new Error('INVALID_CONTACT_PHONE');

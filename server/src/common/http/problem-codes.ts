@@ -75,6 +75,7 @@ export const PROBLEM_CODES: Readonly<Record<number, readonly string[]>> = {
     'INVOICE_NOT_FOUND',
   ],
   409: [
+    'DRAFT_PENDING',
     'INVOICE_NOT_RENDERED',
     'INVOICE_RENDER_NOT_SUSPENDED',
     'IDEMPOTENCY_LEASE_LOST',
@@ -143,6 +144,7 @@ export const PROBLEM_CODES: Readonly<Record<number, readonly string[]>> = {
   413: ['IMPORT_TOO_LARGE'],
   502: ['ExternalServiceRejected'],
   503: [
+    'AGENT_NOT_CONFIGURED',
     'ExternalServiceUnavailable',
     'ExternalServiceTimeout',
     'FULFILLMENT_DEPENDENCY_UNAVAILABLE',
@@ -154,6 +156,14 @@ export const PROBLEM_CODES: Readonly<Record<number, readonly string[]>> = {
 
 /** Codes translated directly from domain errors, preserving existing status semantics. */
 export const DOMAIN_ERROR_STATUS: Readonly<Record<string, number>> = {
+  AGENT_NOT_CONFIGURED: 503,
+  AGENT_DAILY_LIMIT: 429,
+  DRAFT_PENDING: 409,
+  THREAD_ARCHIVED: 409,
+  DRAFT_NOT_PENDING: 409,
+  DRAFT_EXPIRED: 409,
+  DRAFT_INVALID: 409,
+  RUN_IN_PROGRESS: 409,
   SESSION_EXPIRED: 401,
   SESSION_REPLACED: 401,
   CONFLICTING_CREDENTIALS: 409,

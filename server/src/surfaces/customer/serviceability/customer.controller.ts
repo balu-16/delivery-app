@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import {
   IsBoolean,
+  IsIn,
   IsLatitude,
   IsLongitude,
   IsNumber,
@@ -58,6 +59,10 @@ class DetailsQuery {
   @ApiProperty({ minLength: 1, maxLength: 200 }) @IsString() @Length(1, 200) placeId!: string;
 }
 class AddressFieldsDto {
+  @ApiPropertyOptional({ enum: ['HOME', 'WORK', 'OTHER'] })
+  @IsOptional()
+  @IsIn(['HOME', 'WORK', 'OTHER'])
+  label?: 'HOME' | 'WORK' | 'OTHER';
   @ApiProperty({ minLength: 1, maxLength: 200 }) @IsString() @Length(1, 200) line1!: string;
   @ApiPropertyOptional({ maxLength: 200 }) @IsOptional() @IsString() @Length(0, 200) line2?: string;
   @ApiPropertyOptional({ maxLength: 200 })
@@ -91,6 +96,7 @@ class PointView {
   @ApiProperty() lng!: number;
 }
 class AddressView {
+  @ApiPropertyOptional({ enum: ['HOME', 'WORK', 'OTHER'] }) label?: 'HOME' | 'WORK' | 'OTHER';
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() line1!: string;
   @ApiPropertyOptional() line2?: string;
@@ -169,6 +175,7 @@ async function result<T>(work: () => Promise<T>): Promise<T> {
 }
 function address(dto: AddressFieldsDto) {
   return {
+    ...(dto.label === undefined ? {} : { label: dto.label }),
     line1: dto.line1,
     ...(dto.line2 === undefined ? {} : { line2: dto.line2 }),
     ...(dto.landmark === undefined ? {} : { landmark: dto.landmark }),
