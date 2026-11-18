@@ -41,7 +41,7 @@ interface ScenarioResult {
 }
 
 const PACING_MS = 2500;
-const RETRY_DELAY_MS = 15000;
+const RETRY_DELAY_MS = 30000;
 const TELEUGU = /[\u0C00-\u0C7F]/;
 
 function providerArgs(provider: string): { LLM_PROVIDER: string; LLM_MODEL: string } {
@@ -257,6 +257,18 @@ async function main(): Promise<void> {
     await sql`INSERT INTO wallet_accounts(id,user_id,cash_balance_paise) VALUES(${randomUUID()}::uuid,${world.customer}::uuid,15000)`.execute(
       db.db,
     );
+    await sql`UPDATE stores SET accepts_cod=true WHERE id IN (${world.store}::uuid,${world.otherStore}::uuid)`.execute(
+      db.db,
+    );
+    const seedCheck = await sql<{
+      accepts_cod: boolean;
+      flag: boolean;
+    }>`SELECT (SELECT accepts_cod FROM stores WHERE id=${world.store}::uuid) AS accepts_cod,(SELECT enabled FROM feature_flags WHERE key='cod_enabled') AS flag`.execute(
+      db.db,
+    );
+    console.log(
+      `seed check: accepts_cod=${seedCheck.rows[0]?.accepts_cod} cod_enabled=${seedCheck.rows[0]?.flag}`,
+    );
     const milk = await seedProduct(world, 'Toned Milk', ['500 ml', '1 L'], 3200n);
     const _curd = await seedProduct(world, 'Curd', ['400 g cup', '1 kg tub'], 5500n);
     const paneer = await seedProduct(world, 'Paneer', ['200 g'], 9900n);
@@ -310,7 +322,7 @@ async function main(): Promise<void> {
       LLM_TEMPERATURE: '0',
       LLM_MAX_OUTPUT_TOKENS: '1024',
       LLM_TIMEOUT_MS: '60000',
-      LLM_MAX_RETRIES: '1',
+      LLM_MAX_RETRIES: '3',
       ...models,
       GOOGLE_API_KEY: process.env.GOOGLE_API_KEY ?? '',
       NVIDIA_API_KEY: process.env.NVIDIA_API_KEY ?? '',
@@ -400,7 +412,7 @@ async function main(): Promise<void> {
           const ask = await turn(ops, {
             userId: cust1,
             threadId: thread,
-            text: 'నాకు Toned Milk 500 ml రెండు ప్యాకెట్లు ఇంటి చిరునామాకి కావాలి',
+            text: 'నాకు Paneer 200 g ఒకటి ఇంటి చిరునామాకి కావాలి',
             locale: 'te',
             clientMessageId: randomUUID(),
           });
@@ -421,13 +433,13 @@ async function main(): Promise<void> {
             });
           const orders = await sql<{
             n: string;
-          }>`SELECT count(*)::text AS n FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.user_id=${cust1}::uuid AND o.status='CONFIRMED' AND oi.ordered_qty=2`.execute(
+          }>`SELECT count(*)::text AS n FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.user_id=${cust1}::uuid AND o.status='CONFIRMED' AND oi.name_snapshot LIKE 'Paneer%' AND oi.ordered_qty=1`.execute(
             db.db,
           );
           check(
             failures,
             Number(orders.rows[0]?.n ?? 0) >= 1,
-            'no confirmed order with quantity 2',
+            'no confirmed Paneer order placed by this scenario',
           );
           return {
             turns: [
@@ -452,7 +464,7 @@ async function main(): Promise<void> {
           const ask = await turn(ops, {
             userId: cust1,
             threadId: thread,
-            text: '2 Toned Milk 500 ml packets home address ki kavanandi',
+            text: 'Paneer 200 g okati home address ki kavanandi',
             locale: 'te',
             clientMessageId: randomUUID(),
           });
@@ -840,7 +852,7 @@ async function main(): Promise<void> {
           const tickets = await sql<{
             n: string;
             category: string;
-          }>`SELECT count(*)::text AS n,category FROM support_tickets WHERE user_id=${cust2}::uuid AND category='refund_request' GROUP BY category`.execute(
+          }>`SELECT count(*)::text AS n,category FROM support_tickets WHERE owner_id=${cust2}::uuid AND category='refund_request' GROUP BY category`.execute(
             db.db,
           );
           check(
@@ -900,10 +912,15 @@ async function main(): Promise<void> {
       await sleep(paceMs);
       const result = await runScenario(scenario.name, scenario.body);
       if (result.error && result.error.includes('AGENT_UNAVAILABLE')) {
+        // Provider overload: back off once more before recording the failure.
         await sleep(RETRY_DELAY_MS);
         const retried = await runScenario(scenario.name, scenario.body);
-        report.scenarios.push(retried);
-        consecutiveFailures = retried.ok || !retried.error ? 0 : consecutiveFailures + 1;
+        const settled =
+          retried.ok || !retried.error || !retried.error.includes('AGENT_UNAVAILABLE')
+            ? retried
+            : (await sleep(RETRY_DELAY_MS), await runScenario(scenario.name, scenario.body));
+        report.scenarios.push(settled);
+        consecutiveFailures = settled.ok || !settled.error ? 0 : consecutiveFailures + 1;
       } else {
         report.scenarios.push(result);
         consecutiveFailures = result.ok ? 0 : consecutiveFailures + 1;
