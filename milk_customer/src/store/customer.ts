@@ -2,9 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
 import { create } from 'zustand';
 import { ApiError } from '../api/client';
-import { customerApi, customerDetailsApi, type CatalogItem, type CustomerAddress, type CustomerProfile, type NewCustomerAddress, type ServerCart, type QuoteResult, type PlaceRequest, type CustomerOrder, type CustomerSubscription, type SubscriptionCreateRequest, type Notification, type WalletBalances, type WalletEntry } from '../api/customer';
+import { requestMessage } from '../api/messages';
+import { customerApi, customerDetailsApi, type CatalogItem, type CustomerAddress, type CustomerProfile, type NewCustomerAddress, type PendingCustomerAddress, type ServerCart, type QuoteResult, type PlaceRequest, type CustomerOrder, type CustomerSubscription, type SubscriptionCreateRequest, type Notification, type WalletBalances, type WalletEntry } from '../api/customer';
 import { accessToken, restoreSession, signOut } from '../auth/session';
 import { unregisterPushBeforeSignOut } from '../notifications/push';
+import { requireLocationServices } from '../utils/location-policy';
 
 const pendingKey = (userId: string) => `@dairydirect/pending-checkout-v1:${userId}`;
 const subscriptionKey = (userId: string) => `@dairydirect/pending-subscription-v1:${userId}`;
@@ -20,6 +22,18 @@ let catalogRequest = 0, activityRequest = 0, accountRequest = 0;
 export type LoadState = 'idle' | 'loading' | 'success' | 'error';
 const beginLoad = (state: LoadState): LoadState => state === 'success' ? 'success' : 'loading';
 const failedLoad = (state: LoadState): LoadState => state === 'success' ? 'success' : 'error';
+const localMessages = new Set([
+  'Your pending checkout could not be read. Please contact support before placing another order.',
+  'Your pending subscription could not be read. Please contact support before starting another.',
+  'Your pending subscription change could not be read. Please contact support before changing it again.',
+  'Sign in to order.', 'Sign in to continue.', 'Select a subscription first.', 'Select a subscription change first.',
+  'Review a current checkout quote before ordering.', 'Cash on delivery is not available for this order.',
+  'This checkout belongs to a different account.', 'This subscription belongs to a different account.',
+  'This subscription change belongs to a different account.', 'Check your pending subscription change before making another.',
+  'Your order is awaiting payment. Check order history before retrying.',
+  'Turn on your phone location to place this order.', 'Allow location access in your phone settings to place this order.',
+  'Confirm the location at your delivery address before reviewing your order.',
+]);
 
 function readable(error: unknown) {
   if (error instanceof ApiError) {
@@ -30,16 +44,18 @@ function readable(error: unknown) {
       case 'INVENTORY_INSUFFICIENT': case 'ITEM_UNAVAILABLE': return 'This item is no longer available in the requested quantity.';
       case 'PRICE_CHANGED': return 'Prices changed. Review a new quote before ordering.';
       case 'QUOTE_EXPIRED': return 'Your order summary expired. Review it again before ordering.';
-      case 'ADDRESS_NOT_SERVICEABLE': return 'This address is not currently serviceable.';
+      case 'ADDRESS_NOT_SERVICEABLE': return 'We cannot deliver to this address right now. Try another address or contact support.';
+      case 'ADDRESS_LOCATION_REQUIRED': return 'Confirm the location at your delivery address to see available products.';
       case 'COD_NOT_ELIGIBLE': case 'COD_LIMIT_EXCEEDED': return 'Cash on delivery is not available for this order.';
       case 'WALLET_INSUFFICIENT': case 'WALLET_DISABLED': return 'Your wallet availability changed. Review your order again.';
       case 'CUTOFF_PASSED': return 'This delivery is past the change cutoff.';
       case 'SUBSCRIPTION_STATE_INVALID': return 'This subscription can no longer be changed in that way.';
-      default: return `The request could not be completed (${error.code}).`;
+      default: return requestMessage(error);
     }
   }
   if (error instanceof TypeError) return 'Unable to reach the server. Check your connection and try again.';
-  return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+  if (error instanceof Error && localMessages.has(error.message)) return error.message;
+  return requestMessage(error);
 }
 async function safeCart(token: string) {
   try { return await customerApi.cart(token); }
@@ -48,7 +64,7 @@ async function safeCart(token: string) {
 type Status = 'loading' | 'signedOut' | 'signedIn' | 'unavailable';
 type CustomerState = {
   status: Status; error: string | null; busy: boolean; cartBusy: boolean;
-  profile: CustomerProfile | null; addresses: CustomerAddress[]; selectedAddress: string | null;
+  profile: CustomerProfile | null; addresses: CustomerAddress[]; selectedAddress: string | null; locationRequired: boolean;
   products: CatalogItem[]; cursor: string | null; cart: ServerCart | null; quote: QuoteResult | null;
   pendingPlacement: PendingPlacement | null; orders: CustomerOrder[]; subscriptions: CustomerSubscription[];
   pendingSubscription: PendingSubscription | null;
@@ -59,7 +75,8 @@ type CustomerState = {
   activityLoad: { orders: LoadState; subscriptions: LoadState };
   accountLoad: { wallet: LoadState; ledger: LoadState; notifications: LoadState };
   initialize: () => Promise<void>; load: () => Promise<void>; logout: () => Promise<void>;
-  chooseAddress: (id: string) => Promise<void>; addAddress: (value: NewCustomerAddress) => Promise<{needsConfirmation:boolean; degraded:boolean; temporarilyUnavailable:boolean}>;
+  chooseAddress: (id: string) => Promise<void>; addAddress: (value: PendingCustomerAddress & Partial<Pick<NewCustomerAddress, 'lat' | 'lng'>>) => Promise<{id:string; locationNeeded:boolean; needsConfirmation:boolean; degraded:boolean; temporarilyUnavailable:boolean}>;
+  confirmAddressLocation: (id: string, point: {lat:number; lng:number}) => Promise<{temporarilyUnavailable:boolean; needsConfirmation:boolean; degraded:boolean}>; refreshAddresses: () => Promise<void>; refreshDeliverySettings: () => Promise<boolean>;
   loadCatalog: (cursor?: string) => Promise<void>; updateCart: (id: string, delta: number) => Promise<void>;
   refreshCart: () => Promise<void>; createQuote: () => Promise<void>; placeOrder: () => Promise<boolean>;
   changeCoupon: (code:string | null) => Promise<void>;
@@ -70,7 +87,7 @@ type CustomerState = {
   loadFavorites: () => Promise<void>; toggleFavorite: (id:string) => Promise<void>;
 };
 
-const blank = { profile: null, addresses: [], selectedAddress: null, products: [], cursor: null, cart: null, quote: null, pendingPlacement: null, pendingSubscription: null, pendingSubscriptionAction:null, favorites: [], favoritesLoaded:false, favoriteBusy:[], orders: [], subscriptions: [], notifications: [], wallet: null, ledger: [],
+const blank = { profile: null, addresses: [], selectedAddress: null, locationRequired: true, products: [], cursor: null, cart: null, quote: null, pendingPlacement: null, pendingSubscription: null, pendingSubscriptionAction:null, favorites: [], favoritesLoaded:false, favoriteBusy:[], orders: [], subscriptions: [], notifications: [], wallet: null, ledger: [],
   catalogLoad: { addressId: null, state: 'idle' as LoadState }, activityLoad: { orders: 'idle' as LoadState, subscriptions: 'idle' as LoadState },
   accountLoad: { wallet: 'idle' as LoadState, ledger: 'idle' as LoadState, notifications: 'idle' as LoadState } };
 export const useCustomer = create<CustomerState>((set, get) => ({
@@ -90,7 +107,7 @@ export const useCustomer = create<CustomerState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const token = await accessToken();
-      const [profile, addresses, cart] = await Promise.all([customerApi.profile(token), customerApi.addresses(token), safeCart(token)]);
+      const [profile, addresses, cart, deliverySettings] = await Promise.all([customerApi.profile(token), customerApi.addresses(token), safeCart(token), customerApi.deliverySettings(token).catch(() => ({locationRequired:true}))]);
       const chosen = addresses.find(x => x.isDefault)?.id ?? addresses.find(x => x.id === cart?.addressId)?.id ?? addresses[0]?.id ?? null;
       let pending: PendingPlacement | null = null;
       const raw = await AsyncStorage.getItem(pendingKey(profile.userId));
@@ -121,7 +138,7 @@ export const useCustomer = create<CustomerState>((set, get) => ({
         } catch { throw new Error('Your pending subscription change could not be read. Please contact support before changing it again.'); }
       }
       if (generation !== epoch) return;
-      set({ profile, addresses, selectedAddress: chosen, cart, quote: null, pendingPlacement: pending, pendingSubscription, pendingSubscriptionAction, status: 'signedIn', busy: false });
+      set({ profile, addresses, selectedAddress: chosen, locationRequired:deliverySettings.locationRequired, cart, quote: null, pendingPlacement: pending, pendingSubscription, pendingSubscriptionAction, status: 'signedIn', busy: false });
       void get().loadFavorites();
       if (chosen) await get().loadCatalog();
     } catch (error) { if (generation === epoch) set({ status: 'unavailable', busy: false, error: readable(error) }); }
@@ -140,32 +157,74 @@ export const useCustomer = create<CustomerState>((set, get) => ({
     const generation = epoch;
     set({ busy: true, error: null });
     try { const token = await accessToken(); await customerApi.selectDefaultAddress(token, id); if (generation !== epoch) return; set({ selectedAddress: id, products: [], cursor: null, quote: null }); await get().loadCatalog(); }
-    catch (error) { if (generation === epoch) set({ error: readable(error) }); } finally { if (generation === epoch) set({ busy: false }); }
+    catch (error) { if (generation === epoch) set({ error: readable(error) }); throw error; } finally { if (generation === epoch) set({ busy: false }); }
   },
   addAddress: async value => {
     const generation = epoch;
     set({ busy: true, error: null });
     try {
       const token = await accessToken();
-      const service = await customerApi.serviceability(token, value.lat, value.lng).catch(error => {
+      const hasPoint = typeof value.lat === 'number' && typeof value.lng === 'number';
+      const service = await customerApi.serviceability(token, value.pincode).catch(error => {
         if (error instanceof ApiError && (error.status === 401 || error.status === 403))
           throw new Error('Could not check delivery coverage. Sign in again and try again.');
         if (error instanceof TypeError)
           throw new Error('Could not check delivery coverage. Check your connection and try again.');
         throw new Error('Could not check delivery coverage. Please try again shortly.');
       });
-      if (!service.zone || service.reasons.includes('OUTSIDE_ZONE')) throw new Error('This address is outside the current delivery area.');
-      const result = await customerApi.createAddress(token, { ...value, makeDefault: true });
+      const {lat, lng, ...written} = value;
+      const requestBody = {...written, makeDefault:true};
+      const userId = get().profile?.userId;
+      if (!userId) throw new Error('Sign in again to save this address.');
+      const fingerprint = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify(requestBody));
+      const storageKey = `@dairydirect/pending-address:${userId}:${fingerprint}`;
+      let key = await AsyncStorage.getItem(storageKey);
+      if (!key) { key = Crypto.randomUUID(); await AsyncStorage.setItem(storageKey, key); }
+      let result = await customerApi.createPendingAddress(token, requestBody, key);
+      if (hasPoint && lat !== undefined && lng !== undefined) {
+        result = await customerApi.confirmAddressLocation(token, result.address.id, {lat, lng, version:result.address.version});
+      }
+      const address = result.address;
+      await AsyncStorage.removeItem(storageKey).catch(() => undefined);
       if (generation !== epoch) throw new Error('Session changed.');
-      const addresses = [...get().addresses.filter(address => address.id !== result.address.id).map(address => ({...address,isDefault:false})), result.address];
-      set({ addresses, selectedAddress: result.address.id, quote: null, products: [] });
+      const addresses = [...get().addresses.filter(item => item.id !== address.id).map(item => ({...item,isDefault:false})), address];
+      set({ addresses, selectedAddress: address.id, quote: null, products: [] });
       await get().loadCatalog();
-      return {needsConfirmation:result.needsConfirmation, degraded:result.degraded, temporarilyUnavailable:!service.serviceable};
+      return {id:address.id, locationNeeded:get().locationRequired && !address.point, needsConfirmation:result.needsConfirmation, degraded:result.degraded, temporarilyUnavailable:!service.serviceable};
     } finally { if (generation === epoch) set({ busy: false }); }
+  },
+  refreshAddresses: async () => {
+    const generation = epoch;
+    const addresses = await customerApi.addresses(await accessToken());
+    if (generation === epoch) set({addresses, selectedAddress:addresses.find(item => item.isDefault)?.id ?? get().selectedAddress});
+  },
+  refreshDeliverySettings: async () => {
+    const generation = epoch;
+    const { locationRequired } = await customerApi.deliverySettings(await accessToken());
+    if (generation === epoch) set({ locationRequired });
+    return locationRequired;
+  },
+  confirmAddressLocation: async (id, point) => {
+    const generation = epoch;
+    set({busy:true,error:null});
+    try {
+      const address = get().addresses.find(item => item.id === id);
+      if (!address) throw new Error('Address not found. Reopen your saved addresses and try again.');
+      const token = await accessToken();
+      const service = await customerApi.serviceability(token, address.pincode);
+      const result = await customerApi.confirmAddressLocation(token, id, {...point, version:address.version});
+      await customerApi.selectDefaultAddress(token, id);
+      const addresses = await customerApi.addresses(token);
+      if (generation !== epoch) throw new Error('Your session changed. Sign in and try again.');
+      if (!addresses.some(item => item.id === result.address.id && item.point)) throw new Error('Could not refresh the confirmed address.');
+      set({addresses, selectedAddress:id, products:[], quote:null});
+      await get().loadCatalog();
+      return {temporarilyUnavailable:!service.serviceable,needsConfirmation:result.needsConfirmation,degraded:result.degraded};
+    } finally {if (generation === epoch) set({busy:false});}
   },
   loadCatalog: async cursor => {
     const addressId = get().selectedAddress; const generation = epoch;
-    if (!addressId) return;
+    if (!addressId || !get().addresses.some(item => item.id === addressId)) {set({products:[], cursor:null, catalogLoad:{addressId:null,state:'idle'}});return;}
     const request = ++catalogRequest;
     const previous = get().catalogLoad;
     set({ catalogLoad: { addressId, state: previous.addressId === addressId ? beginLoad(previous.state) : 'loading' } });
@@ -228,7 +287,7 @@ export const useCustomer = create<CustomerState>((set, get) => ({
     if (get().pendingPlacement) { set({ error: 'Check or retry your pending order first.' }); return; }
     if (!addressId || !get().cart?.lines.length) { set({ error: 'Add items and select a delivery address first.' }); return; }
     set({ busy: true, error: null, quote: null });
-    try { const token = await accessToken(); const quote = await customerApi.quote(token, { addressId }); const cart = await safeCart(token); if (generation === epoch && addressId === get().selectedAddress) set({ quote, cart }); }
+    try { const required = await get().refreshDeliverySettings(); if (required) {if (!get().addresses.find(item => item.id === addressId)?.point) throw new Error('Confirm the location at your delivery address before reviewing your order.'); await requireLocationServices();} const token = await accessToken(); const quote = await customerApi.quote(token, { addressId }); const cart = await safeCart(token); if (generation === epoch && addressId === get().selectedAddress) set({ quote, cart }); }
     catch (error) { if (generation === epoch) set({ error: readable(error) }); } finally { if (generation === epoch) set({ busy: false }); }
   },
   placeOrder: async () => {
@@ -239,6 +298,10 @@ export const useCustomer = create<CustomerState>((set, get) => ({
       const profile = get().profile; if (!profile) throw new Error('Sign in to order.');
       let pending = get().pendingPlacement;
       if (!pending) {
+        if (await get().refreshDeliverySettings()) {
+          if (!get().addresses.find(item => item.id === get().selectedAddress)?.point) throw new Error('Confirm the location at your delivery address before reviewing your order.');
+          await requireLocationServices();
+        }
         const quote = get().quote;
         if (!quote || quote.quote.issues.length || Date.parse(quote.intentExpiresAt) <= Date.now()) throw new Error('Review a current checkout quote before ordering.');
         if (!quote.codAvailable) throw new Error('Cash on delivery is not available for this order.');
@@ -258,7 +321,7 @@ export const useCustomer = create<CustomerState>((set, get) => ({
       return true;
     } catch (error) {
       // Keep the exact request and key across ambiguous network failures; never create a duplicate.
-      if (generation === epoch && error instanceof ApiError && ['COD_NOT_ELIGIBLE', 'COD_LIMIT_EXCEEDED', 'PRICE_CHANGED', 'QUOTE_EXPIRED', 'CONCURRENT_MODIFICATION', 'INVENTORY_INSUFFICIENT', 'ITEM_UNAVAILABLE', 'ADDRESS_NOT_SERVICEABLE', 'CART_NOT_FOUND', 'WALLET_INSUFFICIENT', 'WALLET_DISABLED', 'COUPON_INVALID', 'MIN_ORDER_NOT_MET', 'MAX_ORDER_EXCEEDED'].includes(error.code)) {
+      if (generation === epoch && error instanceof ApiError && ['COD_NOT_ELIGIBLE', 'COD_LIMIT_EXCEEDED', 'PRICE_CHANGED', 'QUOTE_EXPIRED', 'CONCURRENT_MODIFICATION', 'INVENTORY_INSUFFICIENT', 'ITEM_UNAVAILABLE', 'ADDRESS_NOT_SERVICEABLE', 'ADDRESS_LOCATION_REQUIRED', 'CART_NOT_FOUND', 'WALLET_INSUFFICIENT', 'WALLET_DISABLED', 'COUPON_INVALID', 'MIN_ORDER_NOT_MET', 'MAX_ORDER_EXCEEDED'].includes(error.code)) {
         const profile = get().profile;
         if (profile) { try { await AsyncStorage.removeItem(pendingKey(profile.userId)); set({ pendingPlacement: null, quote: null }); } catch { /* Retain the pending request until it can be safely removed. */ } }
       }

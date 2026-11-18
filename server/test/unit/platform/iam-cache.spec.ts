@@ -42,12 +42,16 @@ test('IAM subscriber connections obtain and refresh their own credentials', asyn
         cacheName: 'cache',
         username: 'cache-user',
         region: 'ap-southeast-2',
+        connectTimeoutMs: 30000,
+        commandTimeoutMs: 20000,
       },
       issue,
     );
     const subscriber = await duplicateRedis(publisher);
     expect(publisher.options.password).toBe('publisher-token');
     expect(subscriber.options.password).toBe('subscriber-token');
+    expect(subscriber.options.connectTimeout).toBe(30000);
+    expect(subscriber.options.commandTimeout).toBe(20000);
     await jest.advanceTimersByTimeAsync(5 * 60_000);
     expect(publisher.options.password).toBe('publisher-next');
     expect(subscriber.options.password).toBe('subscriber-next');

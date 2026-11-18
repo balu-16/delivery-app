@@ -64,6 +64,7 @@ export const PROBLEM_CODES: Readonly<Record<number, readonly string[]>> = {
   404: [
     'ADDRESS_NOT_FOUND',
     'STORE_NOT_FOUND',
+    'PINCODE_NOT_FOUND',
     'ZONE_NOT_FOUND',
     'PLACE_NOT_FOUND',
     'DOCUMENT_NOT_FOUND',
@@ -75,6 +76,11 @@ export const PROBLEM_CODES: Readonly<Record<number, readonly string[]>> = {
     'INVOICE_NOT_FOUND',
   ],
   409: [
+    'ADDRESS_LOCATION_REQUIRED',
+    'PINCODE_EXISTS',
+    'DISTANCE_REVIEW_NOT_REQUIRED',
+    'DISTANCE_ALREADY_REVIEWED',
+    'ONLINE_PAYMENTS_NOT_READY',
     'DRAFT_PENDING',
     'INVOICE_NOT_RENDERED',
     'INVOICE_RENDER_NOT_SUSPENDED',
@@ -88,6 +94,7 @@ export const PROBLEM_CODES: Readonly<Record<number, readonly string[]>> = {
     'LAST_SUPER_ADMIN',
     'CANNOT_DISABLE_SELF',
     'APPROVAL_INVALID',
+    'APPROVAL_EXPIRED',
     'APPROVAL_POLICY_CHANGED',
     'PROVISIONING_INPUT_CONFLICT',
     'ROLE_NOT_ASSIGNED',
@@ -145,6 +152,7 @@ export const PROBLEM_CODES: Readonly<Record<number, readonly string[]>> = {
   502: ['ExternalServiceRejected'],
   503: [
     'AGENT_NOT_CONFIGURED',
+    'AGENT_WORKER_UNAVAILABLE',
     'ExternalServiceUnavailable',
     'ExternalServiceTimeout',
     'FULFILLMENT_DEPENDENCY_UNAVAILABLE',
@@ -157,6 +165,7 @@ export const PROBLEM_CODES: Readonly<Record<number, readonly string[]>> = {
 /** Codes translated directly from domain errors, preserving existing status semantics. */
 export const DOMAIN_ERROR_STATUS: Readonly<Record<string, number>> = {
   AGENT_NOT_CONFIGURED: 503,
+  AGENT_WORKER_UNAVAILABLE: 503,
   AGENT_DAILY_LIMIT: 429,
   DRAFT_PENDING: 409,
   THREAD_ARCHIVED: 409,
@@ -187,6 +196,8 @@ export const DOMAIN_ERROR_STATUS: Readonly<Record<string, number>> = {
   RESOURCE_NOT_FOUND: 404,
   MEDIA_NOT_FOUND: 404,
   ADDRESS_NOT_SERVICEABLE: 404,
+  ADDRESS_LOCATION_REQUIRED: 409,
+  ONLINE_PAYMENTS_NOT_READY: 409,
   STORE_NOT_FOUND: 404,
   ORDER_NOT_FOUND: 404,
   CART_NOT_FOUND: 404,

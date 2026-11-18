@@ -198,6 +198,8 @@ export class PlatformModule {
                     cacheName: env.CACHE_IAM_NAME,
                     username: env.CACHE_IAM_USER,
                     region: env.AWS_REGION,
+                    connectTimeoutMs: env.CACHE_CONNECT_TIMEOUT_MS,
+                    commandTimeoutMs: env.CACHE_COMMAND_TIMEOUT_MS,
                   })
                 : createRedis(env.REDIS_URL);
             redis.on('error', () => undefined);
@@ -214,6 +216,8 @@ export class PlatformModule {
                     cacheName: env.CACHE_IAM_NAME,
                     username: env.CACHE_IAM_USER,
                     region: env.AWS_REGION,
+                    connectTimeoutMs: env.CACHE_CONNECT_TIMEOUT_MS,
+                    commandTimeoutMs: env.CACHE_COMMAND_TIMEOUT_MS,
                   })
                 : createRedis(env.REDIS_URL);
             redis.on('error', () => undefined);

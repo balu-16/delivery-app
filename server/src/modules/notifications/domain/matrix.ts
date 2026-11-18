@@ -349,6 +349,28 @@ export function planForEvent(event: MatrixEvent): NotificationPlan | null {
         '/offers',
       );
     }
+    case 'AGENT_RUN_READY':
+    case 'AGENT_RUN_WAITING':
+    case 'AGENT_RUN_FAILED': {
+      const userId = userIdOf(payload);
+      const threadId = uuidAt(payload, 'threadId');
+      if (!userId || !threadId) return null;
+      const template =
+        event.eventType === 'AGENT_RUN_WAITING'
+          ? 'agent.needs_you'
+          : event.eventType === 'AGENT_RUN_FAILED'
+            ? 'agent.run_failed'
+            : 'agent.reply_ready';
+      return plan(
+        template,
+        'ASSISTANT_UPDATES',
+        'TRANSACTIONAL',
+        ['PUSH'],
+        'USER',
+        { threadId },
+        '/agent',
+      );
+    }
     case 'AGENT_REORDER_NUDGE': {
       // Agent-generated restock nudge; PROMOTIONAL applies per-user
       // preferences and quiet hours in the pipeline.

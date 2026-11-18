@@ -6,6 +6,7 @@ export class SseParser {
   private readonly decoder = new TextDecoder();
   private readonly emit: (event: AgentEvent) => void;
   private event = '';
+  private sequence = '';
   private data: string[] = [];
   constructor(emit: (event: AgentEvent) => void) { this.emit = emit; }
   push(chunk: Uint8Array): void { this.buffer += this.decoder.decode(chunk, { stream: true }); this.lines(false); }
@@ -24,16 +25,17 @@ export class SseParser {
       if (this.event && this.data.length) {
         try {
           const parsed: unknown = JSON.parse(this.data.join('\n'));
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) this.emit({ event: this.event, data: parsed as Record<string, unknown> });
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) this.emit({ event: this.event, data: parsed as Record<string, unknown>, ...(this.sequence ? { sequence: this.sequence } : {}) });
         } catch { throw new Error('INVALID_AGENT_EVENT'); }
       }
-      this.event = ''; this.data = []; return;
+      this.event = ''; this.sequence = ''; this.data = []; return;
     }
     if (line.startsWith(':')) return;
     const colon = line.indexOf(':');
     const key = colon < 0 ? line : line.slice(0, colon);
     const value = colon < 0 ? '' : line.slice(colon + 1).replace(/^ /, '');
     if (key === 'event') this.event = value;
+    if (key === 'id' && /^\d{1,18}$/.test(value)) this.sequence = value;
     if (key === 'data') this.data.push(value);
   }
 }

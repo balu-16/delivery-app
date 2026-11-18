@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
 import { hashCanonical } from '../../../common/idempotency/idempotency.js';
 import { uuidV7 } from '../../../common/ids/ids.js';
@@ -7,9 +8,10 @@ import type { AddressOperations } from '../../addresses/contracts/addresses.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import type { CartService } from '../../cart/contracts/cart.js';
 import type { CatalogQuery } from '../../catalog/contracts/catalog.js';
-import type { OrderOperations, OrderStatus, OrderView } from '../../orders/contracts/orders.js';
+import type { OrderOperations } from '../../orders/contracts/orders.js';
+import { AGENT_DISCLOSURE_VERSION } from '../contracts/agent.js';
 import { sanitizeAgentText } from './guards.js';
-import { requireAgentPermission } from './security.js';
+import { assertAgentCommitAllowed, requireAgentPermission } from './security.js';
 
 const NUDGE_EVENT_TYPE = 'AGENT_REORDER_NUDGE';
 const NUDGE_TEMPLATE_KEY = 'agent.reorder_nudge';
@@ -17,17 +19,9 @@ const NUDGE_TEMPLATE_KEY = 'agent.reorder_nudge';
 const NUDGE_DUE_FACTOR = 0.8;
 const MIN_PURCHASES = 3;
 const RECENT_NUDGE_DAYS = 7;
+const IGNORED_NUDGE_LIMIT = 3;
 const SWEEP_USER_LIMIT = 50;
 const HISTORY_ORDER_LIMIT = 20;
-/** Variants already on their way to the customer are never nudged. */
-const ACTIVE_ORDER_STATUSES: readonly OrderStatus[] = [
-  'CONFIRMED',
-  'PICKING',
-  'PACKED',
-  'OUT_FOR_DELIVERY',
-];
-/** Failed or abandoned purchases never contribute cadence history. */
-const IGNORED_ORDER_STATUSES: readonly OrderStatus[] = ['CANCELLED', 'EXPIRED'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface PurchaseHistory {
@@ -142,6 +136,7 @@ export class AgentNudges {
       );
       if (!thread.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
       if (thread.rows[0].status !== 'active') throw new Error('THREAD_ARCHIVED');
+      await assertAgentCommitAllowed(tx, userId, threadId);
       const prior = await sql<{
         request_hash: string;
         result: Json;
@@ -152,7 +147,7 @@ export class AgentNudges {
         if (prior.rows[0].request_hash !== hash) throw new Error('IDEMPOTENCY_KEY_REUSED');
         return prior.rows[0].result as { enabled: boolean };
       }
-      await sql`INSERT INTO agent_nudge_preferences(user_id,enabled,updated_at) VALUES (${userId}::uuid,${enabled},clock_timestamp()) ON CONFLICT (user_id) DO UPDATE SET enabled=${enabled},updated_at=clock_timestamp()`.execute(
+      await sql`INSERT INTO agent_nudge_preferences(user_id,enabled,ignored_count,updated_at) VALUES (${userId}::uuid,${enabled},0,clock_timestamp()) ON CONFLICT (user_id) DO UPDATE SET enabled=${enabled},ignored_count=CASE WHEN ${enabled} THEN 0 ELSE agent_nudge_preferences.ignored_count END,updated_at=clock_timestamp()`.execute(
         tx,
       );
       await sql`INSERT INTO agent_tool_operations(thread_id,tool_call_id,user_id,request_hash,result) VALUES(${threadId}::uuid,${toolCallId},${userId}::uuid,${hash},${JSON.stringify(result)}::jsonb)`.execute(
@@ -195,23 +190,38 @@ export class AgentNudges {
       this.db,
     );
     const remaining = maxPerWeek - Number(weekly.rows[0]?.count ?? 0);
-    if (remaining <= 0) return 0;
-    const recentCutoff = new Date(now.getTime() - RECENT_NUDGE_DAYS * DAY_MS);
-    const recent =
-      await sql`SELECT 1 FROM notifications WHERE user_id=${userId}::uuid AND template_key=${NUDGE_TEMPLATE_KEY} AND created_at >= ${recentCutoff.toISOString()} LIMIT 1`.execute(
+    if (remaining <= 0) {
+      await this.rotate(userId);
+      return 0;
+    }
+    const unread = await sql<{
+      count: number;
+    }>`SELECT count(*)::int AS count FROM notifications WHERE user_id=${userId}::uuid AND template_key=${NUDGE_TEMPLATE_KEY} AND channel='INBOX' AND status='SENT' AND read_at IS NULL`.execute(
+      this.db,
+    );
+    if (Number(unread.rows[0]?.count ?? 0) >= IGNORED_NUDGE_LIMIT) {
+      await sql`UPDATE agent_nudge_preferences SET enabled=false,ignored_count=${IGNORED_NUDGE_LIMIT},updated_at=clock_timestamp() WHERE user_id=${userId}::uuid`.execute(
         this.db,
       );
-    if (recent.rows.length > 0) return 0;
-    const page = await this.orders.list(userId, HISTORY_ORDER_LIMIT);
-    const { history, activeVariantIds } = historyFromOrders(page.items);
-    if (history.size === 0) return 0;
+      return 0;
+    }
+    const signals = await this.orders.purchaseSignals(userId, HISTORY_ORDER_LIMIT);
+    const { history, activeVariantIds } = historyFromSignals(
+      signals.delivered,
+      signals.activeVariantIds,
+    );
+    if (history.size === 0) {
+      await this.rotate(userId);
+      return 0;
+    }
     const cart = await this.cart.get(userId);
     const addressId =
       cart?.addressId ??
       (await this.addresses.list(userId)).find((address) => address.isDefault)?.id;
-    // Availability needs a store (the cart's address, else the default saved
-    // address); without either the reorder could dead-end, so skip this pass.
-    if (!addressId) return 0;
+    if (!addressId) {
+      await this.rotate(userId);
+      return 0;
+    }
     const candidates = selectReorderCandidates({
       history,
       cartVariantIds: new Set((cart?.lines ?? []).map((line) => line.variantId)),
@@ -221,11 +231,30 @@ export class AgentNudges {
     });
     let sent = 0;
     for (const candidate of candidates) {
+      if (await this.nudgedRecently(userId, candidate.variantId, now)) continue;
       if (!(await this.inStock(userId, addressId, candidate))) continue;
-      await this.appendNudgeEvent(userId, candidate, now);
-      sent += 1;
+      const inserted = await this.appendNudgeEvent(userId, candidate, now, maxPerWeek);
+      if (inserted) sent += 1;
     }
+    await this.rotate(userId);
     return sent;
+  }
+
+  /** Move this opted-in customer behind the others so the next sweep is not the same 50. */
+  private async rotate(userId: string): Promise<void> {
+    await sql`UPDATE agent_nudge_preferences SET updated_at=clock_timestamp() WHERE user_id=${userId}::uuid AND enabled`.execute(
+      this.db,
+    );
+  }
+
+  private async nudgedRecently(userId: string, variantId: string, now: Date): Promise<boolean> {
+    const recentCutoff = new Date(now.getTime() - RECENT_NUDGE_DAYS * DAY_MS);
+    const recent =
+      await sql`SELECT 1 FROM notifications WHERE user_id=${userId}::uuid AND template_key=${NUDGE_TEMPLATE_KEY} AND COALESCE(payload->'data'->>'variantId',payload->>'variantId')=${variantId} AND created_at >= ${recentCutoff.toISOString()}
+      UNION ALL SELECT 1 FROM outbox_events WHERE event_type=${NUDGE_EVENT_TYPE} AND payload->>'userId'=${userId} AND payload->>'variantId'=${variantId} AND occurred_at >= ${recentCutoff.toISOString()} LIMIT 1`.execute(
+        this.db,
+      );
+    return recent.rows.length > 0;
   }
 
   /** Stock read through the agent's existing catalog search at the user's store. */
@@ -250,54 +279,93 @@ export class AgentNudges {
     userId: string,
     candidate: NudgeCandidate,
     now: Date,
-  ): Promise<void> {
-    // One transaction per nudge: the event and its consumer obligations commit
-    // together. A fresh aggregate id per nudge keeps dedupe from collapsing
-    // separate sweeps.
-    await this.db.transaction().execute(async (tx) =>
-      appendEvent(
-        tx,
-        {
-          eventId: uuidV7(),
-          eventType: NUDGE_EVENT_TYPE,
-          schemaVersion: 1,
-          aggregateType: 'agent_nudge',
-          aggregateId: uuidV7(),
-          aggregateVersion: '1',
-          occurredAt: now.toISOString(),
-          correlationId: userId,
-          causationId: null,
-          payload: { userId, variantId: candidate.variantId, productName: candidate.productName },
-        },
-        ['notifications'],
-      ),
-    );
+    maxPerWeek: number,
+  ): Promise<boolean> {
+    const week = utcWeekStart(now).toISOString().slice(0, 10);
+    const aggregateId = stableUuid(`${userId}:${candidate.variantId}:${week}`);
+    try {
+      return await this.db.transaction().execute(async (tx) => {
+        // Serialize scheduling with the customer's opt-out and other workers.
+        const user =
+          await sql`SELECT id FROM users WHERE id=${userId}::uuid AND status='ACTIVE' FOR UPDATE`.execute(
+            tx,
+          );
+        if (!user.rows.length) return false;
+        const permission = await sql<{ allowed: boolean }>`SELECT
+          COALESCE((SELECT enabled FROM feature_flags WHERE key='agent_enabled'),false)
+          AND COALESCE((SELECT value='true'::jsonb FROM app_config WHERE key='agent_proactive_nudges_enabled'),false)
+          AND EXISTS (SELECT 1 FROM consents WHERE user_id=${userId}::uuid AND type='ai_assistant' AND version=${AGENT_DISCLOSURE_VERSION} AND revoked_at IS NULL)
+          AND COALESCE((SELECT enabled FROM agent_nudge_preferences WHERE user_id=${userId}::uuid),false)
+          AND COALESCE((SELECT enabled FROM notification_preferences WHERE user_id=${userId}::uuid AND category='PROMOTIONS'),true) AS allowed`.execute(
+          tx,
+        );
+        if (!permission.rows[0]?.allowed) return false;
+        const weekly = await sql<{
+          count: string;
+        }>`SELECT count(DISTINCT logical_id)::text AS count FROM (
+          SELECT aggregate_id::text AS logical_id FROM outbox_events
+            WHERE event_type=${NUDGE_EVENT_TYPE} AND payload->>'userId'=${userId} AND occurred_at >= ${utcWeekStart(now).toISOString()}
+          UNION ALL
+          SELECT split_part(dedupe_key,'|',4) AS logical_id FROM notifications
+            WHERE user_id=${userId}::uuid AND template_key=${NUDGE_TEMPLATE_KEY} AND channel='PUSH' AND created_at >= ${utcWeekStart(now).toISOString()}
+        ) reminders`.execute(tx);
+        if (Number(weekly.rows[0]?.count ?? 0) >= maxPerWeek) return false;
+        const recentCutoff = new Date(now.getTime() - RECENT_NUDGE_DAYS * DAY_MS).toISOString();
+        const recent =
+          await sql`SELECT 1 FROM notifications WHERE user_id=${userId}::uuid AND template_key=${NUDGE_TEMPLATE_KEY}
+          AND COALESCE(payload->'data'->>'variantId',payload->>'variantId')=${candidate.variantId} AND created_at >= ${recentCutoff}
+          UNION ALL SELECT 1 FROM outbox_events WHERE event_type=${NUDGE_EVENT_TYPE} AND payload->>'userId'=${userId}
+          AND payload->>'variantId'=${candidate.variantId} AND occurred_at >= ${recentCutoff} LIMIT 1`.execute(
+            tx,
+          );
+        if (recent.rows.length) return false;
+        await appendEvent(
+          tx,
+          {
+            eventId: uuidV7(),
+            eventType: NUDGE_EVENT_TYPE,
+            schemaVersion: 1,
+            aggregateType: 'agent_nudge',
+            aggregateId,
+            aggregateVersion: '1',
+            occurredAt: now.toISOString(),
+            correlationId: userId,
+            causationId: null,
+            payload: { userId, variantId: candidate.variantId, productName: candidate.productName },
+          },
+          ['notifications'],
+        );
+        return true;
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (/duplicate|unique/i.test(message)) return false;
+      throw error;
+    }
   }
 }
 
-/**
- * Per-variant purchase history from recent orders (newest first). The newest
- * snapshot names the product; non-purchase statuses are ignored and variants
- * on an active order are collected for suppression.
- */
-function historyFromOrders(orders: readonly OrderView[]): {
-  history: Map<string, PurchaseHistory>;
-  activeVariantIds: Set<string>;
-} {
+function stableUuid(value: string): string {
+  const hex = createHash('sha256').update(value).digest('hex').slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+function historyFromSignals(
+  delivered: readonly { orderId: string; variantId: string; name: string; placedAt: string }[],
+  activeVariantIds: readonly string[],
+): { history: Map<string, PurchaseHistory>; activeVariantIds: Set<string> } {
   const history = new Map<string, PurchaseHistory>();
-  const activeVariantIds = new Set<string>();
-  for (const order of orders) {
-    const active = ACTIVE_ORDER_STATUSES.includes(order.status);
-    if (IGNORED_ORDER_STATUSES.includes(order.status)) continue;
-    for (const item of order.items) {
-      if (active) activeVariantIds.add(item.variantId);
-      const entry = history.get(item.variantId) ?? {
-        name: sanitizeAgentText(item.name, 160),
-        dates: [],
-      };
-      entry.dates.push(new Date(order.placedAt));
-      history.set(item.variantId, entry);
-    }
+  const seen = new Set<string>();
+  for (const line of delivered) {
+    const key = `${line.orderId}\u0000${line.variantId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const entry = history.get(line.variantId) ?? {
+      name: sanitizeAgentText(line.name, 160),
+      dates: [],
+    };
+    entry.dates.push(new Date(line.placedAt));
+    history.set(line.variantId, entry);
   }
-  return { history, activeVariantIds };
+  return { history, activeVariantIds: new Set(activeVariantIds) };
 }

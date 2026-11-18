@@ -2,7 +2,8 @@ import { sql } from 'kysely';
 import { uuidV7 } from '../../../common/ids/ids.js';
 import type { Database, Json } from '../../../platform/database/database.js';
 import type { AgentCard } from '../contracts/agent.js';
-import { requireAgentPermission } from './security.js';
+import { assertAgentCommitAllowed, requireAgentPermission } from './security.js';
+import { PROMPT_VERSION } from './prompts/system.base.v1.js';
 
 interface ExistingRun {
   id: string;
@@ -51,6 +52,7 @@ export class AgentRuns {
       );
       if (!thread.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
       if (thread.rows[0].status !== 'active') throw new Error('THREAD_ARCHIVED');
+      await assertAgentCommitAllowed(tx, input.userId, input.threadId);
       const previous =
         await sql<ExistingRun>`SELECT r.id,r.outcome,r.error_code,m.text AS original_text,a.id AS assistant_id,a.text AS assistant_text,a.cards
         FROM agent_runs r JOIN agent_messages m ON m.thread_id=r.thread_id AND m.client_message_id=r.client_message_id
@@ -101,10 +103,17 @@ export class AgentRuns {
         throw new Error('AGENT_DAILY_LIMIT');
       const runId = uuidV7(),
         messageId = uuidV7();
-      await sql`INSERT INTO agent_messages(id,thread_id,role,text,client_message_id) VALUES(${messageId}::uuid,${input.threadId}::uuid,'user',${input.text},${input.clientMessageId}::uuid)`.execute(
-        tx,
-      );
-      await sql`INSERT INTO agent_runs(id,thread_id,user_id,client_message_id,input_tokens,output_tokens,outcome) VALUES(${runId}::uuid,${input.threadId}::uuid,${input.userId}::uuid,${input.clientMessageId}::uuid,${inputReservation},${input.outputReservation},'running')`.execute(
+      // Background admission may already have persisted this exact user message.
+      const message = await sql<{
+        text: string;
+        role: string;
+      }>`INSERT INTO agent_messages(id,thread_id,role,text,client_message_id)
+        VALUES(${messageId}::uuid,${input.threadId}::uuid,'user',${input.text},${input.clientMessageId}::uuid)
+        ON CONFLICT(thread_id,client_message_id) DO UPDATE SET client_message_id=EXCLUDED.client_message_id
+        RETURNING text,role`.execute(tx);
+      if (message.rows[0]?.text !== input.text || message.rows[0]?.role !== 'user')
+        throw new Error('IDEMPOTENCY_KEY_REUSED');
+      await sql`INSERT INTO agent_runs(id,thread_id,user_id,client_message_id,skill,input_tokens,output_tokens,outcome) VALUES(${runId}::uuid,${input.threadId}::uuid,${input.userId}::uuid,${input.clientMessageId}::uuid,${PROMPT_VERSION},${inputReservation},${input.outputReservation},'running')`.execute(
         tx,
       );
       await sql`UPDATE agent_threads SET last_message_at=clock_timestamp() WHERE id=${input.threadId}::uuid`.execute(
@@ -139,6 +148,7 @@ export class AgentRuns {
       );
       if (!thread.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
       if (thread.rows[0].status !== 'active') throw new Error('THREAD_ARCHIVED');
+      await assertAgentCommitAllowed(tx, input.userId, input.threadId);
       const found = await sql<{
         status: string;
         result: Json | null;
@@ -171,7 +181,7 @@ export class AgentRuns {
       )
         throw new Error('AGENT_DAILY_LIMIT');
       const runId = uuidV7();
-      await sql`INSERT INTO agent_runs(id,thread_id,user_id,input_tokens,output_tokens,outcome) VALUES(${runId}::uuid,${input.threadId}::uuid,${input.userId}::uuid,0,${input.outputReservation},'running')`.execute(
+      await sql`INSERT INTO agent_runs(id,thread_id,user_id,skill,input_tokens,output_tokens,outcome) VALUES(${runId}::uuid,${input.threadId}::uuid,${input.userId}::uuid,${PROMPT_VERSION},0,${input.outputReservation},'running')`.execute(
         tx,
       );
       return { kind: 'started', runId };
@@ -187,11 +197,19 @@ export class AgentRuns {
     outcome: 'completed' | 'failed' | 'aborted';
     errorCode?: string;
     latencyMs: number;
+    timings?: { modelMs?: number; toolMs?: number; dbMs?: number };
     usage?: { inputTokens?: number; outputTokens?: number; thinkingTokens?: number };
     model?: string;
     toolCalls?: number;
   }): Promise<string> {
     return this.db.transaction().execute(async (tx) => {
+      // Match the account → thread → job → run lock order used by Stop.
+      await sql`SELECT id FROM users WHERE id=${input.userId}::uuid FOR UPDATE`.execute(tx);
+      await sql`SELECT id FROM agent_threads WHERE id=${input.threadId}::uuid AND user_id=${input.userId}::uuid FOR UPDATE`.execute(
+        tx,
+      );
+      if (input.outcome === 'completed')
+        await assertAgentCommitAllowed(tx, input.userId, input.threadId);
       const found = await sql<{
         outcome: string;
         assistant_message_id: string | null;
@@ -208,6 +226,9 @@ export class AgentRuns {
       );
       // Reported usage replaces the opening reservations; a failed run keeps them.
       await sql`UPDATE agent_runs SET outcome=${input.outcome},error_code=${input.errorCode ?? null},assistant_message_id=${id}::uuid,latency_ms=${Math.max(0, Math.round(input.latencyMs))},
+        model_ms=${input.timings?.modelMs === undefined ? null : Math.max(0, Math.round(input.timings.modelMs))},
+        tool_ms=${input.timings?.toolMs === undefined ? null : Math.max(0, Math.round(input.timings.toolMs))},
+        db_ms=${input.timings?.dbMs === undefined ? null : Math.max(0, Math.round(input.timings.dbMs))},
         input_tokens=COALESCE(${input.usage?.inputTokens ?? null},input_tokens),
         output_tokens=COALESCE(${input.usage?.outputTokens ?? null},output_tokens),
         thinking_tokens=COALESCE(${input.usage?.thinkingTokens ?? null},thinking_tokens),
@@ -220,5 +241,12 @@ export class AgentRuns {
       );
       return id;
     });
+  }
+
+  /** Stores only the duration of the finish transaction, not all database time. */
+  async recordDbMs(runId: string, dbMs: number): Promise<void> {
+    await sql`UPDATE agent_runs SET db_ms=${Math.max(0, Math.round(dbMs))} WHERE id=${runId}::uuid`.execute(
+      this.db,
+    );
   }
 }

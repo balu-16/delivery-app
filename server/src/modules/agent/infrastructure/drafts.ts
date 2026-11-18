@@ -7,7 +7,7 @@ import {
   type TransactionContext,
 } from '../../../platform/database/database.js';
 import { assertPendingDraft, draftHash } from './guards.js';
-import { requireAgentPermission } from './security.js';
+import { assertAgentCommitAllowed, requireAgentPermission } from './security.js';
 
 export interface DraftRecord {
   id: string;
@@ -52,6 +52,7 @@ export class AgentDrafts {
         );
       if (!user.rows.length) throw new Error('ACCOUNT_DISABLED');
       await requireAgentPermission(input.userId, tx);
+      await assertAgentCommitAllowed(tx, input.userId, input.threadId);
       const found =
         await sql<DraftRecord>`SELECT * FROM agent_drafts WHERE id=${input.draftId}::uuid AND user_id=${input.userId}::uuid AND thread_id=${input.threadId}::uuid FOR UPDATE`.execute(
           tx,
@@ -83,6 +84,38 @@ export class AgentDrafts {
     });
   }
 
+  /** Persist a completed external saga. A repeated call returns the stored result. */
+  async markExecuted(input: {
+    userId: string;
+    threadId: string;
+    draftId: string;
+    result: Json;
+  }): Promise<Json> {
+    return this.db.transaction().execute(async (tx) => {
+      const user =
+        await sql`SELECT id FROM users WHERE id=${input.userId}::uuid AND status='ACTIVE' FOR UPDATE`.execute(
+          tx,
+        );
+      if (!user.rows.length) throw new Error('ACCOUNT_DISABLED');
+      await requireAgentPermission(input.userId, tx);
+      const found =
+        await sql<DraftRecord>`SELECT * FROM agent_drafts WHERE id=${input.draftId}::uuid AND user_id=${input.userId}::uuid AND thread_id=${input.threadId}::uuid FOR UPDATE`.execute(
+          tx,
+        );
+      const draft = found.rows[0];
+      if (!draft) throw new Error('RESOURCE_NOT_FOUND');
+      if (draft.status === 'executed') return draft.result ?? input.result;
+      if (draft.status !== 'approved') throw new Error('DRAFT_NOT_PENDING');
+      await sql`UPDATE agent_drafts SET status='executed',result=${JSON.stringify(input.result)}::jsonb,updated_at=clock_timestamp() WHERE id=${draft.id}::uuid`.execute(
+        tx,
+      );
+      await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,${input.userId}::uuid,'AGENT_ACTION','agent_draft',${draft.id},${JSON.stringify({ source: 'AGENT', threadId: input.threadId, draftId: draft.id, type: draft.type })}::jsonb)`.execute(
+        tx,
+      );
+      return input.result;
+    });
+  }
+
   async prepare(input: {
     userId: string;
     threadId: string;
@@ -102,6 +135,7 @@ export class AgentDrafts {
         );
       if (!user.rows.length) throw new Error('ACCOUNT_DISABLED');
       await requireAgentPermission(input.userId, tx);
+      await assertAgentCommitAllowed(tx, input.userId, input.threadId);
       await sql`INSERT INTO agent_drafts(id,thread_id,user_id,type,tool_call_id,payload,payload_hash,status,expires_at,idempotency_key)
         SELECT ${id}::uuid,t.id,t.user_id,${input.type},${input.toolCallId},${JSON.stringify(input.payload)}::jsonb,${hash},'pending',${input.expiresAt.toISOString()}::timestamptz,${`agent:${id}`}
         FROM agent_threads t WHERE t.id=${input.threadId}::uuid AND t.user_id=${input.userId}::uuid AND t.status='active'
@@ -134,6 +168,7 @@ export class AgentDrafts {
         );
       if (!user.rows.length) throw new Error('ACCOUNT_DISABLED');
       await requireAgentPermission(input.userId, tx);
+      await assertAgentCommitAllowed(tx, input.userId, input.threadId);
       const found =
         await sql<DraftRecord>`SELECT * FROM agent_drafts WHERE id=${input.draftId}::uuid AND thread_id=${input.threadId}::uuid AND user_id=${input.userId}::uuid FOR UPDATE`.execute(
           tx,

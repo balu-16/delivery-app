@@ -19,6 +19,7 @@ import { PostgresSubstitutionSwaps } from './infrastructure/substitution-swap.js
 import { INVENTORY_PICK_GUIDANCE } from './contracts/pick-guidance.js';
 import { PostgresPickGuidance } from './infrastructure/pick-guidance.js';
 import { INVENTORY_ADJUSTMENTS } from './contracts/adjustments.js';
+import { INVENTORY_ADMIN_CORRECTIONS } from './contracts/admin-corrections.js';
 import { PostgresAdjustments } from './infrastructure/adjustments.js';
 import { INVENTORY_COUNT_SESSIONS } from './contracts/count-sessions.js';
 import { PostgresCountSessions } from './infrastructure/postgres-count-sessions.js';
@@ -35,6 +36,7 @@ import { InventoryExpiry } from './infrastructure/expiry.js';
 @Module({
   imports: [IdentityModule, AppConfigModule, ComplianceModule],
   providers: [
+    { provide: INVENTORY_ADMIN_CORRECTIONS, useExisting: INVENTORY_ADJUSTMENTS },
     {
       provide: INVENTORY_AVAILABILITY,
       inject: [PLATFORM_DATABASE],
@@ -122,6 +124,7 @@ import { InventoryExpiry } from './infrastructure/expiry.js';
     INVENTORY_PORTAL_READS,
     INVENTORY_RESERVATIONS,
     INVENTORY_ADJUSTMENTS,
+    INVENTORY_ADMIN_CORRECTIONS,
     INVENTORY_COUNT_SESSIONS,
     INVENTORY_QUALITY,
     INVENTORY_RETURNS,

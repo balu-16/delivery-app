@@ -7,7 +7,14 @@ export const NOTIFICATIONS_CONSUMER = 'notifications';
 export type NotificationChannel = 'PUSH' | 'EMAIL' | 'INBOX';
 export type NotificationLocale = 'en' | 'hi' | 'te';
 export type NotificationCategory =
-  'ORDER_UPDATES' | 'PAYMENTS' | 'WALLET' | 'RIDING' | 'STORE_OPS' | 'ADMIN' | 'PROMOTIONS';
+  | 'ORDER_UPDATES'
+  | 'PAYMENTS'
+  | 'WALLET'
+  | 'RIDING'
+  | 'STORE_OPS'
+  | 'ADMIN'
+  | 'PROMOTIONS'
+  | 'ASSISTANT_UPDATES';
 export type NotificationClass = 'TRANSACTIONAL' | 'PROMOTIONAL';
 export type NotificationStatus = 'PENDING' | 'SENT' | 'FAILED' | 'SKIPPED' | 'QUIET_HELD';
 

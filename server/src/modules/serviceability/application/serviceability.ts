@@ -33,7 +33,13 @@ export class ServiceabilityQuery {
     input: ServiceabilityInput,
     tx?: ServiceabilityTransaction,
   ): Promise<ServiceabilityResult> {
-    validateIndiaPoint(input);
+    if (input.pincode !== undefined && !/^\d{6}$/.test(input.pincode))
+      throw new Error('INVALID_PINCODE');
+    if (input.lat !== undefined || input.lng !== undefined) {
+      if (input.lat === undefined || input.lng === undefined)
+        throw new Error('INVALID_COORDINATES');
+      validateIndiaPoint({ lat: input.lat, lng: input.lng });
+    }
     if (!Number.isFinite(input.targetTime.getTime())) throw new Error('INVALID_TARGET_TIME');
     const candidate = await this.repository.findCandidate(input, tx);
     if (!candidate)

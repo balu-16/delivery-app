@@ -144,6 +144,9 @@ export async function createP5World(): Promise<P5World> {
     await sql`INSERT INTO addresses(id,user_id,line1,pincode,contact_name,contact_phone,point,is_default) VALUES(${otherAddress}::uuid,${customer}::uuid,'road','560002','name','+919876543210',ST_SetSRID(ST_MakePoint(76.5,11.5),4326)::geography,false)`.execute(
       db.db,
     );
+    await sql`INSERT INTO delivery_pincodes(id,pincode,store_id,active) VALUES(${uuidV7()}::uuid,'560001',${store}::uuid,true),(${uuidV7()}::uuid,'560002',${otherStore}::uuid,true)`.execute(
+      db.db,
+    );
     await sql`INSERT INTO catalog_categories(id,name) VALUES(${category}::uuid,'Dairy')`.execute(
       db.db,
     );

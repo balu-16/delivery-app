@@ -98,6 +98,7 @@ async function main(): Promise<void> {
       'store_sessions',
       'address_creation_operations',
       'agent_threads',
+      'agent_job_events',
       'agent_nudge_preferences',
     ];
     await client.query(`REVOKE DELETE ON ALL TABLES IN SCHEMA public FROM ${quoted}`);

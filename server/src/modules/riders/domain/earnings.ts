@@ -36,10 +36,11 @@ export function computeEarnings(
 ): Omit<EarningView, 'taskId' | 'orderId' | 'computedAt'> {
   const base = parseMoney(config.basePaise);
   const perKm = parseMoney(config.perKmPaise);
-  const distanceMetres = Math.max(0, Math.trunc(input.distanceMetres));
+  const distanceMetres =
+    input.distanceMetres === null ? null : Math.max(0, Math.trunc(input.distanceMetres));
   // Rounding: whole metres to whole kilometres, half up, so short hops still
   // contribute a deterministic minimum and the sum never drifts.
-  const wholeKm = Math.floor((distanceMetres + 500) / 1000);
+  const wholeKm = distanceMetres === null ? 0 : Math.floor((distanceMetres + 500) / 1000);
   const distance = perKm * BigInt(wholeKm);
   const freeMinutes = Math.max(0, Math.trunc(config.detentionFreeMinutes));
   const billableMinutes = Math.max(0, Math.trunc(input.detentionMinutes) - freeMinutes);

@@ -22,7 +22,7 @@ export function createIamRedisCluster(
   return createCluster({
     rootNodes: [{ url: config.url }],
     defaults: {
-      socket: { tls: true, connectTimeout: 10000 },
+      socket: { tls: true, connectTimeout: config.connectTimeoutMs ?? 10000 },
       credentialsProvider: {
         type: 'async-credentials-provider',
         credentials: async () => ({

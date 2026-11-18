@@ -39,7 +39,7 @@ test('fixture products and stores have unique identities and positive integer pr
   expect(new Set(TEST_PRODUCTS.map((item) => item.name)).size).toBe(10);
   expect(new Set(TEST_STORES.map((store) => store.id)).size).toBe(3);
   for (const item of TEST_PRODUCTS) {
-    expect(item.name).toMatch(/^Test /);
+    expect(item.name).not.toMatch(/^Test /);
     expect(item.paise).toMatch(/^[1-9]\d*$/);
     expect(item.image).toMatch(/^[a-z-]+-hd\.png$/);
   }

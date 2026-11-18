@@ -532,6 +532,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/delivery-pincodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["adminListDeliveryPincodes"];
+        put?: never;
+        post: operations["adminCreateDeliveryPincodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/delivery-pincodes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["adminUpdateDeliveryPincode"];
+        trace?: never;
+    };
+    "/v1/admin/system/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["adminSettingsHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/system/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["adminSystemHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/catalog/categories": {
         parameters: {
             query?: never;
@@ -911,6 +975,38 @@ export interface paths {
         put?: never;
         /** @description Checker also needs a current STORE_MANAGER assignment at the affected store and must differ from the maker. */
         post: operations["adminInventoryApproveAdjustment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/inventory/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["adminInventoryBatches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/inventory/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["adminInventoryCorrectCount"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1525,6 +1621,22 @@ export interface paths {
         patch: operations["adminUpdateTicket"];
         trace?: never;
     };
+    "/v1/admin/tickets/{id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["adminAcknowledgeTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/tickets/{id}/messages": {
         parameters: {
             query?: never;
@@ -1759,6 +1871,38 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["adminMarkManualRefundPaid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/rider-distance-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["adminPendingRiderDistances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/rider-distance-reviews/{earningId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["adminReviewRiderDistance"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2305,7 +2449,40 @@ export interface components {
             detail: string;
             traceId: string;
         };
+        DeliveryFeeSlabResponseDto: {
+            maxOrderValuePaise: string | null;
+            feePaise: string;
+        };
         ConfigValuesResponseDto: {
+            minOrderPaise: string;
+            maxOrderPaise: string;
+            maxCodPaise: string;
+            deliveryFeeSlabs: components["schemas"]["DeliveryFeeSlabResponseDto"][];
+            freeDeliveryThresholdPaise: string;
+            handlingFeePaise: string;
+            smallCartThresholdPaise: string;
+            smallCartFeePaise: string;
+            catalogMaxPerOrder: number;
+            maxCartLines: number;
+            offerTimeoutSeconds: number;
+            riderMaxConcurrentTasks: number;
+            cashInHandLimitPaise: string;
+            earningsBasePaise: string;
+            earningsPerKmPaise: string;
+            detentionFreeMinutes: number;
+            detentionPerMinutePaise: string;
+            deliveryFailureWaitSeconds: number;
+            deliveryFailureMinContactAttempts: number;
+            agent_proactive_nudges_enabled: boolean;
+            agent_nudge_max_per_week: number;
+            agent_daily_turn_limit_per_user: number;
+            notificationQuietHoursStart: number;
+            notificationQuietHoursEnd: number;
+            catalogLowStockThreshold: number;
+            inventoryExpirySoonDays: number;
+            supportFirstResponseSlaHours: number;
+            supportResolutionSlaHours: number;
+            supportReopenDays: number;
             addressMaxPerUser: number;
             addressPinMismatchMetres: number;
             zoneMinAreaM2: number;
@@ -2324,6 +2501,9 @@ export interface components {
             maxPauseLengthDays: number;
         };
         FeatureFlagsResponseDto: {
+            agent_enabled: boolean;
+            customer_location_required: boolean;
+            online_payments_enabled: boolean;
             wallet_enabled: boolean;
             cod_enabled: boolean;
             subscriptions_enabled: boolean;
@@ -2630,6 +2810,62 @@ export interface components {
             role: "STORE_MANAGER";
             active: boolean;
         };
+        PincodeView: {
+            /** Format: uuid */
+            id: string;
+            pincode: string;
+            /** Format: uuid */
+            storeId: string;
+            storeName: string;
+            storeStatus: string;
+            locality: string;
+            active: boolean;
+            version: string;
+            updatedAt: string;
+        };
+        CreatePincodesDto: {
+            /**
+             * @example [
+             *       "520001"
+             *     ]
+             */
+            pincodes: string[];
+            /** Format: uuid */
+            storeId: string;
+            locality?: string;
+        };
+        UpdatePincodeDto: {
+            /** Format: uuid */
+            storeId: string;
+            locality: string;
+            active: boolean;
+            version: string;
+        };
+        SettingsHistoryView: {
+            /** Format: uuid */
+            id: string;
+            actor: string;
+            action: string;
+            subject: string;
+            details: {
+                [key: string]: unknown;
+            };
+            occurredAt: string;
+        };
+        ProbeView: {
+            name: string;
+            available: boolean;
+        };
+        AssistantHealthView: {
+            enabled: boolean | null;
+            runtimeConfigured: boolean;
+            worker: string;
+        };
+        SystemHealthView: {
+            checks: components["schemas"]["ProbeView"][];
+            assistant: components["schemas"]["AssistantHealthView"];
+            push: string;
+        };
         NameView: {
             /** Format: uuid */
             id: string;
@@ -2834,6 +3070,34 @@ export interface components {
             expectedVersion: string;
             reason: string;
         };
+        AdminStockBatchView: {
+            /** Format: uuid */
+            batchId: string;
+            /** Format: uuid */
+            variantId: string;
+            productName: string;
+            variantName: string;
+            batchCode: string;
+            state: string;
+            onHand: string;
+            reserved: string;
+            version: string;
+        };
+        AdminStockBatchPageView: {
+            items: components["schemas"]["AdminStockBatchView"][];
+            nextCursor: string | null;
+        };
+        CorrectionDto: {
+            /** Format: uuid */
+            storeId: string;
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            batchId: string;
+            counted: string;
+            expectedVersion: string;
+            reason: string;
+        };
         CouponDraftDto: {
             code: string;
             /** @enum {string} */
@@ -2900,12 +3164,12 @@ export interface components {
         };
         PreferenceDto: {
             /** @enum {string} */
-            category: "ORDER_UPDATES" | "PAYMENTS" | "WALLET" | "RIDING" | "STORE_OPS" | "ADMIN" | "PROMOTIONS";
+            category: "ORDER_UPDATES" | "PAYMENTS" | "WALLET" | "RIDING" | "STORE_OPS" | "ADMIN" | "PROMOTIONS" | "ASSISTANT_UPDATES";
             enabled: boolean;
         };
         UpdatePreferenceDto: {
             /** @enum {string} */
-            category: "ORDER_UPDATES" | "PAYMENTS" | "WALLET" | "RIDING" | "STORE_OPS" | "ADMIN" | "PROMOTIONS";
+            category: "ORDER_UPDATES" | "PAYMENTS" | "WALLET" | "RIDING" | "STORE_OPS" | "ADMIN" | "PROMOTIONS" | "ASSISTANT_UPDATES";
             enabled: boolean;
         };
         UpdatePreferencesDto: {
@@ -2920,7 +3184,7 @@ export interface components {
             title: string;
             body: string;
             /** @enum {string} */
-            category: "ORDER_UPDATES" | "PAYMENTS" | "WALLET" | "RIDING" | "STORE_OPS" | "ADMIN" | "PROMOTIONS";
+            category: "ORDER_UPDATES" | "PAYMENTS" | "WALLET" | "RIDING" | "STORE_OPS" | "ADMIN" | "PROMOTIONS" | "ASSISTANT_UPDATES";
             /** @enum {string} */
             class: "TRANSACTIONAL" | "PROMOTIONAL";
             payload: {
@@ -3076,6 +3340,21 @@ export interface components {
             /** Format: uuid */
             evidenceMediaId: string;
             idempotencyKey: string;
+        };
+        DistanceReviewView: {
+            /** Format: uuid */
+            earningId: string;
+            /** Format: uuid */
+            orderId: string;
+            /** Format: uuid */
+            riderId: string;
+            riderName: string;
+            createdAt: string;
+            ratePaise: string;
+        };
+        DistanceReviewDto: {
+            distanceMetres: number;
+            reason: string;
         };
         ApprovalIdView: {
             /** Format: uuid */
@@ -3239,7 +3518,7 @@ export interface components {
             /** @enum {integer} */
             status: 401;
             /** @enum {string} */
-            code: "INVALID_TOKEN" | "SESSION_EXPIRED" | "SESSION_REPLACED" | "UNAUTHORIZED";
+            code: "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "SESSION_EXPIRED" | "SESSION_REPLACED" | "UNAUTHORIZED";
             detail: string;
             traceId: string;
         };
@@ -3261,7 +3540,7 @@ export interface components {
             /** @enum {integer} */
             status: 404;
             /** @enum {string} */
-            code: "ADDRESS_NOT_FOUND" | "ADDRESS_NOT_SERVICEABLE" | "CART_NOT_FOUND" | "DOCUMENT_NOT_FOUND" | "FAILED_JOB_NOT_FOUND" | "INVOICE_NOT_FOUND" | "INVOICE_NOT_READY" | "MEDIA_NOT_FOUND" | "NOT_FOUND" | "ORDER_NOT_FOUND" | "PAYMENT_NOT_FOUND" | "PLACE_NOT_FOUND" | "RESOURCE_NOT_FOUND" | "RIDER_APPLICATION_NOT_FOUND" | "STORE_NOT_FOUND" | "USER_NOT_FOUND" | "ZONE_NOT_FOUND";
+            code: "ADDRESS_NOT_FOUND" | "ADDRESS_NOT_SERVICEABLE" | "CART_NOT_FOUND" | "DOCUMENT_NOT_FOUND" | "FAILED_JOB_NOT_FOUND" | "INVOICE_NOT_FOUND" | "INVOICE_NOT_READY" | "MEDIA_NOT_FOUND" | "NOT_FOUND" | "ORDER_NOT_FOUND" | "PAYMENT_NOT_FOUND" | "PINCODE_NOT_FOUND" | "PLACE_NOT_FOUND" | "RESOURCE_NOT_FOUND" | "RIDER_APPLICATION_NOT_FOUND" | "STORE_NOT_FOUND" | "USER_NOT_FOUND" | "ZONE_NOT_FOUND";
             detail: string;
             traceId: string;
         };
@@ -3272,7 +3551,7 @@ export interface components {
             /** @enum {integer} */
             status: 409;
             /** @enum {string} */
-            code: "ADDRESS_CHANGE_NOT_ALLOWED" | "ADDRESS_LIMIT_REACHED" | "ADMIN_RESOLUTION_REQUIRED" | "AMOUNT_MISMATCH" | "APPROVAL_INVALID" | "APPROVAL_POLICY_CHANGED" | "APPROVAL_REQUIRED" | "BATCH_NOT_ELIGIBLE" | "CANNOT_DISABLE_SELF" | "CANNOT_ERASE_SELF" | "CART_INTENT_CONSUMED" | "CASH_LIMIT_EXCEEDED" | "CATALOG_IN_USE" | "COD_AMOUNT_MISMATCH" | "COD_LIMIT_EXCEEDED" | "COD_MISMATCH" | "COD_NOT_APPLICABLE" | "COD_NOT_COLLECTED" | "COD_NOT_ELIGIBLE" | "CONCURRENT_MODIFICATION" | "CONFLICT" | "CONFLICTING_CREDENTIALS" | "COUPON_EXHAUSTED" | "COUPON_EXPIRED" | "COUPON_LIMIT_REACHED" | "COUPON_NOT_ELIGIBLE" | "CUTOFF_PASSED" | "DELIVERY_CODE_INVALID" | "DELIVERY_CODE_LOCKED" | "DELIVERY_CONTACT_ATTEMPTS_REQUIRED" | "DELIVERY_TASK_STATE_INVALID" | "DELIVERY_WAIT_REQUIRED" | "DOCUMENT_STATE_INVALID" | "HANDOVER_CODE_INVALID" | "HANDOVER_LOCKED" | "HANDOVER_NOT_READY" | "HANDOVER_NOT_VERIFIED" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_LEASE_LOST" | "ILLEGAL_STATE_TRANSITION" | "INVALID_REFUND_DESTINATION" | "INVENTORY_INSUFFICIENT" | "INVENTORY_RESERVED" | "INVOICE_NOT_RENDERED" | "INVOICE_RENDER_NOT_SUSPENDED" | "ITEM_ALREADY_RESOLVED" | "LAST_SUPER_ADMIN" | "LOCATION_INVALID" | "NOT_TASK_OWNER" | "NO_ELIGIBLE_DELIVERY" | "OFFER_ALREADY_RESPONDED" | "OFFER_EXPIRED" | "OFFER_NO_LONGER_AVAILABLE" | "ORDER_ON_HOLD" | "PAYMENT_FUNDING_INVALID" | "PAYMENT_STATE_INVALID" | "PAYMENT_WINDOW_EXPIRED" | "PAYOUT_STALE" | "PAYOUT_STATE_INVALID" | "PICKER_AT_CAPACITY" | "PICK_TASK_INCOMPLETE" | "PICK_TASK_NOT_AVAILABLE" | "PICK_TASK_NOT_COMPLETE" | "PICK_TASK_STATE_INVALID" | "PRICE_CHANGED" | "PRODUCT_NOT_PUBLISHABLE" | "PROVISIONING_INPUT_CONFLICT" | "QUOTE_CONSUMED" | "QUOTE_EXPIRED" | "RATING_EXISTS" | "RATING_NOT_ALLOWED" | "RATING_WINDOW_EXPIRED" | "RECEIPT_REQUIRED" | "REFUND_LIMIT_EXCEEDED" | "REFUND_STATE_INVALID" | "REOPEN_WINDOW_EXPIRED" | "REPORT_NOT_READY" | "REQUEST_IN_PROGRESS" | "RESERVATION_STATE_INVALID" | "RESOURCE_CONFLICT" | "RETURN_QUANTITY_EXCEEDED" | "RIDER_AT_CAPACITY" | "RIDER_ENROLLMENT_REQUIRES_REVIEW" | "RIDER_NOT_APPROVED" | "RIDER_OFFLINE" | "RIDER_STALE_LOCATION" | "RIDER_STATE_INVALID" | "RIDER_SUSPENDED" | "ROLE_NOT_ASSIGNED" | "ROLE_REPLACEMENT_REQUIRED" | "STORE_CITY_IMMUTABLE" | "SUBSCRIPTIONS_DISABLED" | "SUBSCRIPTION_STATE_INVALID" | "SUBSTITUTION_DISABLED" | "SUBSTITUTION_NOT_PERMITTED" | "SUBSTITUTION_STATE_INVALID" | "TASK_STATE_INVALID" | "TICKET_CLOSED" | "TICKET_STATE_INVALID" | "WALLET_DISABLED" | "WALLET_INSUFFICIENT" | "WALLET_REQUIRED_FOR_SUBSCRIPTIONS" | "WEIGHT_TOLERANCE_EXCEEDED" | "WRONG_ITEM" | "ZONE_STORE_IMMUTABLE";
+            code: "ADDRESS_CHANGE_NOT_ALLOWED" | "ADDRESS_LIMIT_REACHED" | "ADDRESS_LOCATION_REQUIRED" | "ADMIN_RESOLUTION_REQUIRED" | "AMOUNT_MISMATCH" | "APPROVAL_EXPIRED" | "APPROVAL_INVALID" | "APPROVAL_POLICY_CHANGED" | "APPROVAL_REQUIRED" | "BATCH_NOT_ELIGIBLE" | "CANNOT_DISABLE_SELF" | "CANNOT_ERASE_SELF" | "CART_INTENT_CONSUMED" | "CASH_LIMIT_EXCEEDED" | "CATALOG_IN_USE" | "COD_AMOUNT_MISMATCH" | "COD_LIMIT_EXCEEDED" | "COD_MISMATCH" | "COD_NOT_APPLICABLE" | "COD_NOT_COLLECTED" | "COD_NOT_ELIGIBLE" | "CONCURRENT_MODIFICATION" | "CONFLICT" | "CONFLICTING_CREDENTIALS" | "COUPON_EXHAUSTED" | "COUPON_EXPIRED" | "COUPON_LIMIT_REACHED" | "COUPON_NOT_ELIGIBLE" | "CUTOFF_PASSED" | "DELIVERY_CODE_INVALID" | "DELIVERY_CODE_LOCKED" | "DELIVERY_CONTACT_ATTEMPTS_REQUIRED" | "DELIVERY_TASK_STATE_INVALID" | "DELIVERY_WAIT_REQUIRED" | "DISTANCE_ALREADY_REVIEWED" | "DISTANCE_REVIEW_NOT_REQUIRED" | "DOCUMENT_STATE_INVALID" | "DRAFT_EXPIRED" | "DRAFT_INVALID" | "DRAFT_NOT_PENDING" | "DRAFT_PENDING" | "HANDOVER_CODE_INVALID" | "HANDOVER_LOCKED" | "HANDOVER_NOT_READY" | "HANDOVER_NOT_VERIFIED" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_LEASE_LOST" | "ILLEGAL_STATE_TRANSITION" | "INVALID_REFUND_DESTINATION" | "INVENTORY_INSUFFICIENT" | "INVENTORY_RESERVED" | "INVOICE_NOT_RENDERED" | "INVOICE_RENDER_NOT_SUSPENDED" | "ITEM_ALREADY_RESOLVED" | "LAST_SUPER_ADMIN" | "LOCATION_INVALID" | "NOT_TASK_OWNER" | "NO_ELIGIBLE_DELIVERY" | "OFFER_ALREADY_RESPONDED" | "OFFER_EXPIRED" | "OFFER_NO_LONGER_AVAILABLE" | "ONLINE_PAYMENTS_NOT_READY" | "ORDER_ON_HOLD" | "PAYMENT_FUNDING_INVALID" | "PAYMENT_STATE_INVALID" | "PAYMENT_WINDOW_EXPIRED" | "PAYOUT_STALE" | "PAYOUT_STATE_INVALID" | "PICKER_AT_CAPACITY" | "PICK_TASK_INCOMPLETE" | "PICK_TASK_NOT_AVAILABLE" | "PICK_TASK_NOT_COMPLETE" | "PICK_TASK_STATE_INVALID" | "PINCODE_EXISTS" | "PRICE_CHANGED" | "PRODUCT_NOT_PUBLISHABLE" | "PROVISIONING_INPUT_CONFLICT" | "QUOTE_CONSUMED" | "QUOTE_EXPIRED" | "RATING_EXISTS" | "RATING_NOT_ALLOWED" | "RATING_WINDOW_EXPIRED" | "RECEIPT_REQUIRED" | "REFUND_LIMIT_EXCEEDED" | "REFUND_STATE_INVALID" | "REOPEN_WINDOW_EXPIRED" | "REPORT_NOT_READY" | "REQUEST_IN_PROGRESS" | "RESERVATION_STATE_INVALID" | "RESOURCE_CONFLICT" | "RETURN_QUANTITY_EXCEEDED" | "RIDER_AT_CAPACITY" | "RIDER_ENROLLMENT_REQUIRES_REVIEW" | "RIDER_NOT_APPROVED" | "RIDER_OFFLINE" | "RIDER_STALE_LOCATION" | "RIDER_STATE_INVALID" | "RIDER_SUSPENDED" | "ROLE_NOT_ASSIGNED" | "ROLE_REPLACEMENT_REQUIRED" | "RUN_IN_PROGRESS" | "SESSION_CLOSED" | "STORE_CITY_IMMUTABLE" | "SUBSCRIPTIONS_DISABLED" | "SUBSCRIPTION_STATE_INVALID" | "SUBSTITUTION_DISABLED" | "SUBSTITUTION_NOT_PERMITTED" | "SUBSTITUTION_STATE_INVALID" | "TASK_STATE_INVALID" | "THREAD_ARCHIVED" | "TICKET_CLOSED" | "TICKET_STATE_INVALID" | "WALLET_DISABLED" | "WALLET_INSUFFICIENT" | "WALLET_REQUIRED_FOR_SUBSCRIPTIONS" | "WEIGHT_TOLERANCE_EXCEEDED" | "WRONG_ITEM" | "ZONE_STORE_IMMUTABLE";
             detail: string;
             traceId: string;
         };
@@ -3305,7 +3584,7 @@ export interface components {
             /** @enum {integer} */
             status: 429;
             /** @enum {string} */
-            code: "RATE_LIMITED";
+            code: "AGENT_DAILY_LIMIT" | "RATE_LIMITED";
             detail: string;
             traceId: string;
         };
@@ -3338,7 +3617,7 @@ export interface components {
             /** @enum {integer} */
             status: 503;
             /** @enum {string} */
-            code: "DISPATCH_DEPENDENCY_UNAVAILABLE" | "ExternalServiceTimeout" | "ExternalServiceUnavailable" | "FEATURE_DISABLED" | "FULFILLMENT_DEPENDENCY_UNAVAILABLE" | "GATEWAY_OUTCOME_UNKNOWN" | "QUEUE_UNAVAILABLE" | "REFERRALS_UNAVAILABLE" | "SERVICE_UNAVAILABLE";
+            code: "AGENT_NOT_CONFIGURED" | "AGENT_WORKER_UNAVAILABLE" | "DISPATCH_DEPENDENCY_UNAVAILABLE" | "ExternalServiceTimeout" | "ExternalServiceUnavailable" | "FEATURE_DISABLED" | "FULFILLMENT_DEPENDENCY_UNAVAILABLE" | "GATEWAY_OUTCOME_UNKNOWN" | "QUEUE_UNAVAILABLE" | "REFERRALS_UNAVAILABLE" | "SERVICE_UNAVAILABLE";
             detail: string;
             traceId: string;
         };
@@ -8705,6 +8984,647 @@ export interface operations {
             };
         };
     };
+    adminListDeliveryPincodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PincodeView"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
+    adminCreateDeliveryPincodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePincodesDto"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
+    adminUpdateDeliveryPincode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePincodeDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
+    adminSettingsHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsHistoryView"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
+    adminSystemHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemHealthView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
     adminListCategories: {
         parameters: {
             query?: {
@@ -10914,6 +11834,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 cursor?: string;
+                productId?: string;
             };
             header?: never;
             path?: never;
@@ -13641,6 +14562,267 @@ export interface operations {
             };
         };
     };
+    adminInventoryBatches: {
+        parameters: {
+            query: {
+                storeId: string;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminStockBatchPageView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
+    adminInventoryCorrectCount: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectionDto"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
     adminCouponsList: {
         parameters: {
             query?: {
@@ -15704,7 +16886,10 @@ export interface operations {
     adminWalletAdjustmentRequest: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Use a stable key when retrying an adjustment request. */
+                "Idempotency-Key"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -19861,6 +21046,133 @@ export interface operations {
             };
         };
     };
+    adminAcknowledgeTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
     adminTicketMessage: {
         parameters: {
             query?: never;
@@ -21812,6 +23124,264 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PaidDto"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
+    adminPendingRiderDistances: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DistanceReviewView"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
+    adminReviewRiderDistance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                earningId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DistanceReviewDto"];
             };
         };
         responses: {

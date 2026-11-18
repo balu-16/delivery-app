@@ -125,13 +125,13 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
   private async storeForAddress(user: string, address: string | undefined): Promise<string> {
     const selected = await sql<{
       store_id: string;
-    }>`SELECT z.store_id FROM addresses a JOIN LATERAL (
-      SELECT z.store_id FROM zones z JOIN stores s ON s.id=z.store_id WHERE z.active AND ST_Covers(z.polygon,a.point::geometry)
-      ORDER BY z.priority DESC,ST_Distance(s.location,a.point),s.id,z.id LIMIT 1
-    ) z ON true WHERE a.user_id=${user}::uuid AND (${address ?? null}::uuid IS NOT NULL AND a.id=${address ?? null}::uuid OR ${address ?? null}::uuid IS NULL AND a.is_default) AND a.deleted_at IS NULL`.execute(
+    }>`SELECT p.store_id FROM addresses a JOIN delivery_pincodes p ON p.pincode=a.pincode AND p.active
+      WHERE a.user_id=${user}::uuid AND (${address ?? null}::uuid IS NOT NULL AND a.id=${address ?? null}::uuid OR ${address ?? null}::uuid IS NULL AND a.is_default) AND a.deleted_at IS NULL`.execute(
       this.db,
     );
-    if (!selected.rows[0]) throw new Error('ADDRESS_NOT_SERVICEABLE');
+    if (!selected.rows[0]) {
+      throw new Error('ADDRESS_NOT_SERVICEABLE');
+    }
     return selected.rows[0].store_id;
   }
   async categories(

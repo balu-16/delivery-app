@@ -61,16 +61,19 @@ export class OrderMutationsService {
         id: string;
         zone_id: string | null;
         zone_store_id: string | null;
+        pin_id: string | null;
+        pin_store_id: string | null;
         line1: string;
         line2: string | null;
         landmark: string | null;
         pincode: string;
         contact_name: string;
         contact_phone: string;
-        lat: number;
-        lng: number;
-      }>`SELECT a.id,z.id AS zone_id,z.store_id::text AS zone_store_id,a.line1,a.line2,a.landmark,a.pincode,a.contact_name,a.contact_phone,
+        lat: number | null;
+        lng: number | null;
+      }>`SELECT a.id,z.id AS zone_id,z.store_id::text AS zone_store_id,p.id::text AS pin_id,p.store_id::text AS pin_store_id,a.line1,a.line2,a.landmark,a.pincode,a.contact_name,a.contact_phone,
         ST_Y(a.point::geometry) AS lat,ST_X(a.point::geometry) AS lng FROM addresses a
+        LEFT JOIN delivery_pincodes p ON p.pincode=a.pincode AND p.active
         LEFT JOIN LATERAL(SELECT z.id,z.store_id FROM zones z WHERE z.active AND ST_Covers(z.polygon,a.point::geometry)
           ORDER BY z.priority DESC,z.id LIMIT 1)z ON true
         WHERE a.id=${input.addressId}::uuid AND a.user_id=${userId}::uuid AND a.deleted_at IS NULL FOR SHARE OF a`.execute(
@@ -78,19 +81,39 @@ export class OrderMutationsService {
       );
       const target = address.rows[0];
       if (!target) throw new Error('RESOURCE_NOT_FOUND');
-      if (target.zone_store_id !== row.store_id) throw new Error('ADDRESS_CHANGE_NOT_ALLOWED');
       const snapshot = row.address_snapshot as {
+        coverageKind?: string;
         zoneId?: string;
         zoneVersion?: string;
         cityZoneVersion?: string;
         deliveryFeePaise?: string;
       };
+      await sql`SELECT pg_advisory_xact_lock(701001)`.execute(tx);
+      const required = await sql<{
+        enabled: boolean;
+      }>`SELECT enabled FROM feature_flags WHERE key='customer_location_required'`.execute(tx);
+      if (
+        (required.rows[0]?.enabled || snapshot.coverageKind !== 'PINCODE') &&
+        (target.lat === null || target.lng === null)
+      )
+        throw new Error('ADDRESS_LOCATION_REQUIRED');
+      const newCoverageId = snapshot.coverageKind === 'PINCODE' ? target.pin_id : target.zone_id;
+      const newStoreId =
+        snapshot.coverageKind === 'PINCODE' ? target.pin_store_id : target.zone_store_id;
+      if (newStoreId !== row.store_id) throw new Error('ADDRESS_CHANGE_NOT_ALLOWED');
+      if (snapshot.coverageKind === 'PINCODE') {
+        const locked =
+          await sql`SELECT id FROM delivery_pincodes WHERE id=${target.pin_id}::uuid AND active AND store_id=${row.store_id}::uuid FOR SHARE`.execute(
+            tx,
+          );
+        if (!locked.rows.length) throw new Error('ADDRESS_CHANGE_NOT_ALLOWED');
+      }
       // Fees are a function of (store, zone, order value): same store+zone and
       // a frozen order value keep the delivery fee unchanged by construction.
       ensureAddressChangeAllowed({
         status: row.status,
         originalZoneId: snapshot.zoneId ?? '',
-        newZoneId: target.zone_id ?? '',
+        newZoneId: newCoverageId ?? '',
         originalDeliveryFeePaise: BigInt(snapshot.deliveryFeePaise ?? '0'),
         newDeliveryFeePaise: BigInt(snapshot.deliveryFeePaise ?? '0'),
       });
@@ -101,9 +124,9 @@ export class OrderMutationsService {
         pincode: target.pincode,
         contactName: target.contact_name,
         contactPhone: target.contact_phone,
-        lat: target.lat,
-        lng: target.lng,
-        zoneId: target.zone_id,
+        ...(target.lat !== null && target.lng !== null ? { lat: target.lat, lng: target.lng } : {}),
+        zoneId: newCoverageId,
+        ...(snapshot.coverageKind ? { coverageKind: snapshot.coverageKind } : {}),
         ...(snapshot.zoneVersion ? { zoneVersion: snapshot.zoneVersion } : {}),
         ...(snapshot.cityZoneVersion ? { cityZoneVersion: snapshot.cityZoneVersion } : {}),
         deliveryFeePaise: snapshot.deliveryFeePaise ?? '0',

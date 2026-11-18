@@ -103,6 +103,15 @@ export class CheckoutService implements CheckoutOperations {
     return new ScheduledOrderService(this.deps).place(input, tx);
   }
   async quote(userId: string, input: CheckoutQuoteRequest): Promise<CheckoutQuoteResult> {
+    const location = await sql<{ required: boolean; present: boolean }>`SELECT
+      COALESCE((SELECT enabled FROM feature_flags WHERE key='customer_location_required'),false) AS required,
+      (point IS NOT NULL) AS present FROM addresses
+      WHERE id=${input.addressId}::uuid AND user_id=${userId}::uuid AND deleted_at IS NULL`.execute(
+      this.db,
+    );
+    if (!location.rows[0]) throw new Error('ADDRESS_NOT_FOUND');
+    if (location.rows[0].required && !location.rows[0].present)
+      throw new Error('ADDRESS_LOCATION_REQUIRED');
     const wallet = await this.walletInput(userId);
     const quote = await this.deps.quotes.refresh({
       userId,

@@ -4,12 +4,14 @@ import { InventoryModule } from '../../../modules/inventory/inventory.module.js'
 import { AdminShelfLifeController } from './shelf-life.controller.js';
 import { AdminInventoryController } from './admin.controller.js';
 import { AdminInventoryApprovalController } from './approval.controller.js';
+import { AdminInventoryCorrectionsController } from './corrections.controller.js';
 @Module({
   imports: [IdentityModule, InventoryModule],
   controllers: [
     AdminInventoryController,
     AdminShelfLifeController,
     AdminInventoryApprovalController,
+    AdminInventoryCorrectionsController,
   ],
 })
 export class AdminInventorySurfaceModule {}

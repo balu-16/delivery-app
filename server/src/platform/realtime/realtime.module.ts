@@ -55,6 +55,7 @@ class RealtimeLifecycle implements OnApplicationBootstrap, BeforeApplicationShut
         cacheName: this.env.CACHE_IAM_NAME,
         username: this.env.CACHE_IAM_USER,
         region: this.env.AWS_REGION,
+        connectTimeoutMs: this.env.CACHE_CONNECT_TIMEOUT_MS,
       };
       const publisher = createIamRedisCluster(config);
       const subscriber = createIamRedisCluster(config);

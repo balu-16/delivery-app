@@ -58,17 +58,18 @@ export class ScheduledOrderService {
         pincode: string;
         contact_name: string;
         contact_phone: string;
-        lat: string;
-        lng: string;
+        lat: string | null;
+        lng: string | null;
       }>`SELECT line1,line2,landmark,pincode,contact_name,contact_phone,ST_Y(point::geometry)::text AS lat,ST_X(point::geometry)::text AS lng FROM addresses WHERE id=${input.addressId}::uuid AND user_id=${input.userId}::uuid AND deleted_at IS NULL FOR SHARE`.execute(
         tx,
       ),
     );
     const a = address.rows[0];
     if (!a) throw new Error('ADDRESS_NOT_SERVICEABLE');
-    const service = await this.memo(`service:${a.lat}:${a.lng}:${start.toISOString()}`, () =>
+    if (a.lat === null || a.lng === null) throw new Error('ADDRESS_LOCATION_REQUIRED');
+    const service = await this.memo(`service:${a.pincode}:${start.toISOString()}`, () =>
       this.deps.serviceability.check(
-        { lat: Number(a.lat), lng: Number(a.lng), targetTime: start },
+        { pincode: a.pincode, lat: Number(a.lat), lng: Number(a.lng), targetTime: start },
         tx,
       ),
     );
@@ -193,7 +194,7 @@ export class ScheduledOrderService {
     if ((await this.deps.capacity.claim(input.storeId, start, id, tx)) === 'AT_CAPACITY')
       throw new Error('STORE_AT_CAPACITY');
     const route =
-      await sql`SELECT 1 FROM stores s JOIN zones z ON z.store_id=s.id WHERE s.id=${input.storeId}::uuid AND s.status='ONLINE' AND z.id=${service.zone.zoneId}::uuid AND z.active AND z.version=${service.zone.zoneVersion}::bigint AND ST_Covers(z.polygon,ST_SetSRID(ST_MakePoint(${Number(a.lng)},${Number(a.lat)}),4326)) FOR SHARE OF z`.execute(
+      await sql`SELECT 1 FROM stores s JOIN delivery_pincodes z ON z.store_id=s.id WHERE s.id=${input.storeId}::uuid AND s.status='ONLINE' AND z.id=${service.zone.zoneId}::uuid AND z.pincode=${a.pincode} AND z.active AND z.version=${service.zone.zoneVersion}::bigint FOR SHARE OF z`.execute(
         tx,
       );
     if (!route.rows.length) throw new Error('ADDRESS_NOT_SERVICEABLE');
@@ -211,6 +212,7 @@ export class ScheduledOrderService {
       source: 'SUBSCRIPTION',
       addressSnapshot: {
         addressId: input.addressId,
+        coverageKind: 'PINCODE',
         zoneId: service.zone.zoneId,
         zoneVersion: service.zone.zoneVersion,
         cityZoneVersion: service.zone.cityZoneVersion,

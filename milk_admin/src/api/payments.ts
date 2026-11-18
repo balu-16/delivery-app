@@ -134,7 +134,7 @@ export function walletLedger(filters?: {
 export const requestWalletAdjustment = (input: {
   userId: string; bucket: 'cash' | 'promo'; direction: 'CREDIT' | 'DEBIT'
   amountPaise: string; reason: string
-}) => post<{ approvalId: string }>('/v1/admin/wallet/adjustments', input)
+}, idempotencyKey?: string) => post<{ approvalId: string }>('/v1/admin/wallet/adjustments', input, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined)
 
 export const approveWalletAdjustment = (approvalId: string) =>
   post<unknown>(`/v1/admin/wallet/adjustments/${approvalId}/approve`, {})

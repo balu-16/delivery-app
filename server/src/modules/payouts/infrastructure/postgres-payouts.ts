@@ -96,7 +96,10 @@ export class PostgresPayouts implements Payouts {
           const earnings = await sql<{
             sum: string;
             count: string;
-          }>`SELECT COALESCE(SUM(e.total_paise),0)::text AS sum, COUNT(*)::text AS count FROM payout_earning_claims c JOIN rider_earnings e ON e.id=c.earning_id WHERE c.payout_id=${p.id}::uuid AND c.active AND e.rider_id=${rider}::uuid AND e.payout_reference IS NULL`.execute(
+          }>`SELECT (COALESCE((SELECT SUM(e.total_paise) FROM payout_earning_claims c JOIN rider_earnings e ON e.id=c.earning_id WHERE c.payout_id=${p.id}::uuid AND c.active AND e.rider_id=${rider}::uuid AND e.payout_reference IS NULL),0)
+              + COALESCE((SELECT SUM(a.amount_paise) FROM payout_distance_claims c JOIN rider_distance_adjustments a ON a.id=c.adjustment_id WHERE c.payout_id=${p.id}::uuid AND c.active AND a.rider_id=${rider}::uuid AND a.payout_reference IS NULL),0))::text AS sum,
+            ((SELECT COUNT(*) FROM payout_earning_claims c JOIN rider_earnings e ON e.id=c.earning_id WHERE c.payout_id=${p.id}::uuid AND c.active AND e.rider_id=${rider}::uuid AND e.payout_reference IS NULL)
+              + (SELECT COUNT(*) FROM payout_distance_claims c JOIN rider_distance_adjustments a ON a.id=c.adjustment_id WHERE c.payout_id=${p.id}::uuid AND c.active AND a.rider_id=${rider}::uuid AND a.payout_reference IS NULL))::text AS count`.execute(
             tx,
           );
           if (
@@ -110,6 +113,9 @@ export class PostgresPayouts implements Payouts {
               tx,
             );
           await sql`UPDATE rider_earnings SET payout_reference=${p.id} WHERE id IN (SELECT earning_id FROM payout_earning_claims WHERE payout_id=${p.id}::uuid AND active) AND payout_reference IS NULL`.execute(
+            tx,
+          );
+          await sql`UPDATE rider_distance_adjustments SET payout_reference=${p.id} WHERE id IN (SELECT adjustment_id FROM payout_distance_claims WHERE payout_id=${p.id}::uuid AND active) AND payout_reference IS NULL`.execute(
             tx,
           );
           const zero = payout.net_paise === '0';
@@ -174,6 +180,88 @@ export class PostgresPayouts implements Payouts {
       },
     });
   }
+  async pendingDistances(actorId: string) {
+    return transactionWithRetry(this.db, async (tx) => {
+      await authorize(tx, actorId);
+      const rows = await sql<{
+        earning_id: string;
+        order_id: string;
+        rider_id: string;
+        rider_name: string;
+        computed_at: Date;
+        rate_paise: string;
+      }>`SELECT e.id::text AS earning_id,e.order_id::text,e.rider_id::text,u.name AS rider_name,e.computed_at,e.distance_rate_paise::text AS rate_paise
+        FROM rider_earnings e JOIN users u ON u.id=e.rider_id
+        WHERE e.distance_metres IS NULL AND e.distance_rate_paise IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM rider_distance_adjustments a WHERE a.earning_id=e.id)
+        ORDER BY e.computed_at,e.id LIMIT 200`.execute(tx);
+      return rows.rows.map((row) => ({
+        earningId: row.earning_id,
+        orderId: row.order_id,
+        riderId: row.rider_id,
+        riderName: row.rider_name,
+        createdAt: row.computed_at.toISOString(),
+        ratePaise: row.rate_paise,
+      }));
+    });
+  }
+  async reviewDistance(
+    actorId: string,
+    earningId: string,
+    distanceMetres: number,
+    reason: string,
+  ): Promise<void> {
+    if (
+      !uuid.test(earningId) ||
+      !Number.isSafeInteger(distanceMetres) ||
+      distanceMetres < 0 ||
+      distanceMetres > 500000 ||
+      !reason.trim() ||
+      reason.length > 300
+    )
+      throw new Error('INVALID_INPUT');
+    await transactionWithRetry(this.db, async (tx) => {
+      await authorize(tx, actorId);
+      const lookup = await sql<{
+        rider_id: string;
+      }>`SELECT rider_id::text FROM rider_earnings WHERE id=${earningId}::uuid`.execute(tx);
+      if (!lookup.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
+      await lockRider(tx, lookup.rows[0].rider_id);
+      const result = await sql<{
+        rider_id: string;
+        distance_metres: number | null;
+        rate: string | null;
+      }>`SELECT rider_id::text,distance_metres,distance_rate_paise::text AS rate FROM rider_earnings WHERE id=${earningId}::uuid FOR UPDATE`.execute(
+        tx,
+      );
+      const earning = result.rows[0];
+      if (!earning || earning.distance_metres !== null || earning.rate === null)
+        throw new Error('DISTANCE_REVIEW_NOT_REQUIRED');
+      const prior = await sql<{
+        distance_metres: number;
+        reason: string;
+      }>`SELECT distance_metres,reason FROM rider_distance_adjustments WHERE earning_id=${earningId}::uuid`.execute(
+        tx,
+      );
+      if (prior.rows[0]) {
+        if (
+          prior.rows[0].distance_metres === distanceMetres &&
+          prior.rows[0].reason === reason.trim()
+        )
+          return;
+        throw new Error('DISTANCE_ALREADY_REVIEWED');
+      }
+      const amount = BigInt(Math.floor((distanceMetres + 500) / 1000)) * BigInt(earning.rate);
+      const id = uuidV7();
+      await sql`INSERT INTO rider_distance_adjustments(id,earning_id,rider_id,distance_metres,amount_paise,reason,actor_id)
+        VALUES(${id}::uuid,${earningId}::uuid,${earning.rider_id}::uuid,${distanceMetres},${amount.toString()}::bigint,${reason.trim()},${actorId}::uuid)`.execute(
+        tx,
+      );
+      await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,${actorId}::uuid,'rider.distance_reviewed','rider_earning',${earningId},${JSON.stringify({ distanceMetres, amountPaise: amount.toString(), reason: reason.trim(), adjustmentId: id })}::jsonb)`.execute(
+        tx,
+      );
+    });
+  }
   async list(
     actorId: string,
     cursor?: string,
@@ -224,8 +312,16 @@ export class PostgresPayouts implements Payouts {
       }>`SELECT e.id,e.total_paise::text FROM rider_earnings e WHERE e.rider_id=${riderId}::uuid AND e.computed_at<${cutoff}::timestamptz AND e.payout_reference IS NULL AND NOT EXISTS(SELECT 1 FROM payout_earning_claims c WHERE c.earning_id=e.id AND c.active) ORDER BY e.computed_at,e.id FOR UPDATE`.execute(
         tx,
       );
-      if (!claims.rows.length) return null;
-      const gross = claims.rows.reduce((sum, row) => sum + BigInt(row.total_paise), 0n),
+      const adjustments = await sql<{
+        id: string;
+        amount_paise: string;
+      }>`SELECT a.id,a.amount_paise::text FROM rider_distance_adjustments a WHERE a.rider_id=${riderId}::uuid AND a.created_at<${cutoff}::timestamptz AND a.amount_paise>0 AND a.payout_reference IS NULL AND NOT EXISTS(SELECT 1 FROM payout_distance_claims c WHERE c.adjustment_id=a.id AND c.active) ORDER BY a.created_at,a.id FOR UPDATE`.execute(
+        tx,
+      );
+      if (!claims.rows.length && !adjustments.rows.length) return null;
+      const gross =
+          claims.rows.reduce((sum, row) => sum + BigInt(row.total_paise), 0n) +
+          adjustments.rows.reduce((sum, row) => sum + BigInt(row.amount_paise), 0n),
         held = await due(tx, riderId),
         offset = gross < held ? gross : held;
       const batch = await sql<{
@@ -241,6 +337,10 @@ export class PostgresPayouts implements Payouts {
         await sql`INSERT INTO payout_earning_claims(payout_id,earning_id) VALUES(${id}::uuid,${row.id}::uuid)`.execute(
           tx,
         );
+      for (const row of adjustments.rows)
+        await sql`INSERT INTO payout_distance_claims(payout_id,adjustment_id) VALUES(${id}::uuid,${row.id}::uuid)`.execute(
+          tx,
+        );
       return id;
     });
   }
@@ -252,6 +352,9 @@ export class PostgresPayouts implements Payouts {
       const p = await lockPayout(tx, id);
       if (p.state !== 'DRAFT') throw new Error('PAYOUT_STATE_INVALID');
       await sql`UPDATE payout_earning_claims SET active=false WHERE payout_id=${id}::uuid`.execute(
+        tx,
+      );
+      await sql`UPDATE payout_distance_claims SET active=false WHERE payout_id=${id}::uuid`.execute(
         tx,
       );
       await sql`UPDATE rider_payouts SET state='CANCELLED',version=version+1 WHERE id=${id}::uuid`.execute(
@@ -441,7 +544,7 @@ export class PostgresPayouts implements Payouts {
   async hasUnsettledPayout(riderId: string, tx?: TransactionContext): Promise<boolean> {
     const row = await sql<{
       present: boolean;
-    }>`SELECT EXISTS(SELECT 1 FROM rider_payouts WHERE rider_id=${riderId}::uuid AND state IN ('DRAFT','APPROVED')) OR EXISTS(SELECT 1 FROM payout_corrections c JOIN rider_payouts p ON p.id=c.payout_id WHERE p.rider_id=${riderId}::uuid AND c.state IN ('CREDIT_PENDING','RECEIVABLE_OPEN')) AS present`.execute(
+    }>`SELECT EXISTS(SELECT 1 FROM rider_payouts WHERE rider_id=${riderId}::uuid AND state IN ('DRAFT','APPROVED')) OR EXISTS(SELECT 1 FROM payout_corrections c JOIN rider_payouts p ON p.id=c.payout_id WHERE p.rider_id=${riderId}::uuid AND c.state IN ('CREDIT_PENDING','RECEIVABLE_OPEN')) OR EXISTS(SELECT 1 FROM rider_distance_adjustments WHERE rider_id=${riderId}::uuid AND amount_paise>0 AND payout_reference IS NULL) OR EXISTS(SELECT 1 FROM rider_earnings e WHERE e.rider_id=${riderId}::uuid AND e.distance_metres IS NULL AND NOT EXISTS(SELECT 1 FROM rider_distance_adjustments a WHERE a.earning_id=e.id)) AS present`.execute(
       tx ?? this.db,
     );
     return row.rows[0]?.present ?? false;

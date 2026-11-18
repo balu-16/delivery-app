@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAnimation, useReducedMotion } from 'framer-motion'
+import { rangeToFromTo } from '@/api/mapping'
+import type { RangeKey } from '@/types'
 
 /** Detect platform for the ⌘K vs Ctrl+K hint. */
 export function useOS(): 'mac' | 'other' {
@@ -17,6 +19,16 @@ export function useDebouncedValue<T>(value: T, delay = 250): T {
     return () => clearTimeout(t)
   }, [value, delay])
   return debounced
+}
+
+/** Keep report query keys stable while updating the end time once a minute. */
+export function useRangeWindow(range: RangeKey) {
+  const [minute, setMinute] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => setMinute(value => value + 1), 60_000)
+    return () => clearInterval(timer)
+  }, [])
+  return useMemo(() => { void minute; return rangeToFromTo(range) }, [range, minute])
 }
 
 /** Count-up animation for KPI values; respects reduced motion. */

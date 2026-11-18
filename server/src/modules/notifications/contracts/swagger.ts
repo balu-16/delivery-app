@@ -21,6 +21,7 @@ export const CATEGORY_VALUES = [
   'STORE_OPS',
   'ADMIN',
   'PROMOTIONS',
+  'ASSISTANT_UPDATES',
 ] as const;
 export const PLATFORM_VALUES = ['ANDROID', 'IOS', 'WEB'] as const;
 export const APP_VALUES = ['CUSTOMER', 'RIDER', 'STORE', 'ADMIN'] as const;
@@ -32,7 +33,7 @@ export class NotificationViewDto {
   @ApiProperty() title!: string;
   @ApiProperty() body!: string;
   @ApiProperty({
-    enum: ['ORDER_UPDATES', 'PAYMENTS', 'WALLET', 'RIDING', 'STORE_OPS', 'ADMIN', 'PROMOTIONS'],
+    enum: CATEGORY_VALUES,
   })
   category!: string;
   @ApiProperty({ enum: ['TRANSACTIONAL', 'PROMOTIONAL'] }) class!: string;
@@ -63,7 +64,7 @@ export class DeviceTokenDto {
 }
 export class PreferenceDto {
   @ApiProperty({
-    enum: ['ORDER_UPDATES', 'PAYMENTS', 'WALLET', 'RIDING', 'STORE_OPS', 'ADMIN', 'PROMOTIONS'],
+    enum: CATEGORY_VALUES,
   })
   category!: string;
   @ApiProperty() enabled!: boolean;

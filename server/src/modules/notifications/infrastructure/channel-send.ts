@@ -10,6 +10,7 @@ import type {
 import { chunkBounded } from '../domain/cursor.js';
 import { renderTemplate, selectTemplate, type TemplateRow } from '../domain/render.js';
 import { isInQuietHours, quietHoursEnd, type QuietWindow } from '../domain/quiet-hours.js';
+import { AGENT_DISCLOSURE_VERSION } from '../../agent/contracts/agent.js';
 
 export interface DeliveryContext {
   deliveryId: string;
@@ -63,6 +64,19 @@ export class ChannelSender {
       });
       return 'HELD';
     }
+    if (context.templateKey === 'agent.reorder_nudge') {
+      if (!UUID.test(context.recipientId)) return this.skip(context, 'NO_ACTIVE_USER');
+      const permitted = await sql<{ allowed: boolean }>`SELECT
+        EXISTS (SELECT 1 FROM users WHERE id=${context.recipientId}::uuid AND status='ACTIVE')
+        AND COALESCE((SELECT enabled FROM feature_flags WHERE key='agent_enabled'),false)
+        AND COALESCE((SELECT value='true'::jsonb FROM app_config WHERE key='agent_proactive_nudges_enabled'),false)
+        AND EXISTS (SELECT 1 FROM consents WHERE user_id=${context.recipientId}::uuid AND type='ai_assistant' AND version=${AGENT_DISCLOSURE_VERSION} AND revoked_at IS NULL)
+        AND COALESCE((SELECT enabled FROM agent_nudge_preferences WHERE user_id=${context.recipientId}::uuid),false)
+        AND COALESCE((SELECT enabled FROM notification_preferences WHERE user_id=${context.recipientId}::uuid AND category='PROMOTIONS'),true) AS allowed`.execute(
+        this.db,
+      );
+      if (!permitted.rows[0]?.allowed) return this.skip(context, 'PREFERENCE_OR_CONSENT_DISABLED');
+    }
     switch (context.channel) {
       case 'INBOX':
         return this.complete(context, null);
@@ -112,6 +126,21 @@ export class ChannelSender {
     )
       return this.skip(context, 'OFFER_EXPIRED');
     if (!UUID.test(context.recipientId)) return this.skip(context, 'NO_ACTIVE_DEVICES');
+    const assistantUpdate = ['agent.reply_ready', 'agent.needs_you', 'agent.run_failed'].includes(
+      context.templateKey,
+    );
+    if (assistantUpdate) {
+      const threadId = context.data['threadId'];
+      if (!threadId || !UUID.test(threadId)) return this.skip(context, 'THREAD_UNAVAILABLE');
+      const permitted = await sql<{ allowed: boolean }>`SELECT
+        COALESCE((SELECT enabled FROM feature_flags WHERE key='agent_enabled'),false)
+        AND EXISTS (SELECT 1 FROM consents WHERE user_id=${context.recipientId}::uuid AND type='ai_assistant' AND version=${AGENT_DISCLOSURE_VERSION} AND revoked_at IS NULL)
+        AND EXISTS (SELECT 1 FROM agent_threads WHERE id=${threadId}::uuid AND user_id=${context.recipientId}::uuid)
+        AND COALESCE((SELECT enabled FROM notification_preferences WHERE user_id=${context.recipientId}::uuid AND category='ASSISTANT_UPDATES'),true) AS allowed`.execute(
+        this.db,
+      );
+      if (!permitted.rows[0]?.allowed) return this.skip(context, 'PREFERENCE_OR_CONSENT_DISABLED');
+    }
     const campaignId =
       typeof context.payload['campaignId'] === 'string' && UUID.test(context.payload['campaignId'])
         ? context.payload['campaignId']
@@ -140,7 +169,7 @@ export class ChannelSender {
       token: string;
       updated_at: string;
       identifier_type: 'FCM_TOKEN' | 'FID';
-    }>`SELECT d.id,d.token,d.identifier_type,d.updated_at::text AS updated_at FROM device_tokens d LEFT JOIN notification_token_results r ON r.delivery_id=${context.deliveryId}::uuid AND r.token_id=d.id JOIN users u ON u.id=d.user_id WHERE d.user_id=${context.recipientId}::uuid AND u.status='ACTIVE' AND d.app=${app} AND d.active AND (r.status IS NULL OR r.status='RETRY') AND (${campaignId}::uuid IS NULL OR EXISTS (SELECT 1 FROM push_campaign_targets t WHERE t.campaign_id=${campaignId}::uuid AND t.notification_id=${context.notificationId}::uuid AND t.token_id=d.id AND t.user_id=d.user_id AND t.token_updated_at=d.updated_at)) ORDER BY d.id`.execute(
+    }>`SELECT d.id,d.token,d.identifier_type,d.updated_at::text AS updated_at FROM device_tokens d LEFT JOIN notification_token_results r ON r.delivery_id=${context.deliveryId}::uuid AND r.token_id=d.id JOIN users u ON u.id=d.user_id WHERE d.user_id=${context.recipientId}::uuid AND u.status='ACTIVE' AND d.app=${app} AND d.active AND (NOT ${assistantUpdate} OR d.platform='ANDROID') AND (r.status IS NULL OR r.status='RETRY') AND (${campaignId}::uuid IS NULL OR EXISTS (SELECT 1 FROM push_campaign_targets t WHERE t.campaign_id=${campaignId}::uuid AND t.notification_id=${context.notificationId}::uuid AND t.token_id=d.id AND t.user_id=d.user_id AND t.token_updated_at=d.updated_at)) ORDER BY d.id`.execute(
       this.db,
     );
     if (!tokens.rows.length) {

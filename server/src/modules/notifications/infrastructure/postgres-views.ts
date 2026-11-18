@@ -76,6 +76,15 @@ export class PostgresNotificationViews implements NotificationViews {
         this.db,
       );
     if (Number(updated.numAffectedRows ?? 0) === 0) {
+      // Opening a reorder push also acknowledges its matching inbox row so it
+      // is not counted as an ignored reminder. Both rows belong to this user.
+      const nudge =
+        await sql`UPDATE notifications inbox SET read_at=COALESCE(inbox.read_at,clock_timestamp())
+        FROM notifications push WHERE push.id=${notificationId}::uuid AND push.user_id=${userId}::uuid
+        AND push.channel='PUSH' AND push.template_key='agent.reorder_nudge'
+        AND inbox.user_id=push.user_id AND inbox.channel='INBOX' AND inbox.template_key=push.template_key
+        AND inbox.dedupe_key=replace(push.dedupe_key,'|PUSH|','|INBOX|')`.execute(this.db);
+      if (Number(nudge.numAffectedRows ?? 0) > 0) return;
       const owned = await sql<{
         id: string;
       }>`SELECT id FROM notifications WHERE id=${notificationId}::uuid AND user_id=${userId}::uuid AND channel='INBOX' AND status='SENT'`.execute(

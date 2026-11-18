@@ -28,11 +28,13 @@ AWS_PROFILE=default AWS_CONFIG_FILE= AWS_SHARED_CREDENTIALS_FILE= AWS_P13_INTEGR
   customer data.
 - 14 scenarios per provider (quick order EN/TE/Tenglish, usual order, ambiguity, tracking EN/TE,
   cancel approve/reject, out-of-scope top-up, catalog injection canary, address-less customer,
-  refund request, wallet question). Assertions check tool usage, cards, drafts **and resulting
-  database state** (one order, correct quantity, cancelled/unchanged status, ticket created,
-  wallet untouched).
-- One request at a time, 2.5 s pacing (tunable), 15 s backoff retry on a provider error, and a
-  hard stop after three consecutive failures to respect provider rate limits.
+  refund request, wallet question). Usual order records the order ids first and then requires
+  exactly one new confirmed order for the signed-in customer, with the newest delivered
+  quantity, the current catalog price, and the home address, including a repeated approval.
+- One request at a time, 2.5 s pacing (tunable). The SDK retry count for this run is 0.
+  A rate-limit response stops the suite immediately. Two scenarios that record a provider
+  error also stop it. The command compiles with `tsc` before booting, because `tsx` does not
+  emit the decorator metadata Nest needs.
 - JSON report per run: `artifacts/agent-evals/<provider>-<ts>.json` with per-scenario pass/fail,
   tool sequences, cards, first-event/first-text/total latency, and the transcript text.
 - The direct NVIDIA trial endpoint forbids personal or confidential data; Google's free tier may

@@ -59,4 +59,14 @@ describe('rider earnings (23.6, exactly-once math)', () => {
     const result = computeEarnings(input({ distanceMetres: 0 }), config);
     expect(result.totalPaise).toBe('3000');
   });
+
+  test('unknown distance records base, tips and waiting pay without inventing distance', () => {
+    const result = computeEarnings(
+      input({ distanceMetres: null, detentionMinutes: 10, tipPaise: '2000' }),
+      earningsDefaults(),
+    );
+    expect(result.distanceMetres).toBeNull();
+    expect(result.distancePaise).toBe('0');
+    expect(result.totalPaise).toBe('5500');
+  });
 });

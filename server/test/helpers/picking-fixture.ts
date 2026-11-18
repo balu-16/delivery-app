@@ -174,6 +174,8 @@ export function fakeAdmin(autoSubstitution = true) {
       }),
       flags: {
         agent_enabled: false,
+        customer_location_required: false,
+        online_payments_enabled: false,
         wallet_enabled: false,
         cod_enabled: false,
         subscriptions_enabled: false,

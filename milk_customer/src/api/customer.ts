@@ -5,6 +5,7 @@ export type CustomerProfile = components['schemas']['ProfileResponseDto'];
 export type CustomerPrincipal = components['schemas']['PrincipalResponseDto'];
 export type CustomerAddress = components['schemas']['AddressView'];
 export type NewCustomerAddress = components['schemas']['CustomerAddressDto'];
+export type PendingCustomerAddress = components['schemas']['PendingAddressDto'];
 export type AddressResult = components['schemas']['AddressWriteView'];
 export type CatalogPage = components['schemas']['CatalogPageView'];
 export type CatalogItem = components['schemas']['ItemView'];
@@ -35,8 +36,11 @@ export const customerApi = {
   profile: (token: string) => customerRequest<CustomerProfile>('/v1/customer/me', { token }),
   addresses: (token: string) => customerRequest<CustomerAddress[]>('/v1/customer/addresses', { token }),
   createAddress: (token: string, body: NewCustomerAddress) => customerRequest<AddressResult>('/v1/customer/addresses', { method: 'POST', token, body }),
+  createPendingAddress: (token: string, body: PendingCustomerAddress, key: string) => customerRequest<AddressResult>('/v1/customer/addresses/pending', { method: 'POST', token, body, idempotencyKey: key }),
+  confirmAddressLocation: (token: string, id: string, body: components['schemas']['ConfirmAddressLocationDto']) => customerRequest<AddressResult>(`/v1/customer/addresses/${encodeURIComponent(id)}/location`, { method: 'PATCH', token, body }),
   selectDefaultAddress: (token: string, id: string) => customerRequest<void>(`/v1/customer/addresses/${encodeURIComponent(id)}/default`, { method: 'POST', token }),
-  serviceability: (token: string, lat: number, lng: number) => customerRequest<Serviceability>(`/v1/customer/serviceability?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, { token }),
+  serviceability: (token: string, pincode: string) => customerRequest<Serviceability>(`/v1/customer/serviceability?pincode=${encodeURIComponent(pincode)}`, { token }),
+  deliverySettings: (token: string) => customerRequest<{locationRequired:boolean}>('/v1/customer/delivery-settings', { token }),
   catalogPreview: (token: string) => customerRequest<CatalogPreview>('/v1/customer/catalog/preview', { token }),
   catalog: (token: string, addressId: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/catalog/home?${new URLSearchParams({ addressId, limit: '50', ...(cursor ? { cursor } : {}) })}`, { token }),
   categories: (token: string, addressId: string) => customerRequest<{items:{id:string; name:string}[]}>(`/v1/customer/catalog/categories?${new URLSearchParams({addressId})}`, {token}),
@@ -70,6 +74,7 @@ export interface Page<T> { items: T[]; nextCursor: string | null }
 export type Notification = components['schemas']['NotificationViewDto'];
 export interface SupportTicket { id: string; category: string; status: string; created_at: string; order_id: string | null }
 export interface SupportMessage { id: string; author_id: string; body: string; created_at: string }
+export interface SupportProgress { type: 'ACKNOWLEDGED' | 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED'; created_at: string }
 
 export const customerDetailsApi = {
   orders: (token: string) => customerRequest<Page<CustomerOrder>>('/v1/customer/orders', { token }),
@@ -83,15 +88,18 @@ export const customerDetailsApi = {
   createSubscription: (token: string, body: SubscriptionCreateRequest, key: string) => customerRequest<{id:string; nextDeliveryDate:string; effectiveFrom:string}>('/v1/customer/subscriptions', {token, method:'POST', body, idempotencyKey:key}),
   subscriptionAction: (token: string, id: string, action: 'cancel' | 'resume' | 'skip' | 'pause', body: object, key: string) => customerRequest<unknown>(`/v1/customer/subscriptions/${encodeURIComponent(id)}/${action}`, {token, method:'POST', body, idempotencyKey:key}),
   notifications: (token: string) => customerRequest<Page<Notification>>('/v1/customer/notifications', { token }),
+  notificationPreferences: (token: string) => customerRequest<{ category: string; enabled: boolean }[]>('/v1/customer/notification-preferences', { token }),
+  setAssistantNotifications: (token: string, enabled: boolean) => customerRequest<{ category: string; enabled: boolean }[]>('/v1/customer/notification-preferences', { token, method: 'PATCH', body: { updates: [{ category: 'ASSISTANT_UPDATES', enabled }] } }),
   registerDevice: (token: string, deviceToken: string) => customerRequest<{registered:boolean}>('/v1/customer/device-tokens', {token, method:'POST', body:{token:deviceToken,platform:'ANDROID',identifierType:'FCM_TOKEN'}}),
   unregisterDevice: (token: string, deviceToken: string) => customerRequest<{removed:boolean}>('/v1/customer/device-tokens', {token, method:'DELETE', body:{token:deviceToken}}),
   readNotifications: (token: string) => customerRequest<{ updated: number }>('/v1/customer/notifications/read-all', { token, method: 'POST' }),
+  readNotification: (token: string, id: string) => customerRequest<{ read: boolean }>(`/v1/customer/notifications/${encodeURIComponent(id)}/read`, { token, method: 'POST' }),
   ledger: (token: string) => customerRequest<Page<WalletEntry>>('/v1/customer/wallet/ledger', { token }),
   updateProfile: (token: string, name: string) => customerRequest<void>('/v1/customer/me', { token, method: 'PATCH', body: { name } }),
   tickets: (token: string) => customerRequest<Page<SupportTicket>>('/v1/customer/tickets', { token }),
-  ticket: (token: string, id: string) => customerRequest<{ticket: SupportTicket; messages: SupportMessage[]; nextMessagesCursor: string | null}>(`/v1/customer/tickets/${encodeURIComponent(id)}`, { token }),
-  createTicket: (token: string, body: string, key: string) => customerRequest<{id: string}>('/v1/customer/tickets', {token, method: 'POST', body: { category: 'General', body }, idempotencyKey: key}),
-  ticketMessage: (token: string, id: string, body: string, key: string) => customerRequest<{id: string}>(`/v1/customer/tickets/${encodeURIComponent(id)}/messages`, {token, method: 'POST', body: { body }, idempotencyKey: key}),
+  ticket: (token: string, id: string) => customerRequest<{ticket: SupportTicket; messages: SupportMessage[]; progress: SupportProgress[]; nextMessagesCursor: string | null}>(`/v1/customer/tickets/${encodeURIComponent(id)}`, { token }),
+  createTicket: (token: string, body: string, key: string, signal?: AbortSignal) => customerRequest<{id: string}>('/v1/customer/tickets', {token, method: 'POST', body: { category: 'General', body }, idempotencyKey: key, signal}),
+  ticketMessage: (token: string, id: string, body: string, key: string, signal?: AbortSignal) => customerRequest<{id: string}>(`/v1/customer/tickets/${encodeURIComponent(id)}/messages`, {token, method: 'POST', body: { body }, idempotencyKey: key, signal}),
   referral: (token:string) => customerRequest<ReferralView>('/v1/customer/referrals',{token}),
 };
 

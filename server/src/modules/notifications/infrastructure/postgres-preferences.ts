@@ -15,6 +15,7 @@ export const ALL_CATEGORIES: readonly NotificationCategory[] = [
   'STORE_OPS',
   'ADMIN',
   'PROMOTIONS',
+  'ASSISTANT_UPDATES',
 ];
 
 /** Opt-out model: missing rows mean enabled; updates upsert category rows. */

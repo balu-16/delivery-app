@@ -1,15 +1,18 @@
 import { interrupt } from '@langchain/langgraph';
 import { z } from 'zod';
 import { sql } from 'kysely';
+import { uuidV7 } from '../../../common/ids/ids.js';
 import type { Json } from '../../../platform/database/database.js';
 import type { OrderOperations } from '../../orders/contracts/orders.js';
 import type { CheckoutOperations } from '../../checkout/contracts/checkout.js';
 import type { CartService } from '../../cart/contracts/cart.js';
 import type { AddressOperations } from '../../addresses/contracts/addresses.js';
 import type { Support } from '../../support/contracts/support.js';
+import type { Serviceability } from '../../serviceability/contracts/serviceability.js';
 import { AgentDrafts, STALE_DRAFT } from './drafts.js';
 import { AgentOrderPlacement, orderDraft } from './placement.js';
 import { draftHash, sanitizeAgentText } from './guards.js';
+import { assertAgentCommitAllowed, requireAgentPermission } from './security.js';
 import type { AgentToolKit } from './tool-kit.js';
 
 interface Context {
@@ -24,6 +27,7 @@ interface Dependencies {
   cart: CartService;
   addresses: AddressOperations;
   support: Support;
+  serviceability?: Serviceability;
 }
 const cancelPayload = z
   .object({
@@ -137,7 +141,7 @@ export function createConfirmTools(
     ),
     kit.define(
       'place_order',
-      'Prepare an order from the current cart only when the customer asks to order. The customer must approve the displayed totals before it is placed. Only eligible cash on delivery or an existing wallet balance can be used.',
+      'Prepare an order from the current cart when the customer asks to order or agrees to the items already in the cart. Call it in that same turn; a written summary does not create the confirmation card. The customer approves the card before anything is placed. Only eligible cash on delivery or an existing wallet balance can be used.',
       z.object({}),
       async (_input, runtime) => {
         let draft = await drafts.byCall(context.userId, context.threadId, runtime.toolCallId);
@@ -148,10 +152,53 @@ export function createConfirmTools(
             (item) => item.id === cart.addressId,
           );
           if (!address) throw new Error('ADDRESS_NOT_FOUND');
-          const quoted = await deps.checkout.quote(context.userId, {
-            addressId: cart.addressId,
-            ...(cart.couponCode ? { couponCode: cart.couponCode } : {}),
-          });
+          const [quoted, delivery] = await Promise.all([
+            deps.checkout
+              .quote(context.userId, {
+                addressId: cart.addressId,
+                ...(cart.couponCode ? { couponCode: cart.couponCode } : {}),
+              })
+              .catch((error: unknown) => {
+                if (
+                  error instanceof Error &&
+                  error.message === 'ADDRESS_LOCATION_REQUIRED' &&
+                  kit.showCardOnce('delivery-address-required')
+                )
+                  runtime.writer?.({
+                    event: 'card',
+                    data: {
+                      cardId: uuidV7(),
+                      type: 'info',
+                      payload: {
+                        title: 'Confirm delivery location',
+                        description:
+                          'When you are at the delivery address, share your location to place this order.',
+                        options: [
+                          {
+                            label: 'Confirm location',
+                            action: 'open_screen',
+                            payload: {
+                              screen: 'addresses',
+                              addressId: address.id,
+                              needsLocation: true,
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  });
+                throw error;
+              }),
+            deps.serviceability?.check({ pincode: address.pincode, targetTime: new Date() }) ??
+              Promise.resolve(null),
+          ]);
+          if (delivery && !delivery.serviceable) throw new Error('ADDRESS_NOT_SERVICEABLE');
+          if (
+            quoted.quote.issues.some(
+              (issue) => issue.code === 'ITEM_UNAVAILABLE' || issue.code === 'QTY_REDUCED',
+            )
+          )
+            throw new Error('INVENTORY_INSUFFICIENT');
           if (quoted.quote.issues.some((issue) => issue.code !== 'PRICE_CHANGED'))
             throw new Error('CART_NOT_READY');
           if (BigInt(quoted.quote.totalPaise) > BigInt(context.maxOrderPaise))
@@ -186,6 +233,7 @@ export function createConfirmTools(
             taxTotalPaise: quoted.quote.taxTotalPaise,
             walletCashPaise: quoted.quote.wallet?.cashPaise ?? '0',
             walletPromoPaise: quoted.quote.wallet?.promoPaise ?? '0',
+            etaRange: delivery?.etaRange ?? null,
           });
           const expiry = Math.min(
             Date.now() + context.confirmTtlSeconds * 1000,
@@ -217,7 +265,8 @@ export function createConfirmTools(
               status: draft.status,
               title: 'Confirm your order',
               formatted: payload.formattedAddress,
-              description: 'Payment: cash on delivery or existing wallet balance.',
+              description:
+                'Eligible wallet balance is applied automatically. Any remaining amount is due on delivery.',
             },
           },
         });
@@ -322,6 +371,8 @@ export function createConfirmTools(
           },
           {
             beforeCreate: async (tx) => {
+              await requireAgentPermission(context.userId, tx);
+              await assertAgentCommitAllowed(tx, context.userId, context.threadId);
               const rows = await sql<{
                 status: string;
                 payload: unknown;
@@ -333,15 +384,23 @@ export function createConfirmTools(
               const row = rows.rows[0];
               if (
                 !row ||
-                row.status !== 'approved' ||
+                !['approved', 'executed'].includes(row.status) ||
                 draftHash(row.payload) !== row.payload_hash ||
-                row.expires_at.getTime() <= Date.now()
+                (row.status === 'approved' && row.expires_at.getTime() <= Date.now())
               )
                 throw new Error('DRAFT_INVALID');
             },
           },
         );
-        return { status: 'executed', result: { ticketId, ticketStatus: 'OPEN', request: true } };
+        return {
+          status: 'executed',
+          result: await drafts.markExecuted({
+            userId: context.userId,
+            threadId: context.threadId,
+            draftId: draft.id,
+            result: { ticketId, ticketStatus: 'OPEN', request: true },
+          }),
+        };
       },
     ),
   ];

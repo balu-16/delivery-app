@@ -1,6 +1,24 @@
 import type { TransactionContext } from '../../../platform/database/database.js';
 export const PAYOUTS = Symbol('PAYOUTS');
 export interface Payouts {
+  pendingDistances(
+    actorId: string,
+  ): Promise<
+    Array<{
+      earningId: string;
+      orderId: string;
+      riderId: string;
+      riderName: string;
+      createdAt: string;
+      ratePaise: string;
+    }>
+  >;
+  reviewDistance(
+    actorId: string,
+    earningId: string,
+    distanceMetres: number,
+    reason: string,
+  ): Promise<void>;
   list(
     actorId: string,
     cursor?: string,

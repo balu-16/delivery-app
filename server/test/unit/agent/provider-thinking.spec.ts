@@ -69,6 +69,7 @@ describe('assistant provider thinking configuration', () => {
       expect(requestBody?.chat_template_kwargs).toEqual(
         expected === undefined ? undefined : { enable_thinking: expected },
       );
+      expect(requestBody?.top_p).toBe(0.95);
       expect(requestBody?.reasoning).toBeUndefined();
     },
   );

@@ -22,6 +22,7 @@ import { PickingWorkerModule } from '../modules/picking/picking.module.js';
 import { CartWorkerModule } from '../modules/cart/cart-worker.module.js';
 import { NotificationsWorkerModule } from '../modules/notifications/notifications-worker.module.js';
 import { AgentNudgesModule } from '../modules/agent/agent-nudges.module.js';
+import { AgentModule } from '../modules/agent/agent.module.js';
 import { RealtimeModule } from '../platform/realtime/realtime.module.js';
 import { PaymentsWorkerModule } from '../modules/payments/payments-worker.module.js';
 import { WalletWorkerModule } from '../modules/wallet/wallet-worker.module.js';
@@ -87,6 +88,7 @@ export class RoleModule {
               SubscriptionsWorkerModule,
               P11WorkerModule,
               AgentNudgesModule.register([]),
+              AgentModule,
               ComplianceWorkerModule.register([
                 IdentityModule,
                 SubscriptionsModule,

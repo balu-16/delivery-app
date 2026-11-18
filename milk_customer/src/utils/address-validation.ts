@@ -15,6 +15,5 @@ export function addressErrors(value: {
   if (!value.contact.trim()) errors.contact = 'Enter the contact name.';
   else if (value.contact.trim().length > 120) errors.contact = 'Use at most 120 characters.';
   if (!indianPhoneE164(value.phone)) errors.phone = 'Enter a valid 10-digit Indian phone number.';
-  if (!value.point) errors.location = 'Select your current location at the delivery address.';
   return errors;
 }

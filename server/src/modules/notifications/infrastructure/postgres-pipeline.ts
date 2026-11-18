@@ -110,6 +110,9 @@ export class PostgresNotificationPipeline implements NotificationPipeline {
       'subscription.skipped',
       'marketing.campaign',
       'AGENT_REORDER_NUDGE',
+      'AGENT_RUN_READY',
+      'AGENT_RUN_WAITING',
+      'AGENT_RUN_FAILED',
       'custody.escalated',
       'ops.anomaly',
       'payments.refund.failed',
@@ -155,11 +158,14 @@ export class PostgresNotificationPipeline implements NotificationPipeline {
       });
       for (const recipient of recipients) {
         if (
-          plan.class === 'PROMOTIONAL' &&
+          (plan.class === 'PROMOTIONAL' || plan.category === 'ASSISTANT_UPDATES') &&
           !(await this.preferenceEnabled(tx, recipient, plan.category))
         )
           continue;
-        const locale = resolveLocale(await userLocale(tx, recipient));
+        const locale =
+          plan.category === 'ASSISTANT_UPDATES' || event.eventType === 'AGENT_REORDER_NUDGE'
+            ? 'en'
+            : resolveLocale(await userLocale(tx, recipient));
         for (const channel of plan.channels) {
           await this.insertNotification(tx, {
             recipientId: recipient,

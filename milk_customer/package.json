@@ -31,6 +31,7 @@
     "react-dom": "19.3.0",
     "react-native": "0.88.1",
     "react-native-gesture-handler": "~3.3.0",
+    "react-native-keyboard-controller": "1.22.7",
     "react-native-pager-view": "9.0.7",
     "react-native-reanimated": "4.7.1",
     "react-native-safe-area-context": "~5.11.1",
@@ -66,7 +67,9 @@
   "private": true,
   "jest": {
     "preset": "jest-expo",
-    "setupFilesAfterEnv": ["<rootDir>/test/jest-setup.js"],
+    "setupFilesAfterEnv": [
+      "<rootDir>/test/jest-setup.js"
+    ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/$1"
     },

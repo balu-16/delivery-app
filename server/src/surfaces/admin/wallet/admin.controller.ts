@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpException,
   Inject,
   Param,
@@ -13,6 +14,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiProperty,
@@ -89,9 +91,8 @@ class AdminLedgerQuery {
 
 /**
  * Administrative wallet operations (manifest rows POST-v1-admin-wallet-
- * adjustments and GET-v1-admin-wallet-ledger). Manual money moves are
- * maker-checker: an ADMIN requests, a different SUPER_ADMIN approves through
- * the shared approval executor, and the executed adjustment writes the
+ * adjustments and GET-v1-admin-wallet-ledger). An authorized admin requests
+ * and confirms through the shared approval executor; the adjustment writes the
  * wallet ledger row plus an audit record exactly once.
  */
 @Controller('v1/admin/wallet')
@@ -105,10 +106,19 @@ export class AdminWalletController {
     @Inject(WALLET_VIEWS) private readonly views: WalletViews,
   ) {}
   @Post('adjustments')
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description: 'Use a stable key when retrying an adjustment request.',
+  })
   @ApiOperation({ operationId: 'adminWalletAdjustmentRequest' })
   @ApiOkResponse({ description: 'Approval request id for the checker' })
-  async request(@CurrentPrincipal() p: Principal, @Body() dto: AdjustmentDto) {
-    return { approvalId: await this.adjustments.request(p.userId, dto) };
+  async request(
+    @CurrentPrincipal() p: Principal,
+    @Body() dto: AdjustmentDto,
+    @Headers('idempotency-key') requestId?: string,
+  ) {
+    return { approvalId: await this.adjustments.request(p.userId, dto, requestId) };
   }
   @Post('adjustments/:id/approve')
   @AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
@@ -118,9 +128,21 @@ export class AdminWalletController {
       await this.adjustments.approve(p.userId, id);
     } catch (error: unknown) {
       const code = error instanceof Error ? error.message : '';
-      if (code === 'APPROVAL_INVALID' || code === 'APPROVAL_POLICY_CHANGED' || code === 'FORBIDDEN')
+      if (
+        code === 'APPROVAL_INVALID' ||
+        code === 'APPROVAL_EXPIRED' ||
+        code === 'APPROVAL_POLICY_CHANGED' ||
+        code === 'FORBIDDEN'
+      )
         throw new HttpException(
-          { code: code === 'FORBIDDEN' ? 'FORBIDDEN' : 'APPROVAL_INVALID' },
+          {
+            code:
+              code === 'FORBIDDEN'
+                ? 'FORBIDDEN'
+                : code === 'APPROVAL_EXPIRED'
+                  ? 'APPROVAL_EXPIRED'
+                  : 'APPROVAL_INVALID',
+          },
           code === 'FORBIDDEN' ? 403 : 409,
         );
       throw error;

@@ -237,7 +237,10 @@ async function startAwsTestServices(skipCache: boolean): Promise<TestServices> {
         const redis = new Redis(cache.toString(), {
           lazyConnect: true,
           connectTimeout: 15000,
+          commandTimeout: 15000,
           maxRetriesPerRequest: 1,
+          // A failed AWS connection must reach the bounded retry loop below.
+          retryStrategy: () => null,
         });
         redis.on('error', () => undefined);
         try {

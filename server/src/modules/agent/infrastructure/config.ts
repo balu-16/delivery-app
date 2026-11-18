@@ -36,14 +36,14 @@ export class AgentConfiguration {
     return Boolean(this.runtime.get('OPENAI_API_KEY'));
   }
 
-  async view(locale: AgentLocale = 'en'): Promise<AgentConfigView> {
+  async view(_locale: AgentLocale = 'en'): Promise<AgentConfigView> {
     const enabled = this.configured() && (await this.config.flag('agent_enabled'));
     return {
       enabled,
-      suggestedPrompts: prompts[locale],
+      suggestedPrompts: prompts.en,
       maxMessageChars: 2000,
       disclosureVersion: AGENT_DISCLOSURE_VERSION,
-      supportedLocales: ['en', 'hi', 'te'],
+      supportedLocales: ['en'],
     };
   }
 }

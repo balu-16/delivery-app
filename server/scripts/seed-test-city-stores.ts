@@ -169,7 +169,7 @@ async function main(): Promise<void> {
         (SELECT count(*)::text FROM catalog_product_images i JOIN catalog_media m ON m.id=i.media_id
           WHERE i.product_id=p.id AND m.state='REGISTERED' AND m.purpose='PRODUCT_IMAGE' AND m.object_key LIKE 'public/%') AS images
        FROM catalog_variants v JOIN catalog_products p ON p.id=v.product_id
-       JOIN catalog_categories c ON c.id=p.category_id AND c.name='Test Dairy' AND c.deleted_at IS NULL
+       JOIN catalog_categories c ON c.id=p.category_id AND c.name='Dairy' AND c.deleted_at IS NULL
        WHERE v.sku=ANY($1::text[]) AND v.deleted_at IS NULL AND p.published AND p.deleted_at IS NULL`,
       [TEST_PRODUCTS.map((p) => p.sku)],
     );

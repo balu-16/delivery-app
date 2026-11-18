@@ -38,7 +38,7 @@ export async function createAssistantModel(config: ConfigService) {
       ? { configuration: { baseURL: config.get('LLM_BASE_URL') } }
       : {}),
     ...(provider === 'nvidia'
-      ? { configuration: { baseURL: config.get('LLM_BASE_URL') || NVIDIA_BASE_URL } }
+      ? { configuration: { baseURL: config.get('LLM_BASE_URL') || NVIDIA_BASE_URL }, topP: 0.95 }
       : {}),
     ...(provider === 'openai_compatible' &&
     config.get('OPENROUTER_REASONING') !== 'provider_default'

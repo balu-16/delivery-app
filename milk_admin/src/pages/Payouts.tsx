@@ -18,6 +18,7 @@ import { DataTable } from '@/components/shared/DataTable'
 import { KpiCard } from '@/components/shared/KpiCard'
 import type { Payout, PayoutCorrection } from '@/types'
 import { cn, fmtDateTime, fmtINR } from '@/lib/utils'
+import { RiderDistanceReviews } from './RiderDistanceReviews'
 
 function CursorBar({ onPrev, onNext, hasPrev, hasNext, loading, label }: {
   onPrev: () => void; onNext: () => void; hasPrev: boolean; hasNext: boolean; loading: boolean; label: string
@@ -206,6 +207,7 @@ export function Payouts() {
       />
 
       <motion.div variants={container.container} initial="hidden" animate="show" className="space-y-5">
+        <RiderDistanceReviews />
         <motion.section variants={container.item} className="grid grid-cols-2 gap-4 xl:grid-cols-4">
           <KpiCard loading={payoutsQ.isLoading || payoutsQ.isPlaceholderData} unavailable={payoutsQ.isError && !payoutsQ.data} label="Awaiting review (page)" value={pendingReview} icon={Bike} tint="amber" format="num" />
           <KpiCard loading={payoutsQ.isLoading || payoutsQ.isPlaceholderData} unavailable={payoutsQ.isError && !payoutsQ.data} label="Paid (page)" value={paidCount} icon={CheckCircle2} tint="green" format="num" />

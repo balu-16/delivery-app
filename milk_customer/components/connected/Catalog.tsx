@@ -14,7 +14,7 @@ import { BottomSheet } from '@/components/ui/BottomSheet';
 import { Screen } from '@/components/ui/Screen';
 import { images } from '@/constants/assets';
 import { colors, fonts } from '@/constants/theme';
-import { customerApi, type CatalogItem, type CatalogPreviewItem } from '@/src/api/customer';
+import { customerApi, customerDetailsApi, type CatalogItem, type CatalogPreviewItem } from '@/src/api/customer';
 import { accessToken } from '@/src/auth/session';
 import { useCustomer } from '@/src/store/customer';
 import { AddressPanel } from './AddressPanel';
@@ -23,6 +23,7 @@ import { useProductPhoto } from './useProductPhoto';
 import { PushSettings } from './PushNotifications';
 import { agentClient } from '@/src/agent/client';
 import { agentStrings } from '@/src/agent/strings';
+import { assistantNotificationTarget } from '@/src/agent/notification-target';
 
 type DisplayItem = CatalogItem | CatalogPreviewItem;
 function isDiscounted(item: DisplayItem): boolean {
@@ -42,7 +43,7 @@ function ProductTile({ item, select, requestAddress }: { item: DisplayItem; sele
   const favorite = useCustomer(s => s.favorites.includes(item.productId));
   const favoriteDisabled = useCustomer(s => !s.favoritesLoaded || s.favoriteBusy.includes(item.productId));
   const toggleFavorite = useCustomer(s => s.toggleFavorite);
-  const addressId = useCustomer(s => s.selectedAddress);
+  const addressId = useCustomer(s => s.addresses.find(address => address.id === s.selectedAddress)?.point ? s.selectedAddress : null);
   const blocked = useCustomer(s => !!s.pendingPlacement || (!!s.selectedAddress && !!s.cart && s.cart.addressId !== s.selectedAddress));
   const outOfStock = 'availability' in item && item.availability === 'OUT_OF_STOCK';
   const disabled = outOfStock || blocked;
@@ -62,7 +63,9 @@ function ProductTile({ item, select, requestAddress }: { item: DisplayItem; sele
 }
 export function Catalog({ home = false }: { home?: boolean }) {
   const insets = useSafeAreaInsets();
-  const { profile, addresses, selectedAddress, products, cursor, loadCatalog, pendingPlacement, cart, notifications, loadAccount, readNotifications, favorites, catalogLoad, accountLoad } = useCustomer();
+  const { profile, addresses, selectedAddress: savedAddressId, products, cursor, loadCatalog, pendingPlacement, cart, notifications, loadAccount, readNotifications, favorites, catalogLoad, accountLoad } = useCustomer();
+  const selectedAddressValue = addresses.find(x => x.id === savedAddressId);
+  const selectedAddress = selectedAddressValue ? savedAddressId : null;
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [assistantAvailability, setAssistantAvailability] = useState<{ userId: string; enabled: boolean } | null>(null);
   const assistantEnabled = !!profile?.userId && assistantAvailability?.userId === profile.userId && assistantAvailability.enabled;
@@ -95,7 +98,6 @@ export function Catalog({ home = false }: { home?: boolean }) {
     void accessToken().then(token => customerApi.categories(token,selectedAddress)).then(value => { if (active) setCategories({addressId:selectedAddress,items:value.items}); }).catch(() => {});
     return () => {active=false;};
   }, [selectedAddress]);
-  const selectedAddressValue = addresses.find(x => x.id === selectedAddress);
   const currentResults = results?.addressId === selectedAddress ? results : null;
   const shown: DisplayItem[] = !selectedAddress ? preview.filter(item => !previewSearch || `${item.name} ${item.variantName}`.toLowerCase().includes(previewSearch.toLowerCase())) : currentResults?.kind === 'favorites' ? currentResults.items.filter(item => favorites.includes(item.productId)) : currentResults?.items ?? products;
   const catalogPending = !!selectedAddress && !currentResults && (catalogLoad?.addressId !== selectedAddress || catalogLoad?.state === 'idle' || catalogLoad?.state === 'loading');
@@ -121,7 +123,7 @@ export function Catalog({ home = false }: { home?: boolean }) {
     {!home && <View style={shared.row}><TextInput style={[shared.input, { flex: 1 }]} value={query} onChangeText={text => { setQuery(text); if (!text) {requestNumber.current++;setResults(null);setSearching(false);setPreviewSearch('');} }} placeholder="Search products" accessibilityLabel="Search products" onSubmitEditing={search} /><Button label="Search" size="sm" variant="soft" onPress={search} disabled={searching} /></View>}
     {selectedAddress && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8}}><Button label="All" size="sm" variant={!currentResults ? 'primary' : 'soft'} onPress={() => {requestNumber.current++;setResults(null);setQuery('');setSearching(false);}} /><Button label="Favorites" icon="heart-outline" size="sm" variant={currentResults?.kind === 'favorites' ? 'primary' : 'soft'} onPress={() => {setQuery('');void browse('favorites','favorites');}} />{categories?.addressId === selectedAddress && categories.items.map(category => <Button key={category.id} label={category.name} size="sm" variant={currentResults?.kind === 'category' && currentResults.key === category.id ? 'primary' : 'soft'} onPress={() => {setQuery('');void browse('category',category.id);}} />)}</ScrollView>}
     {!!searchError && <AppText style={{color: colors.danger}}>{searchError}</AppText>}
-    {!selectedAddress && <><AppText style={shared.muted}>Sample prices shown. Add a delivery address to see local availability and order.</AppText><Button label="Add delivery address" onPress={() => setAddressOpen(true)} fullWidth />{previewError && <Button label="Retry loading products" variant="soft" onPress={() => setPreviewAttempt(value => value + 1)} />}</>}
+    {!selectedAddress && <><AppText style={shared.muted}>{selectedAddressValue ? 'Your address is saved. Confirm its location to see local availability and order.' : 'Sample prices shown. Add a delivery address to see local availability and order.'}</AppText><Button label={selectedAddressValue ? 'Confirm address location' : 'Add delivery address'} onPress={() => setAddressOpen(true)} fullWidth />{previewError && <Button label="Retry loading products" variant="soft" onPress={() => setPreviewAttempt(value => value + 1)} />}</>}
     {freshBrowsePending || (shown.length === 0 && (catalogPending || (!selectedAddress && previewLoading))) ? <ProductGridSkeleton />
       : catalogFailed ? <View style={{gap:8}}><AppText style={shared.muted}>Could not load products for this address.</AppText><Button label="Try again" variant="soft" size="sm" onPress={() => void loadCatalog()} /></View>
       : shown.length === 0 ? <AppText style={shared.muted}>{!selectedAddress && previewError ? 'Could not load the product preview.' : !selectedAddress && previewSearch ? 'No matching products in the preview.' : currentResults?.kind === 'favorites' ? 'No favorites available at this address yet.' : 'No products available here right now.'}</AppText>
@@ -130,7 +132,15 @@ export function Catalog({ home = false }: { home?: boolean }) {
   </ScrollView><AddressPanel visible={addressOpen} onClose={() => setAddressOpen(false)} /><BottomSheet visible={notificationsOpen} onClose={() => setNotificationsOpen(false)} title="Notifications"><View style={{gap:10}}><ErrorBanner />
     {accountLoad?.notifications === 'idle' || accountLoad?.notifications === 'loading' ? <CardListSkeleton label="Loading notifications" count={2} />
       : accountLoad?.notifications === 'error' ? <><AppText style={shared.muted}>Could not load notifications.</AppText><Button label="Try again" size="sm" variant="soft" onPress={() => void loadAccount()} /></>
-      : <>{notifications.length > 0 && <Button label="Mark all as read" size="sm" variant="soft" onPress={() => void readNotifications()} />}{notifications.length ? notifications.map(item => <Card key={item.id}><AppText style={shared.label}>{item.title}</AppText><AppText style={shared.body}>{item.body}</AppText>{!item.readAt && <AppText style={shared.muted}>Unread</AppText>}</Card>) : <AppText style={shared.muted}>You have no notifications.</AppText>}</>}
+      : <>{notifications.length > 0 && <Button label="Mark all as read" size="sm" variant="soft" onPress={() => void readNotifications()} />}{notifications.length ? notifications.map(item => {
+        const data = item.payload?.data && typeof item.payload.data === 'object' && !Array.isArray(item.payload.data) ? item.payload.data as Record<string, unknown> : {};
+        const target = assistantNotificationTarget({ ...data, deepLink: item.payload?.deepLink });
+        const content = <Card><AppText style={shared.label}>{item.title}</AppText><AppText style={shared.body}>{item.body}</AppText>{!item.readAt && <AppText style={shared.muted}>Unread</AppText>}</Card>;
+        return target ? <Pressable key={item.id} accessibilityRole="button" onPress={() => {
+          void accessToken().then(token => customerDetailsApi.readNotification(token, item.id)).then(() => loadAccount()).catch(() => undefined);
+          setNotificationsOpen(false); router.push({ pathname: '/agent', params: target } as Href);
+        }}>{content}</Pressable> : <View key={item.id}>{content}</View>;
+      }) : <AppText style={shared.muted}>You have no notifications.</AppText>}</>}
     <PushSettings /></View></BottomSheet><BottomSheet visible={!!selected} onClose={() => setSelected(null)} title={selected?.name} subtitle={selected?.variantName}>{selected && <View style={{gap:12}}><AppText style={shared.body}>{selected.description || 'Product details are not available.'}</AppText><Price item={selected} /><Button label={selectedAddress ? 'Add to cart' : 'Choose delivery address'} onPress={() => { if (!selectedAddress) { setSelected(null); setAddressOpen(true); return; } void useCustomer.getState().updateCart(selected.variantId, 1); setSelected(null); }} disabled={('availability' in selected && selected.availability === 'OUT_OF_STOCK') || !!pendingPlacement || (!!selectedAddress && !!cart && cart.addressId !== selectedAddress)} fullWidth /></View>}</BottomSheet></Screen>;
 }
 const styles = StyleSheet.create({

@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 export interface SelectOption { value: string; label: string }
 
 export function Select({
-  value, onValueChange, options, placeholder = 'Select…', className, disabled,
+  value, onValueChange, options, placeholder = 'Select…', className, disabled, ariaLabel,
 }: {
   value: string
   onValueChange: (v: string) => void
@@ -15,10 +15,12 @@ export function Select({
   placeholder?: string
   className?: string
   disabled?: boolean
+  ariaLabel?: string
 }) {
   return (
     <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
       <SelectPrimitive.Trigger
+        aria-label={ariaLabel}
         className={cn(
           'flex h-10 w-full items-center justify-between gap-2 rounded-xl border border-input bg-card px-3.5 text-sm shadow-innersoft transition-colors focus:outline-none focus:ring-2 focus:ring-ring/60 disabled:opacity-50 data-[placeholder]:text-muted-foreground/70',
           className,

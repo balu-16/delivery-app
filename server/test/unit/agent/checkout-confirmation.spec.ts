@@ -79,7 +79,11 @@ test.each(['approve', 'reject'] as const)(
           lines: [{ variantId: ids.variant, productName: 'Milk', variantName: '1 litre' }],
         }),
       },
-      addresses: { list: async () => [{ id: ids.address, line1: 'Street', pincode: '520001' }] },
+      addresses: {
+        list: async () => [
+          { id: ids.address, line1: 'Street', pincode: '520001', point: { lat: 16.5, lng: 80.6 } },
+        ],
+      },
       checkout: { quote },
       orders: {},
     } as unknown as Parameters<typeof createConfirmTools>[0];
@@ -104,3 +108,31 @@ test.each(['approve', 'reject'] as const)(
     expect(execute).toHaveBeenCalledTimes(decision === 'approve' ? 1 : 0);
   },
 );
+
+test('an order requests location when the checkout policy requires it', async () => {
+  const quote = jest
+    .fn<() => Promise<never>>()
+    .mockRejectedValue(new Error('ADDRESS_LOCATION_REQUIRED'));
+  const deps = {
+    cart: { get: async () => ({ addressId: ids.address, lines: [{ variantId: ids.variant }] }) },
+    addresses: {
+      list: async () => [{ id: ids.address, line1: 'Street', pincode: '520001', point: null }],
+    },
+    checkout: { quote },
+    orders: {},
+  } as unknown as Parameters<typeof createConfirmTools>[0];
+  const tools = createConfirmTools(
+    deps,
+    { byCall: async () => null } as unknown as AgentDrafts,
+    {} as AgentOrderPlacement,
+    { userId: ids.user, threadId: ids.thread, confirmTtlSeconds: 60, maxOrderPaise: '500000' },
+    new AgentToolKit(5),
+  );
+  const tool = tools.find((item) => item.name === 'place_order')! as unknown as {
+    invoke(input: object, runtime: { toolCallId: string }): Promise<string>;
+  };
+  expect(
+    JSON.parse(await tool.invoke({}, { toolCallId: 'place-without-location' })).error.code,
+  ).toBe('ADDRESS_LOCATION_REQUIRED');
+  expect(quote).toHaveBeenCalledTimes(1);
+});

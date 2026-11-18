@@ -175,11 +175,29 @@ export class PostgresSupport implements Support {
         tx,
       );
       const messages = result.rows.slice(0, limit);
+      const progress = await sql<{
+        type: string;
+        created_at: Date;
+      }>`SELECT event_type AS type,created_at FROM support_ticket_events WHERE ticket_id=${id}::uuid ORDER BY created_at,id`.execute(
+        tx,
+      );
       return {
         ticket: rows.rows[0],
         messages,
+        progress: progress.rows,
         nextMessagesCursor: result.rows.length > limit ? (messages.at(-1)?.id ?? null) : null,
       };
+    });
+  }
+  async acknowledge(actorId: string, id: string): Promise<void> {
+    await transactionWithRetry(this.db, async (tx) => {
+      if (!(await staff(tx, actorId))) throw new Error('FORBIDDEN');
+      const ticket =
+        await sql`SELECT id FROM support_tickets WHERE id=${id}::uuid FOR UPDATE`.execute(tx);
+      if (!ticket.rows.length) throw new Error('RESOURCE_NOT_FOUND');
+      await sql`INSERT INTO support_ticket_events(id,ticket_id,event_type,actor_id) VALUES(${uuidV7()}::uuid,${id}::uuid,'ACKNOWLEDGED',${actorId}::uuid) ON CONFLICT DO NOTHING`.execute(
+        tx,
+      );
     });
   }
   async canned(
@@ -349,6 +367,10 @@ export class PostgresSupport implements Support {
       await sql`UPDATE support_tickets SET sla_cycle=CASE WHEN ${input.status ?? null}='OPEN' THEN sla_cycle+1 ELSE sla_cycle END,first_response_at=CASE WHEN ${input.status ?? null}='OPEN' THEN NULL ELSE first_response_at END,first_response_due_at=CASE WHEN ${input.status ?? null}='OPEN' THEN clock_timestamp()+${firstSla}*interval '1 hour' ELSE first_response_due_at END,resolution_due_at=CASE WHEN ${input.status ?? null}='OPEN' THEN clock_timestamp()+${resolutionSla}*interval '1 hour' ELSE resolution_due_at END,status=COALESCE(${input.status ?? null},status),assignee_id=CASE WHEN ${input.assigneeId !== undefined} THEN ${input.assigneeId ?? null}::uuid ELSE assignee_id END,resolved_at=CASE WHEN ${input.status ?? null}='RESOLVED' THEN clock_timestamp() ELSE resolved_at END,closed_at=CASE WHEN ${input.status ?? null}='CLOSED' THEN clock_timestamp() WHEN ${input.status ?? null}='OPEN' THEN NULL ELSE closed_at END,updated_at=clock_timestamp(),version=version+1 WHERE id=${id}::uuid`.execute(
         tx,
       );
+      if (input.status && input.status !== ticket.status)
+        await sql`INSERT INTO support_ticket_events(id,ticket_id,event_type,actor_id) VALUES(${uuidV7()}::uuid,${id}::uuid,${input.status},${actorId}::uuid)`.execute(
+          tx,
+        );
       await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,${actorId}::uuid,'support.ticket_updated','ticket',${id},${JSON.stringify(input)}::jsonb)`.execute(
         tx,
       );

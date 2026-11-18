@@ -27,6 +27,7 @@ export interface Support {
     cursor?: string,
     limit?: number,
   ): Promise<unknown>;
+  acknowledge(actorId: string, ticketId: string): Promise<void>;
   canned(
     actorId: string,
     cursor?: string,

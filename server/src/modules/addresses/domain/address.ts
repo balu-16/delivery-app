@@ -18,7 +18,7 @@ export interface AddressInput {
   pincode: string;
   contactName: string;
   contactPhone: string;
-  point: Coordinates;
+  point: Coordinates | null;
 }
 
 /** India bounding box is a coarse input guard; serviceability uses actual polygons. */
@@ -37,7 +37,7 @@ export function validateIndiaPoint(point: Coordinates): void {
 export function validateAddress(input: AddressInput): void {
   if (input.label !== undefined && !['HOME', 'WORK', 'OTHER'].includes(input.label))
     throw new Error('INVALID_ADDRESS');
-  validateIndiaPoint(input.point);
+  if (input.point) validateIndiaPoint(input.point);
   if (!/^\d{6}$/.test(input.pincode)) throw new Error('INVALID_PINCODE');
   if (!/^\+[1-9]\d{7,14}$/.test(input.contactPhone)) throw new Error('INVALID_CONTACT_PHONE');
   if (

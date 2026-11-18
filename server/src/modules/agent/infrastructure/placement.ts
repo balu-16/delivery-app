@@ -16,7 +16,7 @@ import type {
   CheckoutOperations,
   CheckoutPlacementGuard,
 } from '../../checkout/contracts/checkout.js';
-import { requireAgentPermission } from './security.js';
+import { requireAgentPermission, assertAgentCommitAllowed } from './security.js';
 import { draftHash } from './guards.js';
 
 export const orderDraft = z
@@ -49,6 +49,13 @@ export const orderDraft = z
     taxTotalPaise: z.string(),
     walletCashPaise: z.string(),
     walletPromoPaise: z.string(),
+    etaRange: z
+      .object({
+        minMinutes: z.number().int().nonnegative(),
+        maxMinutes: z.number().int().nonnegative(),
+      })
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -94,6 +101,7 @@ export class AgentOrderPlacement {
     const guard: CheckoutPlacementGuard = {
       beforePlace: async (tx: TransactionContext) => {
         await requireAgentPermission(input.userId, tx);
+        await assertAgentCommitAllowed(tx, input.userId, input.threadId);
         const found = await sql<{
           status: string;
           payload: Json;

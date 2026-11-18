@@ -1,5 +1,9 @@
 # Customer assistant progress
 
+The sections below are historical. See the root `progress.md` for the current English-only scope, enabled development environment, completed checks and outstanding work.
+
+Verified on 18 November 2026: `ORDERS.purchaseSummary` reads only the signed-in customer's delivered orders. The usual-order live scenario then placed one new order for Toned Milk 500 ml, quantity 3, at the current price, and a repeated approval did not create another order. See the root `progress.md` for the two NVIDIA reports. Coupons and substitutes remain deferred (ADR 0003).
+
 - A0: Discovery completed; see `DISCOVERY.md` for domain mappings and gaps.
 - A1/A2: **Complete.** Configuration, consent, thread/run records, LangGraph model factory (fake, anthropic, bedrock, openai, google, openai_compatible and nvidia with per-provider thinking), read/write/confirm/nudge tools, confirmation drafts with replay/expiry/ownership, token-bounded history middleware, usage accounting. 16 tools; see `TOOLS.md`. ADRs 0002–0004 record the single-agent shape, address flow and draft-blocking decisions.
 - A3: **Complete for the approved scope.** Quick order (search → cart → quote → confirmation card → placement through the existing checkout saga), cancellation, refund-request tickets, escalation, order-history "usual", tracking, serviceability, policy text, typed-address parsing with app-screen handoff (ADR 0003). Database-backed placement verified by AWS integration tests.

@@ -4,6 +4,10 @@ export type AgentCardType =
   | 'address_confirm'
   | 'order_confirm'
   | 'order_status'
+  | 'out_of_stock'
+  | 'delivery_unavailable'
+  | 'payment_unavailable'
+  | 'cart_attention'
   | 'cancel_confirm'
   | 'refund_confirm'
   | 'subscription_confirm'
@@ -39,9 +43,18 @@ export interface AgentConfigView {
   supportedLocales: AgentLocale[];
 }
 export const AGENT_OPERATIONS = Symbol('AGENT_OPERATIONS');
+export interface AgentRunView {
+  id: string;
+  threadId: string;
+  state: 'queued' | 'running' | 'completed' | 'waiting' | 'failed' | 'cancelled';
+  errorCode: string | null;
+  clientMessageId: string | null;
+}
 export interface AgentOperations {
   config(locale?: AgentLocale): Promise<AgentConfigView>;
   current(userId: string, locale?: AgentLocale): Promise<unknown>;
+  listThreads(userId: string, cursor?: string): Promise<unknown>;
+  thread(userId: string, threadId: string): Promise<unknown>;
   create(userId: string, locale?: AgentLocale): Promise<unknown>;
   messages(userId: string, threadId: string, cursor?: string): Promise<unknown>;
   feedback(
@@ -68,12 +81,22 @@ export interface AgentOperations {
       threadId: string;
       draftId: string;
       decision: 'approve' | 'reject';
+      clientActionId?: string;
       locale: AgentLocale;
       signal: AbortSignal;
     },
     emit: (event: AgentEvent) => void,
   ): Promise<void>;
   cancel(userId: string, threadId: string): Promise<void>;
+  currentRun(userId: string, threadId: string): Promise<AgentRunView | null>;
+  followRun(
+    userId: string,
+    threadId: string,
+    runId: string,
+    after: string | undefined,
+    signal: AbortSignal,
+    emit: (event: AgentEvent) => void,
+  ): Promise<void>;
   deleteThread(userId: string, threadId: string): Promise<void>;
   deleteAllThreads(userId: string): Promise<void>;
   action(
@@ -82,5 +105,6 @@ export interface AgentOperations {
     cardId: string,
     action: string,
     payload: unknown,
+    clientActionId?: string,
   ): Promise<unknown>;
 }

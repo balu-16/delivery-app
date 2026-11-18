@@ -11,6 +11,8 @@ test.each([
   ['+1 9876543210', null],
   ['98765', null],
   ['98765432101', null],
+  ['1234567890', null],
+  ['0987654321', null],
 ])('normalizes Indian phone input %s', (input, expected) => {
   expect(indianPhoneE164(input)).toBe(expected);
 });
@@ -23,6 +25,8 @@ test('removes a pasted Indian prefix without deleting the start of a ten-digit n
 test('reports each missing or invalid address field beside that field', () => {
   expect(addressErrors(valid)).toEqual({});
   expect(addressErrors({ ...valid, phone: '123' })).toEqual({ phone: 'Enter a valid 10-digit Indian phone number.' });
-  expect(addressErrors({ ...valid, pincode: '5200', point: null })).toEqual({ pincode: 'Enter a six-digit PIN code.', location: 'Select your current location at the delivery address.' });
+  expect(addressErrors({ ...valid, phone: '1234567890' })).toEqual({ phone: 'Enter a valid 10-digit Indian phone number.' });
+  expect(addressErrors({ ...valid, point: null })).toEqual({});
+  expect(addressErrors({ ...valid, pincode: '5200', point: null })).toEqual({ pincode: 'Enter a six-digit PIN code.' });
   expect(addressErrors({ ...valid, line1: '', contact: '' })).toEqual({ line1: 'Enter your house and street.', contact: 'Enter the contact name.' });
 });

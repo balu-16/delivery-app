@@ -16,7 +16,9 @@ import { DataTable } from '@/components/shared/DataTable'
 import type { InventorySummaryRow, LedgerRow, ShelfLifePolicy } from '@/types'
 import { cn, fmtDateTime, fmtNum } from '@/lib/utils'
 
-type MainTab = 'stock' | 'crossstore' | 'movements' | 'shelf'
+import { StockCorrections } from './StockCorrections'
+
+type MainTab = 'stock' | 'crossstore' | 'movements' | 'shelf' | 'corrections'
 
 function CursorPager({ onPrev, onNext, hasPrev, hasNext, loading, label }: {
   onPrev: () => void; onNext: () => void; hasPrev: boolean; hasNext: boolean; loading: boolean; label: string
@@ -174,12 +176,15 @@ export function Inventory() {
             onChange={(v) => setTab(v as MainTab)}
             tabs={[
               { value: 'stock', label: 'Store stock' },
+              { value: 'corrections', label: 'Correct stock' },
               { value: 'crossstore', label: 'Cross-store' },
               { value: 'movements', label: 'Ledger' },
               { value: 'shelf', label: 'Shelf life' },
             ]}
           />
         </motion.div>
+
+        {tab === 'corrections' && <StockCorrections stores={stores} />}
 
         {/* ── STORE STOCK (per-store report) ── */}
         {tab === 'stock' && (
@@ -386,7 +391,7 @@ export function Inventory() {
                 (also holding a STORE_MANAGER assignment at the affected store). Pending adjustment approvals appear under
                 <span className="font-semibold text-foreground"> Approvals</span> where the Approve action executes them.
               </p>
-              <p className="mt-3 text-xs text-muted-foreground">Direct stock edits are intentionally not available to the admin — receiving and counting belong to stores.</p>
+              <p className="mt-3 text-xs text-muted-foreground">Admins can record a reasoned batch count under Correct stock; reserved items remain protected.</p>
             </Card>
           </motion.section>
         )}

@@ -60,7 +60,7 @@ export function TaskDetail({ task, enabled, busy, run }: { task: Task; enabled: 
     <Card><View style={styles.row}><IconBox name="location-outline" /><View style={{ flex: 1 }}>
       <Text style={styles.strong}>{destination.name || 'Customer'}</Text><Text style={styles.sub}>{customer || 'Address unavailable'}</Text>
     </View></View>
-      {destination.lat !== null && destination.lng !== null ? <Button label="Navigate to customer" secondary compact onPress={() => openMap(destination.lat, destination.lng)} /> : null}
+      {destination.lat !== null && destination.lng !== null ? <Button label="Navigate to customer" secondary compact onPress={() => openMap(destination.lat, destination.lng)} /> : <Text style={styles.sub}>Customer location is unavailable. Use the written address or contact the customer.</Text>}
       <View style={styles.space} /><Button label="Show customer contact" secondary compact disabled={!allowed || contactLoading} onPress={() => void showContact()} />
       {contactLoading && !contact ? <View accessible accessibilityLabel="Loading customer contact" accessibilityState={{busy:true}}><SkeletonBlock width="65%" height={18} style={{marginTop:10}} /></View> : null}
       {contact ? <Button label={`Call ${contact.contactName}`} compact onPress={() => void Linking.openURL(`tel:${contact.contactPhone}`)} /> : null}

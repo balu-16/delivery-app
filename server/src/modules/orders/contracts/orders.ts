@@ -138,6 +138,14 @@ export interface OrderListPage {
   items: readonly OrderView[];
   nextCursor: string | null;
 }
+/** A variant this customer has received, with the quantity from its newest delivered order. */
+export interface UsualPurchase {
+  variantId: string;
+  name: string;
+  orderCount: number;
+  lastQuantity: number;
+  lastOrderedAt: string;
+}
 export interface AdminOrderFilter {
   readonly status?: OrderStatus;
   readonly storeId?: string;
@@ -193,6 +201,19 @@ export interface OrderOperations {
   expireDue(limit: number): Promise<number>;
   timeline(orderId: string, opts?: { userId?: string }): Promise<readonly TimelineEntry[]>;
   list(userId: string, limit: number, cursor?: string): Promise<OrderListPage>;
+  /**
+   * Owner-scoped usual-order candidates from delivered orders only.
+   * `limit` is how many recent delivered orders to read (1–20, default 10).
+   */
+  purchaseSummary(userId: string, limit?: number): Promise<readonly UsualPurchase[]>;
+  /** Owner-scoped delivered lines plus variants still on an active order. */
+  purchaseSignals(
+    userId: string,
+    limit?: number,
+  ): Promise<{
+    delivered: readonly { orderId: string; variantId: string; name: string; placedAt: string }[];
+    activeVariantIds: readonly string[];
+  }>;
   adminList(filter: AdminOrderFilter, limit: number, cursor?: string): Promise<OrderListPage>;
   /** Same-zone, fee-preserving, pre-PICKING address change (GEO-03). */
   changeAddress(

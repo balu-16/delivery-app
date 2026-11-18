@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:local-admin": "VITE_DEV_API_TARGET=http://127.0.0.1:13081 vite --host 127.0.0.1 --port 5175 --strictPort",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

@@ -4,6 +4,7 @@ import type { TransactionContext } from '../../../platform/database/database.js'
 import { parseMoney } from '../../../common/money/money.js';
 import type { WalletBucket, WalletReason } from '../contracts/wallet.js';
 import { WalletPrimitives } from './postgres-wallet.js';
+import { allocateLots, assertSufficient } from '../domain/wallet-math.js';
 
 /**
  * Credits and administrative adjustments. Credits are exactly-once by ledger
@@ -82,6 +83,25 @@ export class WalletCreditService {
           ? account.cash_balance_paise + delta
           : account.promo_balance_paise + delta;
       if (balanceAfter < 0n) throw new Error('WALLET_INSUFFICIENT');
+      // Promotional money is spendable only through active, unexpired lots.
+      // Keep the lots, ledger and account balance in the same transaction.
+      let lotTakes: { lotId: string; amountPaise: string }[] = [];
+      if (input.bucket === 'promo' && delta < 0n) {
+        const now = await this.primitives.currentLotTime(ctx);
+        const lots = await sql<{
+          id: string;
+          remaining_paise: string;
+        }>`SELECT id,remaining_paise::text
+          FROM wallet_promo_lots WHERE account_id=${account.id}::uuid AND state='ACTIVE' AND remaining_paise>0
+            AND (expires_at IS NULL OR expires_at > ${now})
+          ORDER BY created_at,id FOR UPDATE`.execute(ctx);
+        const available = lots.rows.reduce((sum, lot) => sum + BigInt(lot.remaining_paise), 0n);
+        assertSufficient(available, (-delta).toString());
+        lotTakes = allocateLots(
+          lots.rows.map((lot) => ({ lotId: lot.id, remainingPaise: BigInt(lot.remaining_paise) })),
+          (-delta).toString(),
+        ).map((take) => ({ lotId: take.lotId, amountPaise: take.take.toString() }));
+      }
       const applied = await this.primitives.insertLedgerRow(ctx, {
         accountId: account.id,
         bucket: input.bucket,
@@ -90,8 +110,19 @@ export class WalletCreditService {
         refType: 'ADMIN_APPROVAL',
         refId: input.refId,
         balanceAfter,
+        lotAllocations: lotTakes,
       });
       if (!applied) throw new Error('RESOURCE_CONFLICT');
+      if (input.bucket === 'promo' && delta > 0n) {
+        await this.grantLot(
+          ctx,
+          account.id,
+          { reason: 'ADMIN_ADJUSTMENT', refId: input.refId },
+          delta,
+        );
+      } else if (lotTakes.length) {
+        await this.primitives.consumeLots(ctx, lotTakes);
+      }
       await this.primitives.applyBalance(
         ctx,
         account.id,

@@ -28,6 +28,7 @@ import type {
   RealtimeNamespace,
 } from '../../../platform/realtime/realtime.js';
 import { DELIVERY_TASKS, type DeliveryTasks } from '../contracts/tasks.js';
+import { addressSnapshotPoint } from '../domain/geo.js';
 
 /**
  * Realtime registration (P8): the /rider namespace (offers, task updates) on
@@ -231,9 +232,8 @@ export class DispatchRealtimeLifecycle {
       }>`SELECT address_snapshot FROM orders WHERE id=${orderId}::uuid`.execute(this.db),
     ]);
     const store = storeRows.rows[0];
-    const snapshot = destRows.rows[0]?.address_snapshot as
-      { lat?: number; lng?: number } | undefined;
-    if (!store || !snapshot?.lat || !snapshot?.lng) return null;
+    const snapshot = addressSnapshotPoint(destRows.rows[0]?.address_snapshot);
+    if (!store || !snapshot) return null;
     const metres = haversine(Number(store.lat), Number(store.lng), snapshot.lat, snapshot.lng);
     const range = await this.eta.eta({
       storeToCustomerMetres: metres,

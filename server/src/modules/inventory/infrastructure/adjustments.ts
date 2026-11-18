@@ -12,6 +12,7 @@ import type { AppConfig } from '../../app-config/contracts/config.js';
 import type { ApprovalExecutor, ApprovalFactory } from '../../compliance/contracts/approval.js';
 import type { IdentityAccess } from '../../identity/contracts/identity.js';
 import type { CountInput, InventoryAdjustments } from '../contracts/adjustments.js';
+import type { InventoryAdminCorrections } from '../contracts/admin-corrections.js';
 import { quantity } from '../domain/quantity.js';
 import { fingerprint, lockStock, movement, operation } from './stock-primitives.js';
 
@@ -32,7 +33,7 @@ function validPayload(value: Json): value is { [key: string]: string } {
     ].every((k) => typeof value[k] === 'string')
   );
 }
-export class PostgresAdjustments implements InventoryAdjustments {
+export class PostgresAdjustments implements InventoryAdjustments, InventoryAdminCorrections {
   private readonly approvals: ApprovalExecutor;
   constructor(
     private readonly db: Database,
@@ -185,6 +186,54 @@ export class PostgresAdjustments implements InventoryAdjustments {
       if (after.rows[0]?.status === 'EXECUTED' && after.rows[0].checker_id === actor) return;
       throw error;
     }
+  }
+  async batches(actorId: string, storeId: string, cursor?: string) {
+    if (!(await this.identity.hasRole(actorId, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
+    const rows = await sql<{
+      batch_id: string;
+      variant_id: string;
+      product_name: string;
+      variant_name: string;
+      batch_code: string;
+      state: string;
+      on_hand: string;
+      reserved: string;
+      version: string;
+    }>`SELECT b.id::text AS batch_id,b.variant_id::text,p.name AS product_name,v.name AS variant_name,b.batch_code,b.state,b.on_hand::text,b.reserved::text,i.version::text
+      FROM inventory_batches b JOIN store_inventory i ON i.store_id=b.store_id AND i.variant_id=b.variant_id JOIN catalog_variants v ON v.id=b.variant_id JOIN catalog_products p ON p.id=v.product_id
+      WHERE b.store_id=${storeId}::uuid AND (${cursor ?? null}::uuid IS NULL OR b.id>${cursor ?? null}::uuid) ORDER BY b.id LIMIT 101`.execute(
+      this.db,
+    );
+    const items = rows.rows
+      .slice(0, 100)
+      .map((row) => ({
+        batchId: row.batch_id,
+        variantId: row.variant_id,
+        productName: row.product_name,
+        variantName: row.variant_name,
+        batchCode: row.batch_code,
+        state: row.state,
+        onHand: row.on_hand,
+        reserved: row.reserved,
+        version: row.version,
+      }));
+    return { items, nextCursor: rows.rows.length > 100 ? (items.at(-1)?.batchId ?? null) : null };
+  }
+  async correct(actorId: string, input: CountInput): Promise<void> {
+    quantity(input.counted, true);
+    quantity(input.expectedVersion);
+    if (
+      !input.reference ||
+      input.reference.length > 150 ||
+      !input.reason.trim() ||
+      input.reason.length > 500
+    )
+      throw new Error('INVALID_INPUT');
+    await transactionWithRetry(this.db, async (tx) => {
+      if (!(await this.identity.hasRole(actorId, ['SUPER_ADMIN'], tx)))
+        throw new Error('FORBIDDEN');
+      await this.apply(tx, actorId, { ...input, reason: input.reason.trim(), kind: 'ADJUSTMENT' });
+    });
   }
   private async apply(
     tx: TransactionContext,

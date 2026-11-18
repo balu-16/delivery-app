@@ -1,17 +1,8 @@
 import { sql } from 'kysely';
 import type { Database, Json } from '../../../platform/database/database.js';
 import type { EtaProvider, RiderLocationReads } from '../../tracking/contracts/tracking.js';
-import { haversineMetres } from '../domain/geo.js';
+import { addressSnapshotPoint, haversineMetres } from '../domain/geo.js';
 import type { CustomerTracking, DeliveryCodes, OrderTrackingView } from '../contracts/tasks.js';
-
-function parseSnapshot(snapshot: Json | null): { lat: number; lng: number } | null {
-  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
-  const raw = snapshot as Record<string, unknown>;
-  const lat = Number(raw.lat);
-  const lng = Number(raw.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return { lat, lng };
-}
 
 /**
  * Customer tracking reads (23.4): ownership via the task's customer binding,
@@ -90,7 +81,7 @@ export class PostgresCustomerTracking implements CustomerTracking {
       }>`SELECT address_snapshot FROM orders WHERE id=${orderId}::uuid`.execute(this.db),
     ]);
     const store = storeRows.rows[0];
-    const destination = parseSnapshot(destRows.rows[0]?.address_snapshot ?? null);
+    const destination = addressSnapshotPoint(destRows.rows[0]?.address_snapshot);
     if (!store || !destination) return null;
     const metres = haversineMetres(
       { lat: Number(store.lat), lng: Number(store.lng) },

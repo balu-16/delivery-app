@@ -33,7 +33,7 @@ export class PostgresP11Privacy implements P11Privacy {
       id: string;
       data: unknown;
     }>`SELECT kind,id::text,data FROM (
-   SELECT 'ticket'::text AS kind,t.id,jsonb_build_object('id',t.id,'orderId',t.order_id,'category',t.category,'status',t.status,'createdAt',t.created_at) AS data FROM support_tickets t WHERE t.owner_id=${userId}::uuid
+   SELECT 'ticket'::text AS kind,t.id,jsonb_build_object('id',t.id,'orderId',t.order_id,'category',t.category,'status',t.status,'createdAt',t.created_at,'progress',COALESCE((SELECT jsonb_agg(jsonb_build_object('type',e.event_type,'createdAt',e.created_at) ORDER BY e.created_at,e.id) FROM support_ticket_events e WHERE e.ticket_id=t.id),'[]'::jsonb)) AS data FROM support_tickets t WHERE t.owner_id=${userId}::uuid
    UNION ALL SELECT 'message',m.id,jsonb_build_object('id',m.id,'ticketId',m.ticket_id,'body',m.body,'createdAt',m.created_at) FROM support_ticket_messages m JOIN support_tickets t ON t.id=m.ticket_id WHERE t.owner_id=${userId}::uuid AND NOT m.internal
    UNION ALL SELECT 'rating',r.id,jsonb_build_object('id',r.id,'orderId',r.order_id,'targetType',r.target_type,'targetId',r.target_id,'stars',r.stars,'comment',r.comment,'createdAt',r.created_at) FROM ratings r WHERE r.rater_id=${userId}::uuid
    UNION ALL SELECT 'payout',p.id,jsonb_build_object('id',p.id,'state',p.state,'grossPaise',p.gross_paise::text,'cashOffsetPaise',p.cash_offset_paise::text,'netPaise',p.net_paise::text,'createdAt',p.created_at) FROM rider_payouts p WHERE p.rider_id=${userId}::uuid

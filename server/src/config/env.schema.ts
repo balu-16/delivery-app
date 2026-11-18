@@ -27,6 +27,7 @@ const envBaseSchema = z
     PAYMENTS_PROVIDER: z.enum(['fake', 'razorpay']).default('fake'),
     MAPS_PROVIDER: z.enum(['fake', 'ola']).default('fake'),
     AGENT_ENABLED: z.enum(['true', 'false']).default('false'),
+    AGENT_WORKER_IN_PROCESS: z.enum(['true', 'false']).default('false'),
     AGENT_ROUTING: z.enum(['on', 'off']).default('on'),
     LLM_PROVIDER: z
       .enum(['', 'fake', 'anthropic', 'bedrock', 'openai', 'google', 'openai_compatible', 'nvidia'])
@@ -66,6 +67,8 @@ const envBaseSchema = z
     CACHE_URL: optional,
     CACHE_IAM_NAME: optional,
     CACHE_IAM_USER: optional,
+    CACHE_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
+    CACHE_COMMAND_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
     LOCAL_JWT_SECRET: z.string().default('local-dev-only-change-me'),
     PICKING_HANDOVER_SECRET: z.string().default('picking-handover-local-dev-secret-v1'),
     PICKING_CODE_KEY_VERSION: z.coerce.number().int().positive().default(1),

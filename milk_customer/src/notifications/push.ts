@@ -128,7 +128,7 @@ export async function unregisterPushBeforeSignOut(userId:string | undefined) {
 }
 
 /** Installs foreground, tap and token-rotation listeners for the signed-in account. */
-export function startPushSession(userId:string, onReceived:() => void, onOpen:() => void) {
+export function startPushSession(userId:string, onReceived:() => void, onOpen:(data:Record<string, unknown>) => void) {
   const current = ++generation;
   suspended = false;
   const unsupported = supported();
@@ -143,10 +143,10 @@ export function startPushSession(userId:string, onReceived:() => void, onOpen:()
       subscriptions = [
         Notifications.addPushTokenListener(token => {if (active && !suspended && usePushStatus.getState().status === 'enabled' && token.type === 'android' && typeof token.data === 'string') void serial(() => register(userId,token.data as string,current)).catch(() => {if (active && !suspended && current === generation) setStatus('error','Could not update delivery alerts. Please try again.');});}),
         Notifications.addNotificationReceivedListener(() => {if (active) onReceived();}),
-        Notifications.addNotificationResponseReceivedListener(() => {if (active) onOpen();}),
+        Notifications.addNotificationResponseReceivedListener(response => {if (active) onOpen(response.notification.request.content.data ?? {});}),
       ];
       const response = await Notifications.getLastNotificationResponseAsync();
-      if (active && response) {await Notifications.clearLastNotificationResponseAsync();onOpen();}
+      if (active && response) {await Notifications.clearLastNotificationResponseAsync();onOpen(response.notification.request.content.data ?? {});}
       if (active) await synchronize(userId,current,false);
     } catch {if (active && current === generation) setStatus('error','Could not prepare delivery alerts. Please try again.');}
   })();

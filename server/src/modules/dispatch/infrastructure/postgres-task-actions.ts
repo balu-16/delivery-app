@@ -242,7 +242,7 @@ export class PostgresTaskActions {
       if (point) {
         const summary = await this.orderReads.orderSummary(task.order_id);
         const destination = summary?.addressSnapshot;
-        if (destination?.lat !== undefined && destination?.lng !== undefined) {
+        if (typeof destination?.lat === 'number' && typeof destination.lng === 'number') {
           const metres = haversineMetres({ lat: destination.lat, lng: destination.lng }, point);
           geofence = geofenceFlag(metres, await this.settings.number('geofenceThresholdMetres'));
         }
@@ -338,18 +338,17 @@ export class PostgresTaskActions {
           ['notifications'],
         );
         await this.emitOrderDelivered(tx, task, riderId);
-        if (distance !== null)
-          await this.earnings.recordForTask(
-            {
-              taskId: task.id,
-              orderId: task.order_id,
-              riderId,
-              distanceMetres: distance,
-              detentionMinutes: this.detentionMinutes(task),
-              tipPaise: summary?.tipPaise ?? '0',
-            },
-            tx,
-          );
+        await this.earnings.recordForTask(
+          {
+            taskId: task.id,
+            orderId: task.order_id,
+            riderId,
+            distanceMetres: distance,
+            detentionMinutes: this.detentionMinutes(task),
+            tipPaise: summary?.tipPaise ?? '0',
+          },
+          tx,
+        );
         await releaseRiderTask(tx, riderId, now);
         const effects: Effect[] = [];
         this.emitTaskStatus({ ...task, status: 'DELIVERED' }, effects);
@@ -587,7 +586,7 @@ export class PostgresTaskActions {
     summary: Awaited<ReturnType<OrderDeliveryReads['orderSummary']>> | null,
   ): Promise<number | null> {
     const destination = summary?.addressSnapshot;
-    if (!destination || destination.lat === undefined || destination.lng === undefined) return null;
+    if (typeof destination?.lat !== 'number' || typeof destination.lng !== 'number') return null;
     const store = await this.storePoint(tx, task.store_id);
     if (!store) return null;
     return haversineMetres(store, { lat: destination.lat, lng: destination.lng });
@@ -602,7 +601,7 @@ export class PostgresTaskActions {
   ): Promise<void> {
     const summary = await this.orderReads.orderSummary(task.order_id);
     const destination = summary?.addressSnapshot;
-    if (!destination || destination.lat === undefined || destination.lng === undefined) return;
+    if (typeof destination?.lat !== 'number' || typeof destination.lng !== 'number') return;
     const store = await this.storePoint(tx, task.store_id);
     if (!store) return;
     const range = await this.eta.eta({

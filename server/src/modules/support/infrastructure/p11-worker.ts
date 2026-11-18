@@ -129,7 +129,12 @@ export class P11Worker implements OnApplicationBootstrap, BeforeApplicationShutd
     if (!cutoff) return;
     const riders = await sql<{
       rider_id: string;
-    }>`SELECT DISTINCT e.rider_id FROM rider_earnings e JOIN users u ON u.id=e.rider_id AND u.status='ACTIVE' WHERE e.computed_at<${cutoff.toISOString()}::timestamptz AND e.payout_reference IS NULL AND NOT EXISTS(SELECT 1 FROM payout_earning_claims c WHERE c.earning_id=e.id AND c.active) AND NOT EXISTS(SELECT 1 FROM rider_payouts p WHERE p.rider_id=e.rider_id AND p.state='DRAFT') AND NOT EXISTS(SELECT 1 FROM rider_payouts p JOIN payout_batches b ON b.id=p.batch_id WHERE p.rider_id=e.rider_id AND b.cutoff=${cutoff.toISOString()}::timestamptz AND p.state<>'CANCELLED') ORDER BY e.rider_id LIMIT 100`.execute(
+    }>`SELECT DISTINCT due.rider_id FROM (
+      SELECT e.rider_id FROM rider_earnings e WHERE e.computed_at<${cutoff.toISOString()}::timestamptz AND e.payout_reference IS NULL AND NOT EXISTS(SELECT 1 FROM payout_earning_claims c WHERE c.earning_id=e.id AND c.active)
+      UNION ALL SELECT a.rider_id FROM rider_distance_adjustments a WHERE a.created_at<${cutoff.toISOString()}::timestamptz AND a.amount_paise>0 AND a.payout_reference IS NULL AND NOT EXISTS(SELECT 1 FROM payout_distance_claims c WHERE c.adjustment_id=a.id AND c.active)
+      ) due JOIN users u ON u.id=due.rider_id AND u.status='ACTIVE'
+      WHERE NOT EXISTS(SELECT 1 FROM rider_payouts p WHERE p.rider_id=due.rider_id AND p.state='DRAFT')
+        AND NOT EXISTS(SELECT 1 FROM rider_payouts p JOIN payout_batches b ON b.id=p.batch_id WHERE p.rider_id=due.rider_id AND b.cutoff=${cutoff.toISOString()}::timestamptz AND p.state<>'CANCELLED') ORDER BY due.rider_id LIMIT 100`.execute(
       this.handle.db,
     );
     for (const row of riders.rows) {

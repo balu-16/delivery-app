@@ -5,10 +5,10 @@ import { customerApi, customerDetailsApi } from '../src/api/customer';
 import { useCustomer } from '../src/store/customer';
 
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
-jest.mock('expo-crypto', () => ({randomUUID: jest.fn(() => 'checkout-key')}));
+jest.mock('expo-crypto', () => ({randomUUID: jest.fn(() => 'checkout-key'), CryptoDigestAlgorithm:{SHA256:'SHA256'}, digestStringAsync:jest.fn(async (_algorithm:string, value:string) => `hash:${value}`)}));
 jest.mock('../src/auth/session', () => ({accessToken: jest.fn(async () => 'token'), restoreSession: jest.fn(async () => true), signOut: jest.fn(async () => {})}));
 jest.mock('../src/api/customer', () => ({
-  customerApi: {profile:jest.fn(), addresses:jest.fn(), cart:jest.fn(), catalog:jest.fn(), favorites:jest.fn(), setFavorite:jest.fn(), putItem:jest.fn(), quote:jest.fn(), place:jest.fn(), serviceability:jest.fn(), createAddress:jest.fn()},
+  customerApi: {profile:jest.fn(), addresses:jest.fn(), cart:jest.fn(), catalog:jest.fn(), favorites:jest.fn(), setFavorite:jest.fn(), putItem:jest.fn(), quote:jest.fn(), place:jest.fn(), serviceability:jest.fn(), deliverySettings:jest.fn(), createAddress:jest.fn(), createPendingAddress:jest.fn(), confirmAddressLocation:jest.fn(), selectDefaultAddress:jest.fn()},
   customerDetailsApi: {orders:jest.fn(), subscriptions:jest.fn(), ledger:jest.fn(), notifications:jest.fn(), createSubscription:jest.fn(), subscriptionAction:jest.fn()},
 }));
 const api = jest.mocked(customerApi);
@@ -18,8 +18,10 @@ const quote = {quote:{quoteId:'quote',status:'ACTIVE',referralClaimId:null,lines
 beforeEach(async () => {
   await useCustomer.getState().logout(); await AsyncStorage.clear(); jest.clearAllMocks();
   api.profile.mockResolvedValue(profile); api.addresses.mockResolvedValue([]); api.cart.mockResolvedValue(cart); api.catalog.mockResolvedValue({items:[],nextCursor:null});
+  api.deliverySettings.mockResolvedValue({locationRequired:false});
+  api.serviceability.mockResolvedValue({serviceable:true,storeId:'store',zone:{zoneId:'zone',zoneVersion:'1',cityZoneVersion:'1',storeId:'store'},etaRange:null,reasons:[]});
   api.favorites.mockResolvedValue({items:[],nextCursor:null});
-  useCustomer.setState({status:'signedIn', profile, selectedAddress:'address', cart, quote, pendingPlacement:null, pendingSubscription:null, pendingSubscriptionAction:null, error:null, busy:false});
+  useCustomer.setState({status:'signedIn', profile, selectedAddress:'address', locationRequired:false, cart, quote, pendingPlacement:null, pendingSubscription:null, pendingSubscriptionAction:null, error:null, busy:false});
 });
 test('persists and reuses the same checkout request after an ambiguous failure', async () => {
   api.place.mockRejectedValueOnce(new TypeError('network')).mockResolvedValueOnce({order:{orderId:'order',status:'CONFIRMED',paymentStatus:'COD_PENDING'},confirmation:'CONFIRMED',payment:null});
@@ -118,4 +120,44 @@ test('explains a coverage lookup failure before attempting to save an address', 
   await expect(useCustomer.getState().addAddress({line1:'12 Main Street',pincode:'520001',contactName:'Customer',contactPhone:'+919876543210',lat:16.50547,lng:80.64823}))
     .rejects.toThrow('Could not check delivery coverage. Check your connection and try again.');
   expect(api.createAddress).not.toHaveBeenCalled();
+});
+
+test('retries an unconfirmed address with the original request ID and blocks checkout', async () => {
+  useCustomer.setState({locationRequired:true});
+  api.deliverySettings.mockResolvedValue({locationRequired:true});
+  const written = {line1:'12 Main Street',pincode:'520001',contactName:'Customer',contactPhone:'+919876543210'};
+  const address = {id:'address',...written,point:null,isDefault:true,version:'1'};
+  api.createPendingAddress.mockRejectedValueOnce(new TypeError('network')).mockResolvedValueOnce({address,needsConfirmation:false,degraded:false});
+  await expect(useCustomer.getState().addAddress(written)).rejects.toThrow('network');
+  const result = await useCustomer.getState().addAddress(written);
+  expect(result).toMatchObject({id:'address',locationNeeded:true});
+  expect(api.createPendingAddress.mock.calls.map(call => call[2])).toEqual(['checkout-key','checkout-key']);
+  await useCustomer.getState().createQuote();
+  expect(api.quote).not.toHaveBeenCalled();
+  expect(useCustomer.getState().error).toMatch(/Confirm the location/);
+});
+
+test('allows a saved address without GPS when the admin uses PIN-only delivery', async () => {
+  const written = {line1:'12 Main Street',pincode:'520001',contactName:'Customer',contactPhone:'+919876543210'};
+  const address = {id:'address',...written,point:null,isDefault:true,version:'1'};
+  api.createPendingAddress.mockResolvedValueOnce({address,needsConfirmation:false,degraded:false});
+  api.quote.mockResolvedValueOnce(quote);
+  const result = await useCustomer.getState().addAddress(written);
+  expect(result.locationNeeded).toBe(false);
+  expect(api.serviceability).toHaveBeenCalledWith('token','520001');
+  await useCustomer.getState().createQuote();
+  expect(api.quote).toHaveBeenCalledWith('token',{addressId:'address'});
+});
+
+test('refreshes the version after confirming and selecting a saved address', async () => {
+  const point = {lat:16.50547,lng:80.64823};
+  const address = {id:'other',line1:'12 Main Street',pincode:'520001',contactName:'Customer',contactPhone:'+919876543210',point:null,isDefault:false,version:'1'};
+  useCustomer.setState({addresses:[address]});
+  api.serviceability.mockResolvedValue({serviceable:true,storeId:'store',zone:{zoneId:'zone',zoneVersion:'1',cityZoneVersion:'1',storeId:'store'},etaRange:null,reasons:[]});
+  api.confirmAddressLocation.mockResolvedValue({address:{...address,point,version:'2'},needsConfirmation:false,degraded:false});
+  api.selectDefaultAddress.mockResolvedValue(undefined);
+  api.addresses.mockResolvedValue([{...address,point,isDefault:true,version:'3'}]);
+  await useCustomer.getState().confirmAddressLocation('other',point);
+  expect(useCustomer.getState().addresses[0]?.version).toBe('3');
+  expect(useCustomer.getState().selectedAddress).toBe('other');
 });

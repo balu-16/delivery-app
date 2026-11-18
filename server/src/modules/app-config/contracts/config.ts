@@ -139,6 +139,8 @@ export const APP_CONFIG = Symbol('APP_CONFIG');
 
 export const FEATURE_FLAG_KEYS = [
   'agent_enabled',
+  'customer_location_required',
+  'online_payments_enabled',
   'wallet_enabled',
   'cod_enabled',
   'subscriptions_enabled',

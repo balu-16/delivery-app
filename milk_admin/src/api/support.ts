@@ -56,6 +56,10 @@ export function getTicket(id: string, cursor?: string, limit = 100): Promise<Tic
   }))
 }
 
+/** Idempotently record that a staff member opened the ticket. */
+export const acknowledgeTicket = (id: string) =>
+  post<{ acknowledged: boolean }>(`/v1/admin/tickets/${encodeURIComponent(id)}/acknowledge`, {})
+
 /** Reply — customer-visible by default; internal=true stores a staff-only note. */
 export const sendTicketMessage = (idempotencyKey: string, ticketId: string, input: {
   body: string; internal?: boolean; mediaIds?: string[]

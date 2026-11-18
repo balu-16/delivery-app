@@ -8,6 +8,7 @@ import type { WalletViews } from '../../wallet/contracts/wallet.js';
 import type { CustomerTracking } from '../../dispatch/contracts/tasks.js';
 import type { Serviceability } from '../../serviceability/contracts/serviceability.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
+import type { CouponValidation } from '../../coupons/contracts/coupons.js';
 import type { AgentCard, AgentLocale } from '../contracts/agent.js';
 import { isPolicyTopic, policyText } from './policy.js';
 import { sanitizeAgentText } from './guards.js';
@@ -22,6 +23,7 @@ interface AgentReadDependencies {
   tracking: CustomerTracking;
   serviceability: Serviceability;
   appConfig: AppConfig;
+  coupons?: CouponValidation;
 }
 type Writer = ((chunk: unknown) => void) | null;
 const text = (value: unknown, length = 160) =>
@@ -44,60 +46,46 @@ function safeOrder(order: OrderView) {
     })),
   };
 }
-/** Server-computed usual items: how often each variant was ordered recently and in what quantity. */
-export function historySummary(orders: readonly OrderView[]) {
-  const byVariant = new Map<
-    string,
-    { name: string; orderCount: number; lastQuantity: number; lastOrderedAt: string }
-  >();
-  for (const order of orders)
-    for (const item of order.items) {
-      const known = byVariant.get(item.variantId);
-      byVariant.set(item.variantId, {
-        name: text(item.name, 120),
-        orderCount: (known?.orderCount ?? 0) + 1,
-        lastQuantity: Number(item.orderedQty),
-        lastOrderedAt:
-          !known || order.placedAt > known.lastOrderedAt ? order.placedAt : known.lastOrderedAt,
-      });
-    }
-  return [...byVariant.entries()]
-    .sort(
-      (a, b) =>
-        b[1].orderCount - a[1].orderCount || b[1].lastOrderedAt.localeCompare(a[1].lastOrderedAt),
-    )
-    .slice(0, 8)
-    .map(([variantId, summary]) => ({ variantId, ...summary }));
-}
 const PINCODE = /(?<![0-9])([1-9]\d{5})(?![0-9])/;
-const PHONE = /(?<![0-9])(\d{10,13})(?![0-9])/;
+const PHONE = /(?<!\d)(?:\+?91[\s()-]*)?(?:\d[\s()-]*){10}(?![\s()-]*\d)/;
 const LANDMARK = /\b(?:near|landmark|opp(?:osite)?|behind|beside)\b[:\s]*([^,;\n]+)/i;
+const CONTACT_NAME =
+  /\b(?:contact\s+)?name\s*(?:is|:|=)\s*([a-z][a-z .'-]{0,80}?)(?=\s*[,;\n]|\s+\b(?:phone|mobile|pin(?:code)?)\b|$)/i;
 const firstStreet = (value: string) =>
   value
     .toLowerCase()
     .split(/[,\n;]+/)[0]
     ?.trim() ?? '';
 
-/** Structural parse of a typed Indian address. Coordinates are never invented; the
- * customer adds the final address in the app screen so the device supplies the pin. */
+/** Structural parse of a typed Indian address; coordinates are never inferred. */
 export function parseAddressText(
   raw: string,
   saved: Awaited<ReturnType<AddressOperations['list']>>,
 ) {
   const body = sanitizeAgentText(raw, 600);
   const pincode = PINCODE.exec(body)?.[1];
-  const phoneMatch = PHONE.exec(body)?.[1];
+  const phoneMatch = PHONE.exec(body)?.[0];
+  const phoneDigits = phoneMatch?.replace(/\D/g, '');
+  const localPhone =
+    phoneDigits?.length === 12 && phoneDigits.startsWith('91') ? phoneDigits.slice(2) : phoneDigits;
   const contactPhone =
-    phoneMatch && phoneMatch.length === 10 && /^[6-9]/.test(phoneMatch)
-      ? `+91${phoneMatch}`
-      : phoneMatch
-        ? `+${phoneMatch}`
-        : undefined;
+    localPhone && /^[6-9]\d{9}$/.test(localPhone) ? `+91${localPhone}` : undefined;
   const landmark = LANDMARK.exec(body)?.[1]?.trim();
+  const contactName = CONTACT_NAME.exec(body)?.[1]?.trim();
   let remainder = body;
   if (pincode) remainder = remainder.replace(PINCODE, ' ');
   if (phoneMatch) remainder = remainder.replace(PHONE, ' ');
   if (landmark) remainder = remainder.replace(LANDMARK, ' ');
+  if (contactName) remainder = remainder.replace(CONTACT_NAME, ' ');
+  remainder = remainder
+    .replace(
+      /^\s*(?:please\s+|you\s+)?(?:add|save|create|store)\s+(?:the\s+|my\s+|an?\s+)?address\s*/i,
+      '',
+    )
+    .replace(
+      /\b(?:pin\s*code|pincode|phone(?:\s+number)?|mobile(?:\s+number)?)\s*(?:is|:|=)?/gi,
+      ' ',
+    );
   const lines = remainder
     .split(/[,\n;]+/)
     .map((part) => part.trim())
@@ -107,7 +95,8 @@ export function parseAddressText(
   const missingFields = [
     ...(pincode ? [] : ['pincode']),
     ...(line1 ? [] : ['street address']),
-    ...(contactPhone ? [] : ['contact phone with country code']),
+    ...(contactPhone ? [] : ['contact phone']),
+    ...(contactName ? [] : ['contact name']),
   ];
   const duplicateOf = saved.find(
     (address) =>
@@ -122,7 +111,10 @@ export function parseAddressText(
     landmark,
     pincode,
     contactPhone,
+    contactName,
+    phoneInput: localPhone,
     missingFields,
+    invalidFields: phoneMatch && !contactPhone ? ['contact phone'] : [],
     duplicateOfAddressId: duplicateOf?.id,
     duplicateLabel: duplicateOf?.label,
   };
@@ -148,6 +140,7 @@ export function createReadTools(
             .map((part) => text(part))
             .join(', '),
           isDefault: address.isDefault,
+          locationConfirmed: address.point !== null,
         }));
       },
     ),
@@ -163,8 +156,8 @@ export function createReadTools(
         const cart = await deps.cart.get(context.userId);
         const chosen = input.addressId
           ? addresses.find((address) => address.id === input.addressId)
-          : (addresses.find((address) => address.id === cart?.addressId) ??
-            addresses.find((address) => address.isDefault));
+          : (addresses.find((address) => address.isDefault) ??
+            addresses.find((address) => address.id === cart?.addressId));
         if (!chosen) {
           if (!input.addressId) {
             const label =
@@ -173,9 +166,12 @@ export function createReadTools(
                 : context.locale === 'te'
                   ? 'చిరునామా జోడించండి'
                   : 'Add address';
-            card(runtime.writer, 'info', {
-              options: [{ label, action: 'open_screen', payload: { screen: 'addresses' } }],
-            });
+            if (kit.showCardOnce('delivery-address-required'))
+              card(runtime.writer, 'info', {
+                title: 'Add a delivery address',
+                description: 'Add an address so we can check which products are available.',
+                options: [{ label, action: 'open_screen', payload: { screen: 'addresses' } }],
+              });
           }
           throw new Error(input.addressId ? 'ADDRESS_NOT_FOUND' : 'ADDRESS_REQUIRED');
         }
@@ -208,7 +204,50 @@ export function createReadTools(
             payload: { variantId: item.variantId, quantity: 1, addressId: chosen.id },
           }));
         card(runtime.writer, 'product_list', { title: 'Products', items, options });
+        if (items.some((item) => item.availability === 'OUT_OF_STOCK')) {
+          card(runtime.writer, 'out_of_stock', {
+            title: 'Some items are unavailable',
+            description: 'Choose an available item or browse the farm for something else.',
+            items: items
+              .filter((item) => item.availability === 'OUT_OF_STOCK')
+              .map((item) => ({ name: item.name, variantName: item.variantName })),
+          });
+        }
         return { addressId: chosen.id, items };
+      },
+    ),
+    kit.define(
+      'list_available_coupons',
+      'List the current customer’s available offer codes for the cart. Actual eligibility and savings are checked in the cart; never apply an offer without the customer choosing it.',
+      z.object({}),
+      async (_input, runtime) => {
+        if (!deps.coupons) throw new Error('TOOL_UNAVAILABLE');
+        const scope = await deps.cart.freshSubtotal(context.userId);
+        if (!scope) throw new Error('CART_NOT_FOUND');
+        const offers = await deps.coupons.available(
+          context.userId,
+          scope.storeId,
+          scope.subtotalPaise,
+        );
+        const items = offers
+          .slice(0, 8)
+          .map((offer) => ({
+            name: offer.code,
+            kind: offer.kind,
+            valuePaise: offer.valuePaise,
+            minOrderPaise: offer.minOrderPaise,
+          }));
+        card(runtime.writer, 'info', {
+          title: 'Available offers',
+          description: items.length
+            ? 'Choose an offer in your cart. Eligibility and savings are checked there.'
+            : 'There are no offers available for this cart right now.',
+          items,
+          options: [
+            { label: 'View cart offers', action: 'open_screen', payload: { screen: 'cart' } },
+          ],
+        });
+        return { items };
       },
     ),
     kit.define(
@@ -235,7 +274,7 @@ export function createReadTools(
     ),
     kit.define(
       'get_order_history_summary',
-      'Summarise what this customer orders most often, with typical quantities. Use for vague requests like "my usual" or "the usual milk".',
+      'Read what this signed-in customer has had delivered. Returns up to eight variants ranked by how often they were bought, then by recency, with the quantity from the newest delivered order. Use for "my usual". Offer the candidates and let the customer keep or change them. Do not place an order from this result. After they choose, search the catalog, set quantities, check the address and serviceability, then call place_order. place_order rechecks the current stock and price; there is no separate quote tool.',
       z.object({
         limit: z
           .number()
@@ -243,11 +282,45 @@ export function createReadTools(
           .min(1)
           .max(20)
           .default(10)
-          .describe('How many recent orders to summarise'),
+          .describe('How many recent delivered orders to read, from 1 to 20'),
       }),
-      async (input) => {
-        const page = await deps.orders.list(context.userId, input.limit);
-        return { items: historySummary(page.items) };
+      async (input, runtime) => {
+        const items = (await deps.orders.purchaseSummary(context.userId, input.limit)).map(
+          (item) => ({ ...item, name: text(item.name, 120) }),
+        );
+        if (items.length) {
+          const [addresses, cart, maxQuantity] = await Promise.all([
+            deps.addresses.list(context.userId),
+            deps.cart.get(context.userId),
+            deps.appConfig.get('agent_max_qty_per_line'),
+          ]);
+          const chosen =
+            addresses.find((address) => address.isDefault) ??
+            addresses.find((address) => address.id === cart?.addressId);
+          card(runtime.writer, 'product_list', {
+            title: 'Your usual items',
+            items: items.map((item) => ({
+              variantId: item.variantId,
+              name: item.name,
+              quantity: String(item.lastQuantity),
+              maxPerOrder: maxQuantity,
+            })),
+            options: chosen
+              ? items.map((item) => ({
+                  label: `Add ${item.name}`,
+                  action: 'add_to_cart',
+                  payload: { variantId: item.variantId, quantity: 1, addressId: chosen.id },
+                }))
+              : [
+                  {
+                    label: 'Choose delivery address',
+                    action: 'open_screen',
+                    payload: { screen: 'addresses' },
+                  },
+                ],
+          });
+        }
+        return { items };
       },
     ),
     kit.define(
@@ -291,31 +364,50 @@ export function createReadTools(
       }),
       async (input) => {
         const tracking = await deps.tracking.tracking(input.orderId, context.userId);
-        if (!tracking) throw new Error('ORDER_NOT_FOUND');
-        return {
-          orderId: tracking.orderId,
-          taskStatus: tracking.taskStatus,
-          attemptNo: tracking.attemptNo,
-          eta: tracking.eta
-            ? { minMinutes: tracking.eta.minMinutes, maxMinutes: tracking.eta.maxMinutes }
-            : null,
-        };
+        if (tracking)
+          return {
+            orderId: tracking.orderId,
+            taskStatus: tracking.taskStatus,
+            attemptNo: tracking.attemptNo,
+            eta: tracking.eta
+              ? { minMinutes: tracking.eta.minMinutes, maxMinutes: tracking.eta.maxMinutes }
+              : null,
+          };
+        const order = await deps.orders.byId(input.orderId, { userId: context.userId });
+        if (!order) throw new Error('ORDER_NOT_FOUND');
+        return { orderId: order.orderId, status: order.status, taskStatus: null, eta: null };
       },
     ),
     kit.define(
       'check_serviceability',
       'Check whether a saved address can currently be served, with the delivery estimate range. Use when a customer asks about delivery to an address or an order fails.',
       z.object({ addressId: z.string().uuid().describe('A saved address id from list_addresses') }),
-      async (input) => {
+      async (input, runtime) => {
         const address = (await deps.addresses.list(context.userId)).find(
           (item) => item.id === input.addressId,
         );
         if (!address) throw new Error('ADDRESS_NOT_FOUND');
         const result = await deps.serviceability.check({
-          lat: address.point.lat,
-          lng: address.point.lng,
+          pincode: address.pincode,
           targetTime: new Date(),
         });
+        if (!result.serviceable) {
+          const descriptions: Partial<Record<(typeof result.reasons)[number], string>> = {
+            OUTSIDE_ZONE: 'This address is outside the current delivery area.',
+            STORE_CLOSED: 'The store serving this address is currently closed.',
+            STORE_PAUSED: 'The store serving this address is not accepting orders right now.',
+            STORE_AT_CAPACITY: 'The store is currently at delivery capacity.',
+            NO_RIDERS_AVAILABLE: 'No delivery partners are currently available.',
+          };
+          card(runtime.writer, 'delivery_unavailable', {
+            title: 'Delivery is unavailable here',
+            description:
+              result.reasons
+                .map((reason) => descriptions[reason])
+                .filter(Boolean)
+                .join(' ') || 'Please try another address or check back later.',
+          });
+        }
         return {
           serviceable: result.serviceable,
           storeId: result.storeId,
@@ -326,7 +418,7 @@ export function createReadTools(
     ),
     kit.define(
       'parse_and_validate_address',
-      'Parse a typed Indian address into fields and show what is missing. The customer then adds the address in the app screen; after they say it is added, call list_addresses to continue.',
+      'Parse typed Indian address details and identify missing fields. If the customer explicitly requested saving and provided every required field in their current message, call save_address. Otherwise ask for missing details or offer the address screen. Never infer coordinates.',
       z.object({
         text: z.string().min(5).max(600).describe('The address exactly as the customer typed it'),
       }),
@@ -340,21 +432,29 @@ export function createReadTools(
               : context.locale === 'te'
                 ? 'ఈ చిరునామా ఇప్పటికే సేవ్ చేయబడింది'
                 : 'This address is already saved';
-          card(runtime.writer, 'info', {
-            title: label,
-            options: [
-              {
-                label:
-                  context.locale === 'hi'
-                    ? 'पते देखें'
-                    : context.locale === 'te'
-                      ? 'చిరునామాలు చూడండి'
-                      : 'View addresses',
-                action: 'open_screen',
-                payload: { screen: 'addresses' },
-              },
-            ],
-          });
+          if (kit.showCardOnce('delivery-address-required'))
+            card(runtime.writer, 'info', {
+              title: label,
+              options: [
+                {
+                  label:
+                    context.locale === 'hi'
+                      ? 'पते देखें'
+                      : context.locale === 'te'
+                        ? 'చిరునామాలు చూడండి'
+                        : 'View addresses',
+                  action: 'open_screen',
+                  payload: {
+                    screen: 'addresses',
+                    addressId: parsed.duplicateOfAddressId,
+                    line1: parsed.line1 || undefined,
+                    line2: parsed.line2,
+                    pincode: parsed.pincode,
+                    phone: parsed.phoneInput,
+                  },
+                },
+              ],
+            });
           return {
             duplicateOfAddressId: parsed.duplicateOfAddressId,
             label: parsed.duplicateLabel ?? 'OTHER',
@@ -366,17 +466,46 @@ export function createReadTools(
             : context.locale === 'te'
               ? 'చిరునామా జోడించండి'
               : 'Add address';
-        card(runtime.writer, 'info', {
-          title: 'Add address',
-          line1: parsed.line1 || undefined,
-          line2: parsed.line2,
-          landmark: parsed.landmark,
-          pincode: parsed.pincode,
-          contactPhone: parsed.contactPhone,
-          missingFields: parsed.missingFields,
-          options: [{ label: addLabel, action: 'open_screen', payload: { screen: 'addresses' } }],
-        });
-        return parsed;
+        if (parsed.missingFields.length && kit.showCardOnce('delivery-address-required'))
+          card(runtime.writer, 'info', {
+            title: 'Add address',
+            line1: parsed.line1 || undefined,
+            line2: parsed.line2,
+            landmark: parsed.landmark,
+            pincode: parsed.pincode,
+            contactPhone: parsed.contactPhone,
+            missingFields: parsed.missingFields,
+            description: parsed.missingFields.length
+              ? `Still needed: ${parsed.missingFields.join(', ')}.`
+              : undefined,
+            options: [
+              {
+                label: addLabel,
+                action: 'open_screen',
+                payload: {
+                  screen: 'addresses',
+                  line1: parsed.line1 || undefined,
+                  line2: parsed.line2,
+                  pincode: parsed.pincode,
+                  phone: parsed.phoneInput,
+                  contact: parsed.contactName,
+                  focus: parsed.missingFields.includes('contact phone')
+                    ? 'phone'
+                    : parsed.missingFields.includes('pincode')
+                      ? 'pincode'
+                      : parsed.missingFields.includes('street address')
+                        ? 'line1'
+                        : undefined,
+                },
+              },
+            ],
+          });
+        return {
+          ...parsed,
+          nextStep: parsed.missingFields.length
+            ? 'Ask for the missing details or offer the address screen.'
+            : 'If the customer explicitly requested saving, call save_address with the supplied fields.',
+        };
       },
     ),
     kit.define(

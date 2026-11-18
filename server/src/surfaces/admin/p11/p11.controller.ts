@@ -79,6 +79,12 @@ export class AdminP11Controller {
   ) {
     return this.support.detail(p.userId, id, true, page.cursor, page.limit);
   }
+  @Post('tickets/:id/acknowledge')
+  @ApiOperation({ operationId: 'adminAcknowledgeTicket' })
+  async acknowledge(@CurrentPrincipal() p: Principal, @Param('id') id: string) {
+    await this.support.acknowledge(p.userId, id);
+    return { acknowledged: true };
+  }
   @Post('tickets/:id/messages') @ApiOperation({ operationId: 'adminTicketMessage' }) async message(
     @CurrentPrincipal() p: Principal,
     @Param('id') id: string,

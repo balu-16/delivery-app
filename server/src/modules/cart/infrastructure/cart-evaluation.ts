@@ -60,7 +60,7 @@ interface LineRow {
   price_id: string | null;
   available: string;
 }
-/** Same zone-based store resolution the customer catalog uses; customer-supplied stores never authorize cart reads. */
+/** Resolve the owned address through the authoritative, enabled PIN assignment. */
 export async function resolveStoreForAddress(
   db: Database | TransactionContext,
   userId: string,
@@ -68,15 +68,14 @@ export async function resolveStoreForAddress(
 ): Promise<string> {
   const selected = await sql<{
     store_id: string;
-  }>`SELECT z.store_id::text AS store_id FROM addresses a JOIN LATERAL (
-    SELECT z.store_id FROM zones z JOIN stores s ON s.id=z.store_id WHERE z.active AND ST_Covers(z.polygon,a.point::geometry)
-    ORDER BY z.priority DESC,ST_Distance(s.location,a.point),s.id,z.id LIMIT 1
-  ) z ON true WHERE a.user_id=${userId}::uuid AND a.id=${addressId}::uuid AND a.deleted_at IS NULL`.execute(
+  }>`SELECT p.store_id::text AS store_id FROM addresses a JOIN delivery_pincodes p
+    ON p.pincode=a.pincode AND p.active
+    WHERE a.user_id=${userId}::uuid AND a.id=${addressId}::uuid AND a.deleted_at IS NULL`.execute(
     db,
   );
   if (selected.rows[0]) return selected.rows[0].store_id;
   const owned =
-    await sql`SELECT 1 AS one FROM addresses WHERE id=${addressId}::uuid AND user_id=${userId}::uuid AND deleted_at IS NULL`.execute(
+    await sql`SELECT id FROM addresses WHERE id=${addressId}::uuid AND user_id=${userId}::uuid AND deleted_at IS NULL`.execute(
       db,
     );
   throw new Error(owned.rows.length ? 'ADDRESS_NOT_SERVICEABLE' : 'ADDRESS_NOT_FOUND');
@@ -153,7 +152,8 @@ export async function evaluateCart(
       db,
     ),
     sql<{ version: string }>`SELECT (COALESCE((SELECT sum(version) FROM app_config),0) +
-      COALESCE((SELECT sum(version) FROM feature_flags),0))::text AS version`.execute(db),
+      COALESCE((SELECT sum(version) FROM feature_flags),0) +
+      COALESCE((SELECT sum(version) FROM delivery_pincodes),0))::text AS version`.execute(db),
     sql<{ enabled: boolean }>`SELECT enabled FROM feature_flags WHERE key='surge_enabled'`.execute(
       db,
     ),

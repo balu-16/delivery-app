@@ -13,7 +13,7 @@ export async function codEligibility(
   tx?: TransactionContext,
 ) {
   const connection = tx ?? db;
-  const [flag, store, completed, maxCodPaise, eligibility] = await Promise.all([
+  const [flag, store, completed, maxCodPaise, eligibility, online] = await Promise.all([
     sql<{ enabled: boolean }>`SELECT enabled FROM feature_flags WHERE key='cod_enabled'`.execute(
       connection,
     ),
@@ -26,6 +26,9 @@ export async function codEligibility(
     ),
     config.get('maxCodPaise', tx),
     config.get('codEligibility', tx),
+    sql<{
+      enabled: boolean;
+    }>`SELECT enabled FROM feature_flags WHERE key='online_payments_enabled'`.execute(connection),
   ]);
   return evaluateCod({
     codEnabled: flag.rows[0]?.enabled === true,
@@ -33,6 +36,7 @@ export async function codEligibility(
     amountDuePaise,
     maxCodPaise,
     completedPrepaidOrders: Number(completed.rows[0]?.n ?? '0'),
-    minCompletedPrepaidOrders: eligibility.minCompletedPrepaidOrders,
+    minCompletedPrepaidOrders:
+      online.rows[0]?.enabled === true ? eligibility.minCompletedPrepaidOrders : 0,
   });
 }

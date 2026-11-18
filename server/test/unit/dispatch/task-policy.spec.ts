@@ -8,6 +8,7 @@ import {
 } from '../../../src/modules/dispatch/domain/task-policy.js';
 import { radiusForAttempt } from '../../../src/modules/dispatch/domain/settings.js';
 import type { DeliveryTaskStatus } from '../../../src/modules/dispatch/contracts/tasks.js';
+import { addressSnapshotPoint } from '../../../src/modules/dispatch/domain/geo.js';
 
 const ALL: DeliveryTaskStatus[] = [
   'UNASSIGNED',
@@ -22,6 +23,19 @@ const ALL: DeliveryTaskStatus[] = [
 ];
 
 describe('delivery task policy (11.3)', () => {
+  test('missing address coordinates never produce a fabricated ETA location', () => {
+    for (const snapshot of [
+      null,
+      {},
+      { lat: null, lng: null },
+      { lat: '', lng: '  ' },
+      { lat: true, lng: 1 },
+      { lat: 91, lng: 10 },
+    ])
+      expect(addressSnapshotPoint(snapshot)).toBeNull();
+    expect(addressSnapshotPoint({ lat: 0, lng: 0 })).toEqual({ lat: 0, lng: 0 });
+    expect(addressSnapshotPoint({ lat: '16.5', lng: '80.6' })).toEqual({ lat: 16.5, lng: 80.6 });
+  });
   test('every declared transition is legal and writes through the machine', () => {
     for (const [from, targets] of Object.entries(DELIVERY_TASK_TRANSITIONS))
       for (const to of targets)

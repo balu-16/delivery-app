@@ -19,11 +19,21 @@ import { ServiceabilityQuery } from './application/serviceability.js';
 import { PostgresServiceability } from './infrastructure/postgres-serviceability.js';
 import { PostgresCapacityClaims } from './infrastructure/postgres-capacity.js';
 import { CAPACITY_CLAIMS, MAPS, SERVICEABILITY } from './contracts/tokens.js';
+import { PINCODE_ADMIN } from './contracts/pincodes.js';
+import { PostgresPincodeAdmin } from './infrastructure/pincode-admin.js';
+import { IdentityModule } from '../identity/identity.module.js';
+import { IDENTITY_ACCESS, type IdentityAccess } from '../identity/contracts/identity.js';
 
 /** Provider-only composition: each audience owns its own controllers. */
 @Module({
-  imports: [AppConfigModule, StoresModule],
+  imports: [AppConfigModule, StoresModule, IdentityModule],
   providers: [
+    {
+      provide: PINCODE_ADMIN,
+      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS],
+      useFactory: (db: DatabaseHandle, identity: IdentityAccess) =>
+        new PostgresPincodeAdmin(db.db, identity),
+    },
     {
       provide: SERVICEABILITY,
       inject: [
@@ -122,6 +132,6 @@ import { CAPACITY_CLAIMS, MAPS, SERVICEABILITY } from './contracts/tokens.js';
       },
     },
   ],
-  exports: [SERVICEABILITY, MAPS, CAPACITY_CLAIMS],
+  exports: [SERVICEABILITY, MAPS, CAPACITY_CLAIMS, PINCODE_ADMIN],
 })
 export class ServiceabilityModule {}

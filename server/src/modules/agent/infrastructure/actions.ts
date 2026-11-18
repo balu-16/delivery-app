@@ -9,7 +9,11 @@ import type { Support } from '../../support/contracts/support.js';
 import { addAgentCartItem } from './write-tools.js';
 
 const cartPayload = z
-  .object({ variantId: z.string().uuid(), quantity: z.literal(1), addressId: z.string().uuid() })
+  .object({
+    variantId: z.string().uuid(),
+    quantity: z.number().int().positive(),
+    addressId: z.string().uuid(),
+  })
   .strict();
 interface Dependencies {
   db: Database;
@@ -26,9 +30,16 @@ export class AgentActions {
     action: string;
     payload: unknown;
     maxQuantity: number;
+    clientActionId?: string;
   }) {
     if (input.action !== 'add_to_cart') throw new Error('INVALID_INPUT');
+    const active =
+      await sql`SELECT 1 FROM agent_jobs WHERE thread_id=${input.threadId}::uuid AND user_id=${input.userId}::uuid AND state IN ('queued','running') LIMIT 1`.execute(
+        this.deps.db,
+      );
+    if (active.rows.length) throw new Error('RUN_IN_PROGRESS');
     const payload = cartPayload.parse(input.payload);
+    if (payload.quantity > input.maxQuantity) throw new Error('INVALID_QUANTITY');
     const rows = await sql<{
       card: { type?: unknown; payload?: { options?: unknown } };
     }>`SELECT c.value AS card FROM agent_messages m JOIN agent_threads t ON t.id=m.thread_id
@@ -44,10 +55,15 @@ export class AgentActions {
         option &&
         typeof option === 'object' &&
         option.action === input.action &&
-        hashCanonical(option.payload) === hashCanonical(payload),
+        hashCanonical(option.payload) === hashCanonical({ ...payload, quantity: 1 }),
     );
     if (!authorized) throw new Error('RESOURCE_NOT_FOUND');
-    const reference = `card:${input.cardId}:${payload.variantId}`;
+    const current = await this.deps.cart.get(input.userId);
+    if (current && current.addressId !== payload.addressId)
+      throw new Error('CONCURRENT_MODIFICATION');
+    const reference = input.clientActionId
+      ? `card:${input.cardId}:${input.clientActionId}`
+      : `card:${input.cardId}:${payload.variantId}`;
     const hash = createHash('sha256').update(reference).digest('hex');
     const messageId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
     const result = await addAgentCartItem(

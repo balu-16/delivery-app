@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-import { customerApi, customerDetailsApi } from '../src/api/customer';
+import { customerApi, customerDetailsApi, type CustomerAddress } from '../src/api/customer';
 import { useCustomer } from '../src/store/customer';
 
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
@@ -20,7 +20,8 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 
 beforeEach(() => {
   jest.clearAllMocks();
-  useCustomer.setState({ selectedAddress:'first', products:[], cursor:null, error:null,
+  const address = (id:string):CustomerAddress => ({id, line1:'Street',pincode:'520001',contactName:'Customer',contactPhone:'+919876543210',point:{lat:16.5,lng:80.6},isDefault:id==='first',version:'1'});
+  useCustomer.setState({ selectedAddress:'first', addresses:[address('first'),address('second')], products:[], cursor:null, error:null,
     catalogLoad:{addressId:null,state:'idle'}, activityLoad:{orders:'idle',subscriptions:'idle'},
     accountLoad:{wallet:'idle',ledger:'idle',notifications:'idle'}, orders:[], subscriptions:[], notifications:[], wallet:null, ledger:[] });
 });

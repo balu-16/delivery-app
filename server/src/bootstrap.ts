@@ -26,7 +26,10 @@ export async function createApplication(
     loggerInstance: logger,
     bodyLimit: env.HTTP_BODY_LIMIT_BYTES,
     requestTimeout: env.HTTP_REQUEST_TIMEOUT_MS,
-    connectionTimeout: env.HTTP_HEADERS_TIMEOUT_MS,
+    // Keep active streams alive between their 15-second heartbeats and allow
+    // cloud readiness checks to finish. headersTimeout below still bounds
+    // incomplete request headers independently.
+    connectionTimeout: Math.max(30000, env.READINESS_TIMEOUT_MS + 1000),
     trustProxy: env.TRUSTED_PROXY_CIDRS
       ? env.TRUSTED_PROXY_CIDRS.split(',').map((value) => value.trim())
       : false,

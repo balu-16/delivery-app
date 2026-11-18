@@ -27,6 +27,8 @@ export interface IamCacheConfig {
   cacheName: string;
   username: string;
   region: string;
+  connectTimeoutMs?: number;
+  commandTimeoutMs?: number;
 }
 
 const duplicateFactories = new WeakMap<Redis, () => Promise<Redis>>();
@@ -75,8 +77,8 @@ export async function createIamRedis(
     password: token,
     tls: { rejectUnauthorized: true },
     maxRetriesPerRequest: 1,
-    connectTimeout: 10000,
-    commandTimeout: 10000,
+    connectTimeout: config.connectTimeoutMs ?? 10000,
+    commandTimeout: config.commandTimeoutMs ?? 10000,
     lazyConnect: true,
   });
   duplicateFactories.set(redis, () => createIamRedis(config, issueToken));

@@ -13,6 +13,8 @@ export class Addresses {
   private async confirmation(
     draft: AddressDraft,
   ): Promise<{ needsConfirmation: boolean; degraded: boolean }> {
+    if (!draft.point) return { needsConfirmation: false, degraded: false };
+    const point = draft.point;
     const threshold = await this.mismatchMetres();
     if (!Number.isFinite(threshold) || threshold <= 0) throw new Error('INVALID_MISMATCH_DISTANCE');
     try {
@@ -21,7 +23,7 @@ export class Addresses {
       );
       if (!place) return { needsConfirmation: false, degraded: true };
       return {
-        needsConfirmation: distanceMetres(draft.point, place.location) > threshold,
+        needsConfirmation: distanceMetres(point, place.location) > threshold,
         degraded: place.degraded === true,
       };
     } catch {
@@ -32,13 +34,26 @@ export class Addresses {
   list(userId: string) {
     return this.repository.list(userId);
   }
-  async create(userId: string, draft: AddressDraft, makeDefault = false, reference?: string) {
+  async create(
+    userId: string,
+    draft: AddressDraft,
+    makeDefault = false,
+    reference?: string,
+    beforeCreate?: Parameters<AddressRepository['create']>[5],
+  ) {
     validateAddress(draft);
     const max = await this.maxAddresses();
     if (!Number.isSafeInteger(max) || max < 1) throw new Error('INVALID_ADDRESS_LIMIT');
     const confirmation = await this.confirmation(draft);
     return {
-      address: await this.repository.create(userId, draft, max, makeDefault, reference),
+      address: await this.repository.create(
+        userId,
+        draft,
+        max,
+        makeDefault,
+        reference,
+        beforeCreate,
+      ),
       ...confirmation,
     };
   }

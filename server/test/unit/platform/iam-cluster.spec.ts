@@ -13,9 +13,10 @@ test('cluster connections require TLS and fetch fresh IAM credentials per connec
     .fn<() => Promise<string>>()
     .mockResolvedValueOnce('token-1')
     .mockResolvedValueOnce('token-2');
-  const cluster = createIamRedisCluster(config, issue);
+  const cluster = createIamRedisCluster({ ...config, connectTimeoutMs: 30000 }, issue);
   const options = cluster._options.defaults;
   expect(options?.socket?.tls).toBe(true);
+  expect(options?.socket?.connectTimeout).toBe(30000);
   const provider = options?.credentialsProvider;
   if (!provider || provider.type !== 'async-credentials-provider')
     throw new Error('missing provider');

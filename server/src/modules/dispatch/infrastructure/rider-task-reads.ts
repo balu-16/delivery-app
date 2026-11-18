@@ -93,9 +93,10 @@ export class RiderTaskReads {
       total_paise: string | null;
     }>`
       SELECT h.id AS history_id,h.task_id,t.order_id,o.order_number,h.attempt_no,t.attempt_no AS task_attempt,
-        t.status,t.rider_id,h.created_at AS assigned_at,e.total_paise::text
+        t.status,t.rider_id,h.created_at AS assigned_at,(e.total_paise + COALESCE(a.amount_paise,0))::text AS total_paise
       FROM task_assignment_history h JOIN delivery_tasks t ON t.id=h.task_id JOIN orders o ON o.id=t.order_id
       LEFT JOIN rider_earnings e ON e.task_id=t.id AND e.rider_id=${riderId}::uuid
+      LEFT JOIN rider_distance_adjustments a ON a.earning_id=e.id
       WHERE h.rider_id=${riderId}::uuid AND h.action IN ('ASSIGNED','REASSIGNED')
         AND (${before ?? null}::uuid IS NULL OR h.id<${before ?? null}::uuid)
       ORDER BY h.id DESC LIMIT 51`.execute(this.db);
@@ -121,8 +122,10 @@ export class RiderTaskReads {
     const result = await sql<{ deliveries: string; total_paise: string }>`SELECT
       (SELECT count(DISTINCT task_id)::text FROM delivery_task_history WHERE actor_id=${riderId}::uuid AND status='DELIVERED'
         AND (created_at AT TIME ZONE 'Asia/Kolkata')::date=(clock_timestamp() AT TIME ZONE 'Asia/Kolkata')::date) AS deliveries,
-      (SELECT COALESCE(sum(total_paise),0)::text FROM rider_earnings WHERE rider_id=${riderId}::uuid
-        AND (computed_at AT TIME ZONE 'Asia/Kolkata')::date=(clock_timestamp() AT TIME ZONE 'Asia/Kolkata')::date) AS total_paise`.execute(
+      ((SELECT COALESCE(sum(total_paise),0) FROM rider_earnings WHERE rider_id=${riderId}::uuid
+        AND (computed_at AT TIME ZONE 'Asia/Kolkata')::date=(clock_timestamp() AT TIME ZONE 'Asia/Kolkata')::date)
+       + (SELECT COALESCE(sum(amount_paise),0) FROM rider_distance_adjustments WHERE rider_id=${riderId}::uuid
+        AND (created_at AT TIME ZONE 'Asia/Kolkata')::date=(clock_timestamp() AT TIME ZONE 'Asia/Kolkata')::date))::text AS total_paise`.execute(
       this.db,
     );
     return {

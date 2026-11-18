@@ -20,6 +20,7 @@ import { PLATFORM_REDIS } from '../../../src/platform/contracts/runtime.js';
 import { readEnv } from '../../../src/config/env.schema.js';
 import { startTestServices, type TestServices } from '../../helpers/services.js';
 import { createAwsTestQueues, trackAwsTestRateKeys } from '../../helpers/aws-test-queues.js';
+import { resolveStoreForAddress } from '../../../src/modules/cart/infrastructure/cart-evaluation.js';
 
 let services: TestServices;
 let db: DatabaseHandle;
@@ -66,6 +67,9 @@ beforeAll(async () => {
   await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES (${user},'CUSTOMER','sub','test@example.com','test')`.execute(
     db.db,
   );
+  await sql`INSERT INTO delivery_pincodes(id,pincode,store_id,locality,active) VALUES(${uuidV7()}::uuid,'560001',${store}::uuid,'Test city',true)`.execute(
+    db.db,
+  );
 }, 120000);
 afterAll(async () => {
   await db?.close();
@@ -73,6 +77,23 @@ afterAll(async () => {
 }, 120000);
 
 describe('P2 serviceability against PostGIS', () => {
+  it('saves a written address once and allows cart use when its PIN is enabled', async () => {
+    const repository = new PostgresAddresses(db.db);
+    const written = { ...draft, point: null };
+    const [first, retry] = await Promise.all([
+      repository.create(user, written, 10, true, 'written-address-1'),
+      repository.create(user, written, 10, true, 'written-address-1'),
+    ]);
+    expect(first.id).toBe(retry.id);
+    expect(first.point).toBeNull();
+    await expect(resolveStoreForAddress(db.db, user, first.id)).resolves.toBe(store);
+    const confirmed = await repository.update(user, first.id, draft, first.version);
+    expect(confirmed.id).toBe(first.id);
+    expect(confirmed.point).toEqual(draft.point);
+    await expect(repository.update(user, first.id, draft, first.version)).rejects.toThrow(
+      'CONCURRENT_MODIFICATION',
+    );
+  });
   it('validates polygons and includes boundary points', async () => {
     const zones = new PostgresZones(db.db);
     await expect(
@@ -102,31 +123,17 @@ describe('P2 serviceability against PostGIS', () => {
       { storeId: store, name: 'zone', geometry: polygon, priority: 1, active: true },
       area,
     );
-    const repository = new PostgresServiceability(
-      db.db,
-      'Asia/Kolkata',
-      new PostgresStoreAvailability(db.db, 'Asia/Kolkata'),
-      async () => false,
-    );
-    const result = await repository.findCandidate({
-      lat: 12.9,
-      lng: 77.5,
-      targetTime: new Date('2026-11-02T12:00:00Z'),
-    });
-    expect(result?.zone.zoneId).toBe(zone.id);
-    expect(
-      await repository.findCandidate({
-        lat: 12.8,
-        lng: 77.5,
-        targetTime: new Date('2026-11-02T12:00:00Z'),
-      }),
-    ).toBeNull();
+    const result = await sql<{ boundary: boolean; outside: boolean }>`SELECT
+      ST_Covers(polygon,ST_SetSRID(ST_MakePoint(77.5,12.9),4326)) AS boundary,
+      ST_Covers(polygon,ST_SetSRID(ST_MakePoint(77.5,12.8),4326)) AS outside
+      FROM zones WHERE id=${zone.id}::uuid`.execute(db.db);
+    expect(result.rows[0]).toEqual({ boundary: true, outside: false });
   });
-  it('uses a single caller connection and isolates transactional zone changes from the cache', async () => {
+  it('uses a single caller connection and respects transactional PIN changes', async () => {
     const single = createDatabase(services.databaseUrl, 1);
     const ownStore = uuidV7();
-    const ownZone = uuidV7();
-    const input = { lat: 13.5, lng: 77.6, targetTime: new Date('2026-11-02T12:00:00Z') };
+    const ownPin = uuidV7();
+    const input = { pincode: '560002', targetTime: new Date('2026-11-02T12:00:00Z') };
     const cache = new Map<string, string>();
     try {
       await sql`INSERT INTO stores(id,legal_entity_id,city_id,name,location,status,hourly_capacity) VALUES (${ownStore},${entity},${city},'transaction',ST_SetSRID(ST_MakePoint(77.6,13.5),4326)::geography,'ONLINE',2)`.execute(
@@ -135,7 +142,7 @@ describe('P2 serviceability against PostGIS', () => {
       await sql`INSERT INTO store_hours(store_id,weekday,start_minute,end_minute) SELECT ${ownStore},d,0,1440 FROM generate_series(0,6) d`.execute(
         single.db,
       );
-      await sql`INSERT INTO zones(id,store_id,name,polygon,priority,active) VALUES (${ownZone},${ownStore},'transaction',ST_Multi(ST_GeomFromText('POLYGON((77.5 13.4,77.7 13.4,77.7 13.6,77.5 13.6,77.5 13.4))',4326)),1,true)`.execute(
+      await sql`INSERT INTO delivery_pincodes(id,pincode,store_id,locality,active) VALUES (${ownPin},'560002',${ownStore},'transaction',true)`.execute(
         single.db,
       );
       const config = new AppConfigService(single.db);
@@ -176,7 +183,7 @@ describe('P2 serviceability against PostGIS', () => {
               }),
             ]);
             expect(checked.serviceable).toBe(true);
-            await sql`UPDATE zones SET active=false WHERE id=${ownZone}`.execute(tx);
+            await sql`UPDATE delivery_pincodes SET active=false WHERE id=${ownPin}`.execute(tx);
             expect((await query.check(input, tx)).reasons).toEqual(['OUTSIDE_ZONE']);
             expect([...cache.entries()]).toEqual(originalCache);
             throw rollback;
@@ -224,15 +231,14 @@ describe('P2 serviceability against PostGIS', () => {
       'AT_CAPACITY',
     );
   });
-  it('orders overlaps by priority then distance and preserves zone version snapshots', async () => {
+  it('preserves the original PIN snapshot when the assignment changes', async () => {
     const second = uuidV7();
     await sql`INSERT INTO stores(id,legal_entity_id,city_id,name,location,status,hourly_capacity) VALUES (${second},${entity},${city},'near',ST_SetSRID(ST_MakePoint(77.501,12.901),4326)::geography,'ONLINE',2)`.execute(
       db.db,
     );
-    const zones = new PostgresZones(db.db);
-    const low = await zones.create(
-      { storeId: second, name: 'near', geometry: polygon, priority: 1, active: true },
-      area,
+    const pin = uuidV7();
+    await sql`INSERT INTO delivery_pincodes(id,pincode,store_id,locality,active) VALUES(${pin},'560003',${second},'near',true)`.execute(
+      db.db,
     );
     const cached = new Map<string, string>();
     const repository = new PostgresServiceability(
@@ -247,18 +253,15 @@ describe('P2 serviceability against PostGIS', () => {
         },
       },
     );
-    const input = { lat: 12.9, lng: 77.5, targetTime: new Date('2026-11-02T12:00:00Z') };
+    const input = { pincode: '560003', targetTime: new Date('2026-11-02T12:00:00Z') };
     const snapshot = (await repository.findCandidate(input))!.zone;
-    expect(snapshot.zoneId).toBe(low.id);
-    const changed = await zones.update(
-      low.id,
-      low.version,
-      { storeId: second, name: 'near', geometry: polygon, priority: 0, active: true },
-      area,
+    expect(snapshot.zoneId).toBe(pin);
+    await sql`UPDATE delivery_pincodes SET store_id=${store},version=version+1 WHERE id=${pin}`.execute(
+      db.db,
     );
     expect((await repository.findCandidate(input))!.zone.storeId).toBe(store);
     expect(snapshot.zoneVersion).toBe('1');
-    expect(changed.version).toBe('2');
+    expect((await repository.findCandidate(input))!.zone.zoneVersion).toBe('2');
   });
   it('persists auto-pause and does not overwrite a manual pause', async () => {
     const id = uuidV7();
@@ -346,14 +349,12 @@ describe('P2 serviceability against PostGIS', () => {
       area,
     );
     expect(
-      (await candidate.findCandidate({ lat: 12.9, lng: 77.5, targetTime: slot }))
-        ?.capacityRemaining,
+      (await candidate.findCandidate({ pincode: '560001', targetTime: slot }))?.capacityRemaining,
     ).toBe(false);
     expect(await claims.claim(store, slot, 'capacity-second')).toBe('AT_CAPACITY');
     await service.saveStore(admin, { ...config, hourlyCapacity: 3 }, store);
     expect(
-      (await candidate.findCandidate({ lat: 12.9, lng: 77.5, targetTime: slot }))
-        ?.capacityRemaining,
+      (await candidate.findCandidate({ pincode: '560001', targetTime: slot }))?.capacityRemaining,
     ).toBe(true);
     expect(await claims.claim(store, slot, 'capacity-second')).toBe('CLAIMED');
     expect(await claims.claim(store, slot, 'capacity-third')).toBe('CLAIMED');
@@ -710,7 +711,7 @@ describe('P2 serviceability against PostGIS', () => {
           const auth = { authorization: `Bearer ${customer}` };
           const good = await server.inject({
             method: 'GET',
-            url: '/v1/customer/serviceability?lat=12.9&lng=77.5',
+            url: '/v1/customer/serviceability?pincode=560001',
             headers: auth,
           });
           expect(good.statusCode).toBe(200);
@@ -720,13 +721,13 @@ describe('P2 serviceability against PostGIS', () => {
           );
           const paused = await server.inject({
             method: 'GET',
-            url: '/v1/customer/serviceability?lat=12.9&lng=77.5',
+            url: '/v1/customer/serviceability?pincode=560001',
             headers: auth,
           });
           expect(paused.json()).toMatchObject({ serviceable: false, reasons: ['STORE_PAUSED'] });
           const outside = await server.inject({
             method: 'GET',
-            url: '/v1/customer/serviceability?lat=12.8&lng=77.5',
+            url: '/v1/customer/serviceability?pincode=560099',
             headers: auth,
           });
           expect(outside.json()).toMatchObject({ serviceable: false, reasons: ['OUTSIDE_ZONE'] });

@@ -9,5 +9,5 @@ export function indianPhoneInput(value: string): string {
 /** Customer input is local; Cognito and the API continue to receive E.164. */
 export function indianPhoneE164(value: string): string | null {
   const local = indianPhoneInput(value);
-  return /^\d{10}$/.test(local) ? `+91${local}` : null;
+  return /^[6-9]\d{9}$/.test(local) ? `+91${local}` : null;
 }

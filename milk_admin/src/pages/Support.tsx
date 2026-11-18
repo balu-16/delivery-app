@@ -9,6 +9,7 @@ import {
 import { useStagger } from '@/hooks/misc'
 import { useTickets, useTicket, useSavedResponses, useRatings } from '@/hooks/queries'
 import { useSupportActions } from '@/hooks/mutations'
+import { acknowledgeTicket } from '@/api/support'
 import { rupeesToPaise } from '@/api/money'
 import { PageHeader, TabPills, tabCount, StatusPill, EmptyState, SearchInput } from '@/components/shared/misc'
 import { Select, Field } from '@/components/ui/form'
@@ -60,6 +61,13 @@ function TicketDrawer({ ticketId, onClose }: { ticketId: string | null; onClose:
   useEffect(() => {
     if (data && !ticketQ.isPlaceholderData) setStatus(data.ticket.status)
   }, [data, ticketQ.isPlaceholderData])
+
+  useEffect(() => {
+    if (!ticketId || !data || data.ticket.id !== ticketId || ticketQ.isPlaceholderData) return
+    let active = true
+    void acknowledgeTicket(ticketId).catch(() => { if (active) setServerError('Could not mark this request as acknowledged. Reopen it to try again.') })
+    return () => { active = false }
+  }, [ticketId, data?.ticket.id, ticketQ.isPlaceholderData])
 
   if (!ticketId) return null
 

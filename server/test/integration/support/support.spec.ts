@@ -58,6 +58,12 @@ it('enforces order and ticket ownership and excludes internal messages from cust
     orderId: order.orderId,
     body: '<broken>',
   });
+  await expect(service.acknowledge(w.customer, id)).rejects.toThrow('FORBIDDEN');
+  await Promise.all([service.acknowledge(agent, id), service.acknowledge(agent, id)]);
+  const recorded = (await service.detail(w.customer, id, false)) as {
+    progress: Array<{ type: string }>;
+  };
+  expect(recorded.progress.map((event) => event.type)).toEqual(['ACKNOWLEDGED']);
   await service.message(agent, id, { body: 'private staff note', internal: true });
   await service.message(agent, id, { body: 'public reply' });
   await expect(service.detail(w.rider1, id, false)).rejects.toThrow('RESOURCE_NOT_FOUND');
@@ -111,6 +117,14 @@ it('enforces order and ticket ownership and excludes internal messages from cust
   );
   await service.update(agent, id, { status: 'RESOLVED' });
   await service.update(w.customer, id, { status: 'OPEN' });
+  const transitions = (await service.detail(w.customer, id, false)) as {
+    progress: Array<{ type: string }>;
+  };
+  expect(transitions.progress.map((event) => event.type)).toEqual([
+    'ACKNOWLEDGED',
+    'RESOLVED',
+    'OPEN',
+  ]);
   const cycle = await sql<{
     sla_cycle: number;
     first_response_at: Date | null;

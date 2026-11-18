@@ -44,6 +44,17 @@ beforeAll(async () => {
   await run(process.execPath, ['--import', 'tsx', 'scripts/seed.ts'], { env: seedEnv });
   // A retry of the documented setup cannot duplicate seed roles, identities or stores.
   await run(process.execPath, ['--import', 'tsx', 'scripts/seed.ts'], { env: seedEnv });
+  const fixtureClient = new Client({ connectionString: services.databaseUrl });
+  await fixtureClient.connect();
+  try {
+    await fixtureClient.query(
+      `INSERT INTO delivery_pincodes(id,pincode,store_id,active)
+      SELECT $1,'560001',id,true FROM stores ORDER BY location <-> ST_SetSRID(ST_MakePoint(77.59,12.97),4326)::geography LIMIT 1`,
+      [uuidV7()],
+    );
+  } finally {
+    await fixtureClient.end();
+  }
   app = await createApplication(
     readEnv({
       NODE_ENV: 'test',
@@ -113,7 +124,7 @@ it('runs the seeded customer, store and admin journey through real HTTP adapters
   expect(created.json().address.isDefault).toBe(true);
   const serviceable = await http.inject({
     method: 'GET',
-    url: '/v1/customer/serviceability?lat=12.97&lng=77.59',
+    url: '/v1/customer/serviceability?pincode=560001',
     headers,
   });
   expect(serviceable.statusCode).toBe(200);

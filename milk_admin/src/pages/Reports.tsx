@@ -4,10 +4,9 @@ import { motion } from 'framer-motion'
 import {
   FileDown, ChevronLeft, ChevronRight, Clock, CheckCircle2, XCircle, RefreshCcw, Download,
 } from 'lucide-react'
-import { useStagger } from '@/hooks/misc'
+import { useStagger, useRangeWindow } from '@/hooks/misc'
 import { useReportPreview, useExportJobs, useStoreOptions } from '@/hooks/queries'
 import { useExportActions } from '@/hooks/mutations'
-import { rangeToFromTo } from '@/api/mapping'
 import { openDownloadUrl } from '@/api/http'
 import { toast } from '@/lib/toast'
 import { PageHeader, TabPills, StatusPill, EmptyState } from '@/components/shared/misc'
@@ -36,7 +35,7 @@ export function Reports() {
   const stores = storesQ.data ?? []
   const [storeId, setStoreId] = useState('all')
 
-  const { from, to } = rangeToFromTo(range)
+  const { from, to } = useRangeWindow(range)
   const filters = { storeId: storeId === 'all' ? undefined : storeId, from, to }
 
   const [cursor, setCursor] = useState<string | null>(null)

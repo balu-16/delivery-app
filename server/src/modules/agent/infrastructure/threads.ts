@@ -15,6 +15,7 @@ interface MessageRow {
   text: string;
   cards: AgentCard[];
   created_at: Date;
+  cursor_created_at: string;
 }
 export interface AgentMessageView {
   id: string;
@@ -28,6 +29,12 @@ export interface AgentThreadView {
   messages: AgentMessageView[];
   nextCursor: string | null;
 }
+export interface AgentThreadSummary {
+  id: string;
+  title: string | null;
+  status: 'active' | 'archived';
+  lastMessageAt: string;
+}
 
 function messageView(row: MessageRow): AgentMessageView {
   return {
@@ -39,7 +46,8 @@ function messageView(row: MessageRow): AgentMessageView {
   };
 }
 function cursorFor(row: MessageRow): string {
-  return Buffer.from(JSON.stringify([row.created_at.toISOString(), row.id])).toString('base64url');
+  // JavaScript Date drops PostgreSQL's microseconds; retain the exact cursor.
+  return Buffer.from(JSON.stringify([row.cursor_created_at, row.id])).toString('base64url');
 }
 function readCursor(value: string): { at: string; id: string } {
   try {
@@ -54,7 +62,7 @@ function readCursor(value: string): { at: string; id: string } {
       !/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(data[1])
     )
       throw new Error('INVALID_CURSOR');
-    return { at: new Date(data[0]).toISOString(), id: data[1] };
+    return { at: data[0], id: data[1] };
   } catch {
     throw new Error('INVALID_CURSOR');
   }
@@ -80,6 +88,36 @@ export class AgentThreads {
     return result.rows[0];
   }
 
+  async list(
+    userId: string,
+    cursor?: string,
+  ): Promise<{ items: AgentThreadSummary[]; nextCursor: string | null }> {
+    const before = cursor ? readCursor(cursor) : null;
+    const rows = await sql<{
+      id: string;
+      title: string | null;
+      status: 'active' | 'archived';
+      last_message_at: Date;
+      cursor_at: string;
+    }>`SELECT id,title,status,last_message_at,last_message_at::text AS cursor_at FROM agent_threads
+      WHERE user_id=${userId}::uuid AND (${before?.at ?? null}::timestamptz IS NULL OR (last_message_at,id)<(${before?.at ?? null}::timestamptz,${before?.id ?? null}::uuid))
+      ORDER BY last_message_at DESC,id DESC LIMIT 31`.execute(this.db);
+    const page = rows.rows.slice(0, 30),
+      last = page.at(-1);
+    return {
+      items: page.map((row) => ({
+        id: row.id,
+        title: row.title,
+        status: row.status,
+        lastMessageAt: row.last_message_at.toISOString(),
+      })),
+      nextCursor:
+        rows.rows.length > 30 && last
+          ? Buffer.from(JSON.stringify([last.cursor_at, last.id])).toString('base64url')
+          : null,
+    };
+  }
+
   async current(userId: string, locale: AgentLocale = 'en'): Promise<AgentThreadView> {
     const id = await this.db.transaction().execute(async (tx) => {
       await this.lockCustomer(userId, tx);
@@ -101,6 +139,11 @@ export class AgentThreads {
   async create(userId: string, locale: AgentLocale = 'en'): Promise<AgentThreadView> {
     const id = await this.db.transaction().execute(async (tx) => {
       await this.lockCustomer(userId, tx);
+      const queued =
+        await sql`SELECT id FROM agent_jobs WHERE user_id=${userId}::uuid AND state IN ('queued','running') LIMIT 1`.execute(
+          tx,
+        );
+      if (queued.rows.length) throw new Error('RUN_IN_PROGRESS');
       const running =
         await sql`SELECT id FROM agent_runs WHERE user_id=${userId}::uuid AND outcome='running' AND created_at>clock_timestamp()-interval '5 minutes' LIMIT 1`.execute(
           tx,
@@ -128,7 +171,8 @@ export class AgentThreads {
   ): Promise<{ messages: AgentMessageView[]; nextCursor: string | null }> {
     await this.owned(userId, threadId);
     const before = cursor ? readCursor(cursor) : null;
-    const rows = await sql<MessageRow>`SELECT id,role,text,cards,created_at FROM agent_messages
+    const rows =
+      await sql<MessageRow>`SELECT id,role,text,cards,created_at,created_at::text AS cursor_created_at FROM agent_messages
       WHERE thread_id=${threadId}::uuid AND (${before?.at ?? null}::timestamptz IS NULL OR (created_at,id)<(${before?.at ?? null}::timestamptz,${before?.id ?? null}::uuid))
       ORDER BY created_at DESC,id DESC LIMIT 51`.execute(this.db);
     const page = rows.rows.slice(0, 50);

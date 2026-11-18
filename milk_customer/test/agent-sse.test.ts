@@ -14,4 +14,11 @@ describe('assistant event stream', () => {
     const parser = new SseParser(() => undefined);
     expect(() => parser.push(new TextEncoder().encode('event: card\ndata: {bad}\n\n'))).toThrow('INVALID_AGENT_EVENT');
   });
+  test('keeps the last received event sequence for reconnecting without replaying text', () => {
+    const events: AgentEvent[] = [];
+    const parser = new SseParser(event => events.push(event));
+    parser.push(new TextEncoder().encode('id: 42\nevent: message.delta\ndata: {"text":"Ready"}\n\n'));
+    parser.finish();
+    expect(events).toEqual([{ event: 'message.delta', data: { text: 'Ready' }, sequence: '42' }]);
+  });
 });

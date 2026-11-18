@@ -3,8 +3,8 @@ export const TEST_ACCOUNT = '102364304362';
 export const TEST_REGION = 'ap-southeast-2';
 export const TEST_CLUSTER = 'database-1';
 export const TEST_DATABASE = 'deliveryapp';
-export const TEST_CATEGORY = 'Test Dairy';
-export const TEST_DESCRIPTION = 'Test product for app checkout. Image is illustrative.';
+export const TEST_CATEGORY = 'Dairy';
+export const TEST_DESCRIPTION = 'Fresh dairy product. Image is illustrative.';
 
 export const TEST_STORES = [
   { id: '01800000-0000-7000-8000-000000000011', name: 'Central' },
@@ -15,7 +15,7 @@ export const TEST_STORES = [
 export const TEST_PRODUCTS = [
   {
     sku: 'DD-TEST-001',
-    name: 'Test full-cream milk',
+    name: 'Full-cream milk',
     pack: '500 ml',
     paise: '3500',
     hsn: '0401',
@@ -23,7 +23,7 @@ export const TEST_PRODUCTS = [
   },
   {
     sku: 'DD-TEST-002',
-    name: 'Test toned milk',
+    name: 'Toned milk',
     pack: '500 ml',
     paise: '3000',
     hsn: '0401',
@@ -31,7 +31,7 @@ export const TEST_PRODUCTS = [
   },
   {
     sku: 'DD-TEST-003',
-    name: 'Test A2 milk',
+    name: 'A2 milk',
     pack: '500 ml',
     paise: '5500',
     hsn: '0401',
@@ -39,7 +39,7 @@ export const TEST_PRODUCTS = [
   },
   {
     sku: 'DD-TEST-004',
-    name: 'Test curd',
+    name: 'Curd',
     pack: '400 g',
     paise: '4500',
     hsn: '0403',
@@ -47,7 +47,7 @@ export const TEST_PRODUCTS = [
   },
   {
     sku: 'DD-TEST-005',
-    name: 'Test paneer',
+    name: 'Paneer',
     pack: '200 g',
     paise: '10000',
     hsn: '0406',
@@ -55,7 +55,7 @@ export const TEST_PRODUCTS = [
   },
   {
     sku: 'DD-TEST-006',
-    name: 'Test butter',
+    name: 'Butter',
     pack: '100 g',
     paise: '6000',
     hsn: '0405',
@@ -63,7 +63,7 @@ export const TEST_PRODUCTS = [
   },
   {
     sku: 'DD-TEST-007',
-    name: 'Test ghee',
+    name: 'Ghee',
     pack: '200 ml',
     paise: '16000',
     hsn: '0405',
@@ -71,7 +71,7 @@ export const TEST_PRODUCTS = [
   },
   {
     sku: 'DD-TEST-008',
-    name: 'Test buttermilk',
+    name: 'Buttermilk',
     pack: '200 ml',
     paise: '2000',
     hsn: '0403',
@@ -79,7 +79,7 @@ export const TEST_PRODUCTS = [
   },
   {
     sku: 'DD-TEST-009',
-    name: 'Test sweet lassi',
+    name: 'Sweet lassi',
     pack: '200 ml',
     paise: '3500',
     hsn: '0403',
@@ -87,7 +87,7 @@ export const TEST_PRODUCTS = [
   },
   {
     sku: 'DD-TEST-010',
-    name: 'Test yogurt',
+    name: 'Yogurt',
     pack: '200 g',
     paise: '4000',
     hsn: '0403',

@@ -6,6 +6,7 @@ import { PayoutsModule } from '../../../modules/payouts/payouts.module.js';
 import { OrdersModule } from '../../../modules/orders/orders.module.js';
 import { PaymentsModule } from '../../../modules/payments/payments.module.js';
 import { AdminP11Controller } from './p11.controller.js';
+import { AdminDistanceReviewController } from './payout-distance.controller.js';
 @Module({
   imports: [
     IdentityModule,
@@ -15,6 +16,6 @@ import { AdminP11Controller } from './p11.controller.js';
     PaymentsModule,
     OrdersModule,
   ],
-  controllers: [AdminP11Controller],
+  controllers: [AdminP11Controller, AdminDistanceReviewController],
 })
 export class AdminP11Module {}

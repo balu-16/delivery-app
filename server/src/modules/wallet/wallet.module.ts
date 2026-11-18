@@ -104,9 +104,14 @@ import { WalletEventConsumer, WalletExpiryService } from './infrastructure/walle
     { provide: WALLET_FUNDING, useExisting: WalletFundingService },
     {
       provide: WalletAdjustmentService,
-      inject: [WalletPrimitives, WalletService, APPROVAL_FACTORY],
-      useFactory: (primitives, spender, factory: ApprovalFactory) =>
-        new WalletAdjustmentService(primitives, spender, (actions) => factory.create(actions)),
+      inject: [WalletPrimitives, WalletService, APPROVAL_FACTORY, PLATFORM_DATABASE],
+      useFactory: (primitives, spender, factory: ApprovalFactory, handle: DatabaseHandle) =>
+        new WalletAdjustmentService(
+          primitives,
+          spender,
+          (actions) => factory.create(actions),
+          handle.db,
+        ),
     },
     { provide: WALLET_ADJUSTMENTS, useExisting: WalletAdjustmentService },
   ],

@@ -1,15 +1,14 @@
 // ── §7 Payments, refunds & wallets (REAL API) ────────────────────────────────
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   RefreshCcw, SearchX, ChevronLeft, ChevronRight, Wallet, RotateCcw, Receipt,
   FileWarning, Scale, Check, AlertTriangle,
 } from 'lucide-react'
-import { useStagger, useDebouncedValue } from '@/hooks/misc'
+import { useStagger, useDebouncedValue, useRangeWindow } from '@/hooks/misc'
 import { usePaymentAttempts, useRefundList, useWalletLedger, useReconciliation, useInvoiceFailures, useStoreOptions } from '@/hooks/queries'
 import { usePaymentActions } from '@/hooks/mutations'
-import { rangeToFromTo } from '@/api/mapping'
 import { PageHeader, TabPills, tabCount, SearchInput, StatusPill, EmptyState } from '@/components/shared/misc'
 import { Select, Field } from '@/components/ui/form'
 import { Button, Card, Badge, Input, Textarea } from '@/components/ui/base'
@@ -18,6 +17,10 @@ import { DataTable } from '@/components/shared/DataTable'
 import { KpiCard } from '@/components/shared/KpiCard'
 import type { PaymentAttempt, RangeKey, RefundRow, ReconciliationFinding, WalletLedgerRow } from '@/types'
 import { cn, fmtDateTime, fmtINR } from '@/lib/utils'
+import { requestWalletAdjustment, approveWalletAdjustment } from '@/api/payments'
+import { ApiError, newIdempotencyKey } from '@/api/http'
+import { useAuth } from '@/store/auth'
+import { toast } from '@/lib/toast'
 
 type MainTab = 'attempts' | 'refunds' | 'wallet' | 'reconciliation' | 'invoices'
 
@@ -73,43 +76,79 @@ function ReviewDialog({ open, onOpenChange, title, description, decisions, onDec
   )
 }
 
-function WalletAdjustDialog({ open, onOpenChange, onSubmit }: {
+function WalletAdjustDialog({ open, onOpenChange, onDone }: {
   open: boolean
   onOpenChange: (v: boolean) => void
-  onSubmit: (input: { userId: string; bucket: 'cash' | 'promo'; direction: 'CREDIT' | 'DEBIT'; amountRupees: number; reason: string }) => void
+  onDone: () => void
 }) {
   const [userId, setUserId] = useState('')
   const [bucket, setBucket] = useState<'cash' | 'promo'>('cash')
   const [direction, setDirection] = useState<'CREDIT' | 'DEBIT'>('CREDIT')
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
-  useEffect(() => { if (open) { setUserId(''); setAmount(''); setReason(''); setBucket('cash'); setDirection('CREDIT') } }, [open])
-  const invalid = userId.trim().length < 8 || !Number(amount) || Number(amount) <= 0 || reason.trim().length < 3
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const inFlight = useRef(false)
+  useEffect(() => { if (open) { setUserId(''); setAmount(''); setReason(''); setBucket('cash'); setDirection('CREDIT'); setError('') } }, [open])
+  const validUser = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId.trim())
+  const amountPaise = /^\d+(?:\.\d{1,2})?$/.test(amount) ? (() => {const [whole, fraction=''] = amount.split('.'); return BigInt(whole!) * 100n + BigInt(fraction.padEnd(2,'0'))})() : 0n
+  const validAmount = amountPaise > 0n && amountPaise <= 9223372036854775807n
+  const invalid = !validUser || !validAmount || reason.trim().length < 3
+  const submit = async () => {
+    if (invalid || inFlight.current) return
+    const input = {userId:userId.trim(),bucket,direction,amountPaise:amountPaise.toString(),reason:reason.trim()}
+    if (!window.confirm(`${direction === 'CREDIT' ? 'Credit' : 'Debit'} ₹${amount} ${direction === 'CREDIT' ? 'to' : 'from'} this customer's ${bucket} wallet?`)) return
+    inFlight.current = true; setSaving(true); setError('')
+    let storageKey: string | null = null
+    try {
+      // Store only a fingerprint and random request key. A retry after an
+      // uncertain response uses the same approval, including after a reload.
+      const body = JSON.stringify([useAuth.getState().admin?.id, input])
+      let hash = 14695981039346656037n
+      for (const char of body) hash = BigInt.asUintN(64,(hash ^ BigInt(char.charCodeAt(0))) * 1099511628211n)
+      storageKey = `dairydirect:wallet-adjustment:${hash.toString(16)}`
+      let key = window.localStorage.getItem(storageKey)
+      if (!key) {key = newIdempotencyKey(); window.localStorage.setItem(storageKey,key)}
+      const request = await requestWalletAdjustment(input,key)
+      await approveWalletAdjustment(request.approvalId)
+      window.localStorage.removeItem(storageKey)
+      onDone(); onOpenChange(false); toast.success('Wallet adjustment saved.')
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.code === 'APPROVAL_EXPIRED' && storageKey) {
+        window.localStorage.removeItem(storageKey)
+        setError('The confirmation expired without being applied. Review the details and confirm again.')
+      } else setError(cause instanceof ApiError && cause.code === 'WALLET_INSUFFICIENT' ? 'The customer does not have enough available balance in this wallet.' : 'The adjustment could not be confirmed. Retry with the same details to safely check the result.')
+    }
+    finally {inFlight.current = false; setSaving(false)}
+  }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Wallet adjustment" description="Maker-checker: another admin approves before money moves">
+    <Dialog open={open} onOpenChange={(value) => {if (!saving) onOpenChange(value)}}>
+      <DialogContent title="Wallet adjustment" description="Review the amount and reason, then confirm the adjustment.">
         <div className="space-y-3">
           <Field label="Customer user id (uuid)" required hint="Copy the id from People › Customers">
-            <Input value={userId} onChange={(e) => setUserId(e.target.value)} className="font-mono" placeholder="user uuid" />
+            <Input aria-label="Customer user id" value={userId} onChange={(e) => setUserId(e.target.value)} className="font-mono" placeholder="user uuid" />
+            {!!userId && !validUser && <p className="text-xs text-destructive">Enter the full customer user ID.</p>}
           </Field>
           <div className="grid grid-cols-3 gap-3">
             <Field label="Bucket" required>
-              <Select value={bucket} onValueChange={(v) => setBucket(v as 'cash' | 'promo')} options={[{ value: 'cash', label: 'Cash' }, { value: 'promo', label: 'Promo' }]} />
+              <Select ariaLabel="Wallet bucket" value={bucket} onValueChange={(v) => setBucket(v as 'cash' | 'promo')} options={[{ value: 'cash', label: 'Cash' }, { value: 'promo', label: 'Promo' }]} />
             </Field>
             <Field label="Direction" required>
-              <Select value={direction} onValueChange={(v) => setDirection(v as 'CREDIT' | 'DEBIT')} options={[{ value: 'CREDIT', label: 'Credit' }, { value: 'DEBIT', label: 'Debit' }]} />
+              <Select ariaLabel="Adjustment direction" value={direction} onValueChange={(v) => setDirection(v as 'CREDIT' | 'DEBIT')} options={[{ value: 'CREDIT', label: 'Credit' }, { value: 'DEBIT', label: 'Debit' }]} />
             </Field>
             <Field label="Amount (₹)" required>
-              <Input type="number" min={1} value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <Input aria-label="Amount in rupees" type="number" min={0.01} step={0.01} value={amount} onChange={(e) => setAmount(e.target.value)} />
+              {!!amount && !validAmount && <p className="text-xs text-destructive">Enter a positive amount with up to two decimal places.</p>}
             </Field>
           </div>
           <Field label="Reason" required hint="Recorded on the ledger and audit log">
-            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.eg. Goodwill credit for late delivery" />
+            <Textarea aria-label="Reason for wallet adjustment" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} placeholder="For example, goodwill credit for a late delivery" />
           </Field>
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="secondary" size="md" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button variant="primary" size="md" disabled={invalid} onClick={() => { onSubmit({ userId: userId.trim(), bucket, direction, amountRupees: Number(amount), reason: reason.trim() }); onOpenChange(false) }}>
-              <Wallet className="h-4 w-4" /> Submit for approval
+            <Button variant="secondary" size="md" disabled={saving} onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button variant="primary" size="md" disabled={invalid || saving} onClick={() => void submit()}>
+              <Wallet className="h-4 w-4" /> {saving ? 'Saving…' : 'Confirm adjustment'}
             </Button>
           </div>
         </div>
@@ -132,7 +171,7 @@ export function Payments() {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search, 250)
 
-  const { from, to } = rangeToFromTo(range)
+  const { from, to } = useRangeWindow(range)
   const filters = {
     storeId: storeId === 'all' ? undefined : storeId,
     search: debouncedSearch || undefined,
@@ -430,7 +469,7 @@ export function Payments() {
       <WalletAdjustDialog
         open={adjustOpen}
         onOpenChange={setAdjustOpen}
-        onSubmit={(input) => actions.walletAdjust(input).mutate(undefined, { onError: () => {} })}
+        onDone={() => {void walletQ.refetch()}}
       />
     </div>
   )

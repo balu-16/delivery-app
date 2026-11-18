@@ -33,7 +33,8 @@ export class PostgresAgentPrivacy implements AgentPrivacy {
   async hasActiveRuns(userId: string, tx: TransactionContext): Promise<boolean> {
     const rows = await sql<{
       active: boolean;
-    }>`SELECT EXISTS(SELECT 1 FROM agent_runs WHERE user_id=${userId}::uuid AND outcome='running' AND created_at>clock_timestamp()-interval '5 minutes') AS active`.execute(
+    }>`SELECT (EXISTS(SELECT 1 FROM agent_runs WHERE user_id=${userId}::uuid AND outcome='running' AND created_at>clock_timestamp()-interval '5 minutes')
+      OR EXISTS(SELECT 1 FROM agent_jobs WHERE user_id=${userId}::uuid AND state IN ('queued','running'))) AS active`.execute(
       tx,
     );
     return rows.rows[0]?.active === true;
@@ -62,6 +63,11 @@ export class PostgresAgentPrivacy implements AgentPrivacy {
           tx,
         );
       if (!thread.rows.length) throw new Error('RESOURCE_NOT_FOUND');
+      const queued =
+        await sql`SELECT id FROM agent_jobs WHERE thread_id=${threadId}::uuid AND state IN ('queued','running') LIMIT 1`.execute(
+          tx,
+        );
+      if (queued.rows.length) throw new Error('RUN_IN_PROGRESS');
       const running =
         await sql`SELECT id FROM agent_runs WHERE thread_id=${threadId}::uuid AND outcome='running' AND created_at>clock_timestamp()-interval '5 minutes' LIMIT 1`.execute(
           tx,
@@ -98,6 +104,7 @@ export class PostgresAgentPrivacy implements AgentPrivacy {
         id: string;
       }>`SELECT id::text FROM agent_threads t WHERE last_message_at < clock_timestamp()-${days}*interval '1 day'
         AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.thread_id=t.id AND r.outcome='running' AND r.created_at>clock_timestamp()-interval '5 minutes')
+        AND NOT EXISTS(SELECT 1 FROM agent_jobs j WHERE j.thread_id=t.id AND j.state IN ('queued','running'))
         ORDER BY last_message_at,id LIMIT ${batch} FOR UPDATE SKIP LOCKED`.execute(tx);
       const ids = threads.rows.map((row) => row.id);
       if (!ids.length) return;

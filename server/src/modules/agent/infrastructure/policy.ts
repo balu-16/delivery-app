@@ -78,14 +78,14 @@ export async function policyText(topic: PolicyTopic, config: AppConfig): Promise
       ]);
       return (
         `Delivery typically takes about ${min}-${max} minutes once your order is confirmed, depending on your address and how busy the store is. ` +
-        'The app shows the estimate for your order before you confirm it. Online payments and live map tracking are under development.'
+        'The estimate is shown before you confirm the order. Online payment and maps are coming soon.'
       );
     }
     case 'wallet':
       return (
-        'Your DairyDirect wallet balance can be used automatically towards orders. ' +
-        'This chat can show your balance but cannot add money to the wallet; use the Wallet screen in the app for that. ' +
-        'Cash on delivery follows the existing eligibility rules shown at checkout.'
+        'An existing DairyDirect wallet balance can be applied to an eligible order. ' +
+        'This chat can show that balance. Adding money to the wallet is unavailable. ' +
+        'Cash on delivery follows the eligibility rules at checkout. Online payment is coming soon.'
       );
     case 'subscriptions':
       return 'Subscription deliveries are not available right now. If that changes, the app and this chat will show it.';

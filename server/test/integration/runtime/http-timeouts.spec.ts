@@ -2,6 +2,38 @@ import { connect } from 'node:net';
 import { createApplication } from '../../../src/bootstrap.js';
 import { readEnv } from '../../../src/config/env.schema.js';
 
+it('keeps the connection open for a readiness probe slower than the header timeout', async () => {
+  const app = await createApplication(
+    readEnv({
+      NODE_ENV: 'test',
+      APP_ROLE: 'worker',
+      LOG_LEVEL: 'silent',
+      HTTP_HEADERS_TIMEOUT_MS: '1000',
+      HTTP_REQUEST_TIMEOUT_MS: '3000',
+      READINESS_TIMEOUT_MS: '2500',
+    }),
+    [
+      {
+        name: 'slow',
+        check: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        },
+      },
+    ],
+  );
+  await app.listen(0, '127.0.0.1');
+  const address = app.getHttpServer().address() as { port: number };
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/readyz`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: 'ok' });
+  } finally {
+    await app.close();
+  }
+});
+
 it('closes an incomplete header request within the configured idle receive deadline', async () => {
   const app = await createApplication(
     readEnv({

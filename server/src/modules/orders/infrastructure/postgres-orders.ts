@@ -16,6 +16,7 @@ import type {
   OrderView,
   TimelineEntry,
 } from '../contracts/orders.js';
+import type { DeliveredPurchaseLine } from '../domain/purchase-summary.js';
 import { transitionOrderStatus } from '../domain/order-policy.js';
 
 interface OrderRow {
@@ -274,6 +275,58 @@ export async function listPage(
     ),
     nextCursor: rows.rows.length === limit && last ? encodeOrderCursor(last) : null,
   };
+}
+
+function orderedQuantity(value: string): number {
+  if (!/^\d+$/.test(value)) throw new Error('INVALID_INPUT');
+  const quantity = Number(value);
+  if (!Number.isSafeInteger(quantity)) throw new Error('INVALID_INPUT');
+  return quantity;
+}
+
+/** Delivered order lines for one customer, newest orders first, bounded by `limit`. */
+export async function deliveredPurchaseLines(
+  db: Database,
+  userId: string,
+  limit: number,
+): Promise<DeliveredPurchaseLine[]> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new Error('INVALID_PAGE');
+  const rows = await sql<{
+    order_id: string;
+    placed_at: Date;
+    variant_id: string;
+    name_snapshot: string;
+    ordered_qty: string;
+  }>`WITH recent AS (
+      SELECT id, placed_at FROM orders
+      WHERE user_id=${userId}::uuid AND status='DELIVERED'
+      ORDER BY placed_at DESC, id DESC
+      LIMIT ${limit}
+    )
+    SELECT r.id::text AS order_id, r.placed_at, i.variant_id::text AS variant_id,
+      i.name_snapshot, i.ordered_qty::text AS ordered_qty
+    FROM recent r
+    JOIN order_items i ON i.order_id=r.id
+    ORDER BY r.placed_at DESC, r.id DESC, i.id`.execute(db);
+  return rows.rows.map((row) => ({
+    orderId: row.order_id,
+    placedAt: row.placed_at.toISOString(),
+    variantId: row.variant_id,
+    name: row.name_snapshot,
+    orderedQty: orderedQuantity(row.ordered_qty),
+  }));
+}
+
+/** Variants on orders that are still being fulfilled for this customer. */
+export async function activeOrderVariants(db: Database, userId: string): Promise<string[]> {
+  const rows = await sql<{
+    variant_id: string;
+  }>`SELECT DISTINCT i.variant_id::text AS variant_id FROM orders o
+    JOIN order_items i ON i.order_id=o.id
+    WHERE o.user_id=${userId}::uuid AND o.status IN ('CONFIRMED','PICKING','PACKED','OUT_FOR_DELIVERY')`.execute(
+    db,
+  );
+  return rows.rows.map((row) => row.variant_id);
 }
 
 export function adminFilterWhere(filter: AdminOrderFilter): ReturnType<typeof sql> {

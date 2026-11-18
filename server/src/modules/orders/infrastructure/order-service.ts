@@ -19,13 +19,22 @@ import type {
   OrderStatus,
   OrderView,
   ReorderResult,
+  UsualPurchase,
 } from '../contracts/orders.js';
 import { evaluateCancellation, reinstatable } from '../domain/cancellation-policy.js';
 import { FORCE_STATE_ALLOWED } from '../domain/order-policy.js';
+import { rankUsualPurchases } from '../domain/purchase-summary.js';
 import { OrderCompensationService } from './order-compensation.js';
 import { OrderConfirmationService } from './order-confirmation.js';
 import { OrderMutationsService } from './order-queries.js';
-import { PostgresOrderAggregate, adminFilterWhere, listPage, mapOrder } from './postgres-orders.js';
+import {
+  PostgresOrderAggregate,
+  activeOrderVariants,
+  adminFilterWhere,
+  deliveredPurchaseLines,
+  listPage,
+  mapOrder,
+} from './postgres-orders.js';
 
 function viewOf(
   row: Awaited<ReturnType<PostgresOrderAggregate['byIdRaw']>>,
@@ -221,6 +230,21 @@ export class OrderService implements OrderOperations {
   }
   async list(userId: string, limit: number, cursor?: string): Promise<OrderListPage> {
     return listPage(this.db, sql`user_id=${userId}::uuid`, limit, cursor);
+  }
+  async purchaseSummary(userId: string, limit = 10): Promise<readonly UsualPurchase[]> {
+    return rankUsualPurchases(await deliveredPurchaseLines(this.db, userId, limit));
+  }
+  async purchaseSignals(userId: string, limit = 20) {
+    const delivered = await deliveredPurchaseLines(this.db, userId, limit);
+    return {
+      delivered: delivered.map((line) => ({
+        orderId: line.orderId,
+        variantId: line.variantId,
+        name: line.name,
+        placedAt: line.placedAt,
+      })),
+      activeVariantIds: await activeOrderVariants(this.db, userId),
+    };
   }
   async adminList(
     filter: AdminOrderFilter,

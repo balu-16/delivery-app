@@ -128,7 +128,8 @@ export interface EarningView {
   tipPaise: string;
   adjustmentPaise: string;
   totalPaise: string;
-  distanceMetres: number;
+  distanceMetres: number | null;
+  distancePending?: boolean;
   detentionMinutes: number;
   computedAt: string;
 }
@@ -140,7 +141,7 @@ export interface EarningTaskInput {
   taskId: string;
   orderId: string;
   riderId: string;
-  distanceMetres: number;
+  distanceMetres: number | null;
   /** Wait minutes at the store (arrived-at-store to picked-up). */
   detentionMinutes: number;
   tipPaise: string;

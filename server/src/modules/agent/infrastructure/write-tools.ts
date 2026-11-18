@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
 import { hashCanonical } from '../../../common/idempotency/idempotency.js';
 import { uuidV7 } from '../../../common/ids/ids.js';
@@ -8,10 +9,11 @@ import type { CartService } from '../../cart/contracts/cart.js';
 import type { Support } from '../../support/contracts/support.js';
 import { assertQuantity, sanitizeAgentText } from './guards.js';
 import type { AgentToolKit } from './tool-kit.js';
-import { requireAgentPermission } from './security.js';
+import { requireAgentPermission, assertAgentCommitAllowed } from './security.js';
 
 interface Dependencies {
   db: Database;
+  locationRequired?: () => Promise<boolean>;
   addresses: AddressOperations;
   cart: CartService;
   support: Support;
@@ -20,6 +22,8 @@ interface Context {
   userId: string;
   threadId: string;
   maxQuantity: number;
+  userText?: string;
+  clientMessageId?: string;
 }
 
 /** Absolute quantity writes are audited and replayed by the model's tool-call id. */
@@ -36,8 +40,8 @@ async function writeAgentCart(
   const current = await deps.cart.get(context.userId);
   const address = input.addressId
     ? addresses.find((item) => item.id === input.addressId)
-    : (addresses.find((item) => item.id === current?.addressId) ??
-      addresses.find((item) => item.isDefault));
+    : (addresses.find((item) => item.isDefault) ??
+      addresses.find((item) => item.id === current?.addressId));
   if (!address) throw new Error(input.addressId ? 'ADDRESS_NOT_FOUND' : 'ADDRESS_REQUIRED');
   const hash = hashCanonical(input);
   return deps.db.transaction().execute(async (tx) => {
@@ -54,6 +58,14 @@ async function writeAgentCart(
     );
     if (!thread.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
     if (thread.rows[0].status !== 'active') throw new Error('THREAD_ARCHIVED');
+    if (noteId) {
+      const active =
+        await sql`SELECT 1 FROM agent_jobs WHERE thread_id=${context.threadId}::uuid AND user_id=${context.userId}::uuid AND state IN ('queued','running') LIMIT 1`.execute(
+          tx,
+        );
+      if (active.rows.length) throw new Error('RUN_IN_PROGRESS');
+    }
+    await assertAgentCommitAllowed(tx, context.userId, context.threadId);
     const prior = await sql<{
       request_hash: string;
       result: Json;
@@ -126,6 +138,105 @@ export function addAgentCartItem(
 export function createWriteTools(deps: Dependencies, context: Context, kit: AgentToolKit) {
   return [
     kit.define(
+      'save_address',
+      'Save a written address only when the customer explicitly asks you to add or save it and supplies the street, PIN, contact name and Indian mobile number in their current message. Never invent a location or any field. The address is saved without a delivery location; the customer must confirm the location before shopping at that address.',
+      z.object({
+        line1: z.string().min(1).max(200),
+        line2: z.string().max(200).optional(),
+        pincode: z.string().regex(/^\d{6}$/),
+        contactName: z.string().min(1).max(120),
+        contactPhone: z.string().regex(/^(?:\+91)?[6-9]\d{9}$/),
+      }),
+      async (input, runtime) => {
+        const source = context.userText ?? '';
+        const asksToSave =
+          /\b(add|save|create|store)\b[\s\S]{0,100}\b(address|location)\b|\b(address|location)\b[\s\S]{0,100}\b(add|save|create|store)\b/i.test(
+            source,
+          );
+        const normalized = (value: string) =>
+          value
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim()
+            .replace(/\s+/g, ' ');
+        const inSource = (value: string) => normalized(source).includes(normalized(value));
+        const phone = input.contactPhone.replace(/^\+91/, '');
+        if (
+          !asksToSave ||
+          !inSource(input.line1) ||
+          !inSource(input.contactName) ||
+          !source.replace(/\D/g, '').includes(phone) ||
+          !source.includes(input.pincode) ||
+          (input.line2 && !inSource(input.line2))
+        )
+          throw new Error('ADDRESS_SAVE_NOT_REQUESTED');
+        if (!runtime.toolCallId) throw new Error('INVALID_INPUT');
+        const draft = {
+          line1: input.line1.trim(),
+          ...(input.line2?.trim() ? { line2: input.line2.trim() } : {}),
+          pincode: input.pincode,
+          contactName: input.contactName.trim(),
+          contactPhone: `+91${phone}`,
+          point: null,
+        };
+        const reference = `agent-address:${createHash('sha256')
+          .update(
+            `${context.threadId}:${context.clientMessageId ?? runtime.toolCallId}:${hashCanonical(draft)}`,
+          )
+          .digest('hex')}`;
+        const saved = await deps.addresses.create(
+          context.userId,
+          draft,
+          true,
+          reference,
+          async (tx) => {
+            await requireAgentPermission(context.userId, tx);
+            const thread =
+              await sql`SELECT id FROM agent_threads WHERE id=${context.threadId}::uuid AND user_id=${context.userId}::uuid AND status='active' FOR UPDATE`.execute(
+                tx,
+              );
+            if (!thread.rows.length) throw new Error('THREAD_ARCHIVED');
+            await assertAgentCommitAllowed(tx, context.userId, context.threadId);
+          },
+        );
+        const locationRequired = deps.locationRequired ? await deps.locationRequired() : true;
+        if (
+          locationRequired &&
+          !saved.address.point &&
+          kit.showCardOnce('delivery-address-required')
+        )
+          runtime.writer?.({
+            event: 'card',
+            data: {
+              cardId: uuidV7(),
+              type: 'info',
+              payload: {
+                title: 'Address saved',
+                description:
+                  'Confirm the delivery location when you are there to check products and place an order.',
+                options: [
+                  {
+                    label: 'Confirm location',
+                    action: 'open_screen',
+                    payload: {
+                      screen: 'addresses',
+                      addressId: saved.address.id,
+                      needsLocation: true,
+                    },
+                  },
+                ],
+              },
+            },
+          });
+        return {
+          addressId: saved.address.id,
+          saved: true,
+          locationRequired,
+          locationConfirmed: saved.address.point !== null,
+        };
+      },
+    ),
+    kit.define(
       'set_cart_item_qty',
       'Set the absolute quantity of a product after the customer asks to change the cart. Use zero only when explicitly asked to remove an item.',
       z.object({
@@ -157,6 +268,7 @@ export function createWriteTools(deps: Dependencies, context: Context, kit: Agen
           );
           if (!thread.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
           if (thread.rows[0].status !== 'active') throw new Error('THREAD_ARCHIVED');
+          await assertAgentCommitAllowed(tx, context.userId, context.threadId);
           const prior = await sql<{
             request_hash: string;
             result: Json;
@@ -194,8 +306,8 @@ export function createWriteTools(deps: Dependencies, context: Context, kit: Agen
         if (!runtime.toolCallId || runtime.toolCallId.length > 200)
           throw new Error('INVALID_INPUT');
         const addresses = await deps.addresses.list(context.userId);
-        if (!addresses.some((address) => address.id === input.addressId))
-          throw new Error('ADDRESS_NOT_FOUND');
+        const selected = addresses.find((address) => address.id === input.addressId);
+        if (!selected) throw new Error('ADDRESS_NOT_FOUND');
         const hash = hashCanonical({ op: 'select_address', addressId: input.addressId });
         return deps.db.transaction().execute(async (tx) => {
           const user =
@@ -211,6 +323,7 @@ export function createWriteTools(deps: Dependencies, context: Context, kit: Agen
           );
           if (!thread.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
           if (thread.rows[0].status !== 'active') throw new Error('THREAD_ARCHIVED');
+          await assertAgentCommitAllowed(tx, context.userId, context.threadId);
           const prior = await sql<{
             request_hash: string;
             result: Json;
@@ -268,7 +381,12 @@ export function createWriteTools(deps: Dependencies, context: Context, kit: Agen
             body,
             reference: `agent:${context.threadId}:${runtime.toolCallId}`.slice(0, 150),
           },
-          { beforeCreate: (tx) => requireAgentPermission(context.userId, tx) },
+          {
+            beforeCreate: async (tx) => {
+              await requireAgentPermission(context.userId, tx);
+              await assertAgentCommitAllowed(tx, context.userId, context.threadId);
+            },
+          },
         );
         return { ticketId: id, status: 'OPEN' };
       },
@@ -295,7 +413,12 @@ export function createWriteTools(deps: Dependencies, context: Context, kit: Agen
             body,
             reference: `agent:${context.threadId}:${runtime.toolCallId}`.slice(0, 150),
           },
-          { beforeCreate: (tx) => requireAgentPermission(context.userId, tx) },
+          {
+            beforeCreate: async (tx) => {
+              await requireAgentPermission(context.userId, tx);
+              await assertAgentCommitAllowed(tx, context.userId, context.threadId);
+            },
+          },
         );
         return { ticketId: id, status: 'OPEN' };
       },

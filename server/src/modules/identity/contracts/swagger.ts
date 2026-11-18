@@ -92,7 +92,41 @@ export class StoreResponseDto extends ProfileResponseDto {
   @ApiProperty({ type: [String] }) roles!: string[];
   @ApiProperty({ type: [StoreAssignmentResponseDto] }) stores!: StoreAssignmentResponseDto[];
 }
+class DeliveryFeeSlabResponseDto {
+  @ApiProperty({ type: String, nullable: true }) maxOrderValuePaise!: string | null;
+  @ApiProperty() feePaise!: string;
+}
 export class ConfigValuesResponseDto {
+  @ApiProperty() minOrderPaise!: string;
+  @ApiProperty() maxOrderPaise!: string;
+  @ApiProperty() maxCodPaise!: string;
+  @ApiProperty({ type: [DeliveryFeeSlabResponseDto] })
+  deliveryFeeSlabs!: DeliveryFeeSlabResponseDto[];
+  @ApiProperty() freeDeliveryThresholdPaise!: string;
+  @ApiProperty() handlingFeePaise!: string;
+  @ApiProperty() smallCartThresholdPaise!: string;
+  @ApiProperty() smallCartFeePaise!: string;
+  @ApiProperty() catalogMaxPerOrder!: number;
+  @ApiProperty() maxCartLines!: number;
+  @ApiProperty() offerTimeoutSeconds!: number;
+  @ApiProperty() riderMaxConcurrentTasks!: number;
+  @ApiProperty() cashInHandLimitPaise!: string;
+  @ApiProperty() earningsBasePaise!: string;
+  @ApiProperty() earningsPerKmPaise!: string;
+  @ApiProperty() detentionFreeMinutes!: number;
+  @ApiProperty() detentionPerMinutePaise!: string;
+  @ApiProperty() deliveryFailureWaitSeconds!: number;
+  @ApiProperty() deliveryFailureMinContactAttempts!: number;
+  @ApiProperty() agent_proactive_nudges_enabled!: boolean;
+  @ApiProperty() agent_nudge_max_per_week!: number;
+  @ApiProperty() agent_daily_turn_limit_per_user!: number;
+  @ApiProperty() notificationQuietHoursStart!: number;
+  @ApiProperty() notificationQuietHoursEnd!: number;
+  @ApiProperty() catalogLowStockThreshold!: number;
+  @ApiProperty() inventoryExpirySoonDays!: number;
+  @ApiProperty() supportFirstResponseSlaHours!: number;
+  @ApiProperty() supportResolutionSlaHours!: number;
+  @ApiProperty() supportReopenDays!: number;
   @ApiProperty() addressMaxPerUser!: number;
   @ApiProperty() addressPinMismatchMetres!: number;
   @ApiProperty() zoneMinAreaM2!: number;
@@ -111,6 +145,9 @@ export class ConfigValuesResponseDto {
   @ApiProperty() maxPauseLengthDays!: number;
 }
 export class FeatureFlagsResponseDto {
+  @ApiProperty() agent_enabled!: boolean;
+  @ApiProperty() customer_location_required!: boolean;
+  @ApiProperty() online_payments_enabled!: boolean;
   @ApiProperty() wallet_enabled!: boolean;
   @ApiProperty() cod_enabled!: boolean;
   @ApiProperty() subscriptions_enabled!: boolean;

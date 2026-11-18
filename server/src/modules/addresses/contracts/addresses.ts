@@ -1,3 +1,5 @@
+import type { TransactionContext } from '../../../platform/database/database.js';
+
 export interface AddressDraft {
   label?: 'HOME' | 'WORK' | 'OTHER';
   line1: string;
@@ -6,7 +8,7 @@ export interface AddressDraft {
   pincode: string;
   contactName: string;
   contactPhone: string;
-  point: { lat: number; lng: number };
+  point: { lat: number; lng: number } | null;
 }
 export interface Address extends AddressDraft {
   id: string;
@@ -26,6 +28,7 @@ export interface AddressRepository {
     maxCount: number,
     makeDefault: boolean,
     reference?: string,
+    beforeCreate?: (tx: TransactionContext) => Promise<void>,
   ): Promise<Address>;
   update(
     userId: string,
@@ -43,6 +46,7 @@ export interface AddressOperations {
     draft: AddressDraft,
     makeDefault?: boolean,
     reference?: string,
+    beforeCreate?: (tx: TransactionContext) => Promise<void>,
   ): Promise<AddressWriteResult>;
   update(
     userId: string,

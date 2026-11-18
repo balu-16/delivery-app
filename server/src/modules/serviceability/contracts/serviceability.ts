@@ -5,6 +5,8 @@ export type ServiceabilityTransaction = TransactionContext;
 export type ServiceabilityReason =
   'OUTSIDE_ZONE' | 'STORE_CLOSED' | 'STORE_PAUSED' | 'STORE_AT_CAPACITY' | 'NO_RIDERS_AVAILABLE';
 export interface ZoneSnapshot {
+  /** PIN coverage ID; older order snapshots may contain polygon zone IDs. */
+  kind?: 'PINCODE' | 'ZONE';
   zoneId: string;
   zoneVersion: string;
   cityZoneVersion: string;
@@ -18,8 +20,9 @@ export interface ServiceabilityResult {
   reasons: ServiceabilityReason[];
 }
 export interface ServiceabilityInput {
-  lat: number;
-  lng: number;
+  pincode?: string;
+  lat?: number;
+  lng?: number;
   targetTime: Date;
 }
 export interface Serviceability {

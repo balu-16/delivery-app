@@ -5,7 +5,9 @@ import { sql } from 'kysely';
 import { uuidV7 } from '../../../src/common/ids/ids.js';
 import { createDatabase, type DatabaseHandle } from '../../../src/platform/database/database.js';
 import { AgentDrafts } from '../../../src/modules/agent/infrastructure/drafts.js';
+import { computeQuote } from '../../../src/modules/pricing/contracts/pricing.js';
 import { startTestServices, type TestServices } from '../../helpers/services.js';
+import { assertDisposableAgentDatabase } from './disposable-database.js';
 
 let services: TestServices, db: DatabaseHandle, drafts: AgentDrafts;
 let customer: string, stranger: string, thread: string;
@@ -20,6 +22,7 @@ beforeAll(async () => {
     log: () => undefined,
   });
   db = createDatabase(services.databaseUrl, 4, 10000, undefined, 30000);
+  await assertDisposableAgentDatabase(db.db);
   drafts = new AgentDrafts(db.db);
   customer = uuidV7();
   stranger = uuidV7();
@@ -177,4 +180,92 @@ test('revoked consent and the remote kill switch prevent execution', async () =>
     ),
   ).rejects.toThrow('AGENT_NOT_CONFIGURED');
   expect(execute).not.toHaveBeenCalled();
+});
+
+test('a refund completion is stored once and consent is required before it', async () => {
+  await sql`UPDATE feature_flags SET enabled=true WHERE key='agent_enabled'`.execute(db.db);
+  await sql`UPDATE consents SET revoked_at=NULL WHERE user_id=${customer}::uuid AND type='ai_assistant'`.execute(
+    db.db,
+  );
+  const draft = await drafts.prepare({
+    userId: customer,
+    threadId: thread,
+    toolCallId: 'refund-replay',
+    type: 'refund_request',
+    payload: { orderId: uuidV7(), reason: 'Damaged packet' },
+    expiresAt: new Date(Date.now() + 60000),
+  });
+  await drafts.stageDecision({
+    userId: customer,
+    threadId: thread,
+    draftId: draft.id,
+    decision: 'approve',
+  });
+  await sql`UPDATE consents SET revoked_at=clock_timestamp() WHERE user_id=${customer}::uuid AND type='ai_assistant'`.execute(
+    db.db,
+  );
+  const result = { ticketId: uuidV7(), ticketStatus: 'OPEN', request: true };
+  await expect(
+    drafts.markExecuted({ userId: customer, threadId: thread, draftId: draft.id, result }),
+  ).rejects.toThrow('CONSENT_REQUIRED');
+  await sql`UPDATE consents SET revoked_at=NULL WHERE user_id=${customer}::uuid AND type='ai_assistant'`.execute(
+    db.db,
+  );
+  await expect(
+    drafts.markExecuted({ userId: customer, threadId: thread, draftId: draft.id, result }),
+  ).resolves.toEqual(result);
+  await expect(
+    drafts.markExecuted({
+      userId: customer,
+      threadId: thread,
+      draftId: draft.id,
+      result: { ticketId: uuidV7(), ticketStatus: 'OPEN', request: true },
+    }),
+  ).resolves.toEqual(result);
+  const stored = await sql<{
+    status: string;
+    count: string;
+  }>`SELECT status,(SELECT count(*)::text FROM agent_drafts WHERE id=${draft.id}::uuid AND result->>'ticketId'=${result.ticketId}) AS count FROM agent_drafts WHERE id=${draft.id}::uuid`.execute(
+    db.db,
+  );
+  expect(stored.rows[0]).toEqual({ status: 'executed', count: '1' });
+});
+
+test('a quote applies ₹50 from the wallet and leaves ₹50 due on delivery', async () => {
+  const columns = await sql<{
+    name: string;
+  }>`SELECT column_name AS name FROM information_schema.columns WHERE table_name='agent_runs' AND column_name IN ('model_ms','tool_ms','db_ms')`.execute(
+    db.db,
+  );
+  expect(columns.rows.map((row) => row.name).sort()).toEqual(['db_ms', 'model_ms', 'tool_ms']);
+  const quote = computeQuote({
+    lines: [
+      {
+        variantId: uuidV7(),
+        quantity: 1n,
+        unitPricePaise: 10000n,
+        mrpPaise: 10000n,
+        taxRateBps: 0,
+        eligibleForDiscount: false,
+      },
+    ],
+    coupon: null,
+    tipPaise: 0n,
+    fees: {
+      deliveryFeeSlabs: [{ maxOrderValuePaise: null, feePaise: 0n }],
+      freeDeliveryThresholdPaise: 0n,
+      handlingFeePaise: 0n,
+      smallCartThresholdPaise: 0n,
+      smallCartFeePaise: 0n,
+      surgeEnabled: false,
+      surgeFeePaise: 0n,
+      feeTaxRules: [],
+    },
+    wallet: { promoAvailablePaise: 0n, cashAvailablePaise: 5000n, promoSpendCapBps: 0 },
+    minOrderPaise: 0n,
+    maxOrderPaise: 1000000n,
+  });
+  expect(quote.wallet?.cashPaise).toBe(5000n);
+  expect(quote.amountDuePaise).toBe(5000n);
+  expect(quote.totalPaise).toBe(10000n);
 });

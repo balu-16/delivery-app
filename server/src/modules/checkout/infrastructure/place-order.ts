@@ -43,8 +43,8 @@ export interface PlaceDependencies {
 
 interface AddressContext {
   readonly addressId: string;
-  readonly lat: number;
-  readonly lng: number;
+  readonly lat: number | null;
+  readonly lng: number | null;
   readonly zoneId: string | null;
 }
 
@@ -92,10 +92,25 @@ export class PlaceOrderSaga {
     // 2. Re-check the world: the bound store is still serviceable for this
     // address right now (zone, store open, paused/capacity reasons).
     const address = await this.addressContext(tx, quote.addressId, userId);
+    // Serialize the requirement with an admin changing the flag; no absent-row race.
+    await sql`SELECT pg_advisory_xact_lock(701001)`.execute(tx);
+    if (input.method === 'GATEWAY') {
+      const online = await sql<{
+        enabled: boolean;
+      }>`SELECT enabled FROM feature_flags WHERE key='online_payments_enabled'`.execute(tx);
+      if (online.rows[0]?.enabled !== true) throw new Error('ONLINE_PAYMENTS_NOT_READY');
+    }
+    const required = await sql<{
+      enabled: boolean;
+    }>`SELECT enabled FROM feature_flags WHERE key='customer_location_required'`.execute(tx);
+    if (required.rows[0]?.enabled && (address.lat === null || address.lng === null))
+      throw new Error('ADDRESS_LOCATION_REQUIRED');
     const check = await this.deps.serviceability.check(
       {
-        lat: address.lat,
-        lng: address.lng,
+        pincode: address.pincode,
+        ...(address.lat !== null && address.lng !== null
+          ? { lat: address.lat, lng: address.lng }
+          : {}),
         targetTime: now,
       },
       tx,
@@ -115,9 +130,8 @@ export class PlaceOrderSaga {
     }>`SELECT status FROM stores WHERE id=${quote.storeId}::uuid`.execute(tx);
     if (store.rows[0]?.status !== 'ONLINE' || !check.zone)
       throw new Error('ADDRESS_NOT_SERVICEABLE');
-    const zone = await sql`SELECT id FROM zones WHERE id=${check.zone.zoneId}::uuid
-      AND store_id=${quote.storeId}::uuid AND active AND version=${check.zone.zoneVersion}::bigint
-      AND ST_Covers(polygon,ST_SetSRID(ST_MakePoint(${address.lng},${address.lat}),4326)) FOR SHARE`.execute(
+    const zone = await sql`SELECT id FROM delivery_pincodes WHERE id=${check.zone.zoneId}::uuid
+      AND pincode=${address.pincode} AND store_id=${quote.storeId}::uuid AND active AND version=${check.zone.zoneVersion}::bigint FOR SHARE`.execute(
       tx,
     );
     if (!zone.rows.length) throw new Error('ADDRESS_NOT_SERVICEABLE');
@@ -140,6 +154,7 @@ export class PlaceOrderSaga {
       storeId: quote.storeId,
       addressSnapshot: {
         addressId: address.addressId,
+        coverageKind: 'PINCODE',
         zoneId: check.zone?.zoneId ?? address.zoneId,
         zoneVersion: check.zone.zoneVersion,
         cityZoneVersion: check.zone.cityZoneVersion,
@@ -150,8 +165,9 @@ export class PlaceOrderSaga {
         pincode: address.pincode,
         contactName: address.contactName,
         contactPhone: address.contactPhone,
-        lat: address.lat,
-        lng: address.lng,
+        ...(address.lat !== null && address.lng !== null
+          ? { lat: address.lat, lng: address.lng }
+          : {}),
       },
       items: quote.lines.map((line) => {
         const snapshot = catalog.get(line.variantId);
@@ -321,8 +337,8 @@ export class PlaceOrderSaga {
   > {
     const rows = await sql<{
       id: string;
-      lat: string;
-      lng: string;
+      lat: string | null;
+      lng: string | null;
       zone_id: string | null;
       line1: string;
       line2: string | null;
@@ -333,8 +349,7 @@ export class PlaceOrderSaga {
     }>`SELECT a.id::text AS id,
         ST_Y(a.point::geometry)::text AS lat, ST_X(a.point::geometry)::text AS lng,
         a.line1,a.line2,a.landmark,a.pincode,a.contact_name,a.contact_phone,
-        (SELECT z.id::text FROM zones z WHERE z.active AND ST_Covers(z.polygon, a.point)
-         ORDER BY z.priority DESC LIMIT 1) AS zone_id
+        (SELECT p.id::text FROM delivery_pincodes p WHERE p.active AND p.pincode=a.pincode) AS zone_id
       FROM addresses a WHERE a.id=${addressId}::uuid AND a.user_id=${userId}::uuid AND a.deleted_at IS NULL FOR SHARE OF a`.execute(
       tx,
     );
@@ -342,8 +357,8 @@ export class PlaceOrderSaga {
     if (!row) throw new Error('RESOURCE_NOT_FOUND');
     return {
       addressId: row.id,
-      lat: Number(row.lat),
-      lng: Number(row.lng),
+      lat: row.lat === null ? null : Number(row.lat),
+      lng: row.lng === null ? null : Number(row.lng),
       zoneId: row.zone_id,
       line1: row.line1,
       line2: row.line2,

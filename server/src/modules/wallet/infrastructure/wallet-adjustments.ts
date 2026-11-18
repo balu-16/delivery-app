@@ -1,6 +1,8 @@
 import { sql } from 'kysely';
 import { uuidV7 } from '../../../common/ids/ids.js';
 import type { Json } from '../../../platform/database/database.js';
+import type { Database } from '../../../platform/database/database.js';
+import { hashCanonical } from '../../../common/idempotency/idempotency.js';
 import type { ApprovalAction, ApprovalExecutor } from '../../compliance/contracts/approval.js';
 import { parseMoney } from '../../../common/money/money.js';
 import type {
@@ -43,11 +45,10 @@ function validRequest(payload: Json): boolean {
 }
 
 /**
- * Manual money moves (Section 24.5): maker-checker through the shared
- * approval executor (maker ADMIN, checker SUPER_ADMIN, different users); the
- * approval execution key is the wallet ledger reference, so the approved
+ * Manual money moves use the shared approval executor; the same SUPER_ADMIN
+ * may request and confirm. The approval execution key is the ledger reference, so the approved
  * adjustment applies exactly once even if approval retries. Every execution
- * writes an audit row; the adjustment itself debits cannot go negative.
+ * writes an audit row; debits cannot take the balance below zero.
  */
 export class WalletAdjustmentService implements WalletAdjustments {
   private readonly executor: ApprovalExecutor;
@@ -55,6 +56,7 @@ export class WalletAdjustmentService implements WalletAdjustments {
     primitives: WalletPrimitives,
     spender: WalletSpender,
     approvalFactory: (actions: Record<string, ApprovalAction>) => ApprovalExecutor,
+    private readonly db?: Database,
   ) {
     this.executor = approvalFactory({
       [ADJUSTMENT_ACTION]: {
@@ -82,10 +84,70 @@ export class WalletAdjustmentService implements WalletAdjustments {
       } satisfies ApprovalAction,
     });
   }
-  request(makerId: string, input: WalletAdjustmentRequest): Promise<string> {
-    return this.executor.request(makerId, ADJUSTMENT_ACTION, payloadOf(input));
+  async request(
+    makerId: string,
+    input: WalletAdjustmentRequest,
+    clientRequestId?: string,
+  ): Promise<string> {
+    if (!clientRequestId)
+      return this.executor.request(makerId, ADJUSTMENT_ACTION, payloadOf(input));
+    if (!this.db || !/^[\x21-\x7e]{1,150}$/.test(clientRequestId)) throw new Error('INVALID_INPUT');
+    const actor =
+      await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${makerId}::uuid AND u.status='ACTIVE' AND u.pool='WORKFORCE' AND r.role='SUPER_ADMIN'`.execute(
+        this.db,
+      );
+    if (!actor.rows.length) throw new Error('FORBIDDEN');
+    const payload = { ...(payloadOf(input) as Record<string, Json>), clientRequestId };
+    const existing = async () => {
+      const row = await sql<{
+        id: string;
+        payload: Json;
+      }>`SELECT id::text,payload FROM maker_checker_requests WHERE maker_id=${makerId}::uuid AND action='walletAdjustment' AND payload->>'clientRequestId'=${clientRequestId}`.execute(
+        this.db!,
+      );
+      if (!row.rows[0]) return null;
+      if (hashCanonical(row.rows[0].payload) !== hashCanonical(payload))
+        throw new Error('IDEMPOTENCY_KEY_REUSED');
+      return row.rows[0].id;
+    };
+    const prior = await existing();
+    if (prior) return prior;
+    try {
+      return await this.executor.request(makerId, ADJUSTMENT_ACTION, payload);
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === '23505'
+      ) {
+        const raced = await existing();
+        if (raced) return raced;
+      }
+      throw error;
+    }
   }
-  approve(checkerId: string, requestId: string): Promise<void> {
-    return this.executor.approve(checkerId, requestId);
+  async approve(checkerId: string, requestId: string): Promise<void> {
+    try {
+      await this.executor.approve(checkerId, requestId);
+    } catch (error) {
+      if (this.db && error instanceof Error && error.message === 'APPROVAL_INVALID') {
+        const result = await sql<{
+          status: string;
+          expired: boolean;
+        }>`SELECT m.status,m.expires_at<=clock_timestamp() AS expired
+          FROM maker_checker_requests m JOIN users u ON u.id=${checkerId}::uuid JOIN user_roles r ON r.user_id=u.id
+          WHERE m.id=${requestId}::uuid AND m.action='walletAdjustment' AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role='SUPER_ADMIN'`.execute(
+          this.db,
+        );
+        const prior = result.rows[0];
+        if (prior?.status === 'EXECUTED') return;
+        // An expired pending approval cannot execute later, so the client may
+        // safely start a new, explicitly confirmed request with a fresh key.
+        if (prior?.status === 'EXPIRED' || (prior?.status === 'PENDING' && prior.expired))
+          throw new Error('APPROVAL_EXPIRED', { cause: error });
+      }
+      throw error;
+    }
   }
 }

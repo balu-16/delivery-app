@@ -153,8 +153,12 @@ export interface WalletAdjustmentRequest {
 }
 /** Manual money moves require maker-checker (Section 24.5) and audit records. */
 export interface WalletAdjustments {
-  request(makerId: string, input: WalletAdjustmentRequest): Promise<string>;
-  /** A different authorized checker approves and executes the adjustment. */
+  request(
+    makerId: string,
+    input: WalletAdjustmentRequest,
+    clientRequestId?: string,
+  ): Promise<string>;
+  /** A permitted admin confirms and executes the adjustment. */
   approve(checkerId: string, requestId: string): Promise<void>;
 }
 export type WalletEventPayload = Json;
