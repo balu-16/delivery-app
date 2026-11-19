@@ -3,13 +3,19 @@ import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
 import { hashCanonical } from '../../../common/idempotency/idempotency.js';
 import { uuidV7 } from '../../../common/ids/ids.js';
-import type { Database, Json } from '../../../platform/database/database.js';
+import type { Database, Json, TransactionContext } from '../../../platform/database/database.js';
 import type { AddressOperations } from '../../addresses/contracts/addresses.js';
 import type { CartService } from '../../cart/contracts/cart.js';
 import type { Support } from '../../support/contracts/support.js';
 import { assertQuantity, sanitizeAgentText } from './guards.js';
 import type { AgentToolKit } from './tool-kit.js';
-import { requireAgentPermission, assertAgentCommitAllowed } from './security.js';
+import { requireAgentPermission, assertAgentCommitAllowed, lockAgentThread } from './security.js';
+import {
+  assertWriteCandidate,
+  requestedAddQuantity,
+  stableOperationHash,
+  type AgentCandidateStore,
+} from './product-candidates.js';
 
 interface Dependencies {
   db: Database;
@@ -24,48 +30,68 @@ interface Context {
   maxQuantity: number;
   userText?: string;
   clientMessageId?: string;
+  candidates?: AgentCandidateStore;
+}
+interface CartWriteOptions {
+  noteId?: string;
+  displayedCardPrice?: string;
+  /** A confirmed choice joins the caller's locked transaction. */
+  tx?: TransactionContext;
 }
 
 /** Absolute quantity writes are audited and replayed by the model's tool-call id. */
 async function writeAgentCart(
   deps: Dependencies,
   context: Context,
-  input: { variantId: string; quantity: number; addressId?: string; mode: 'set' | 'add' },
+  input: {
+    variantId: string;
+    quantity: number;
+    addressId?: string;
+    displayedUnitPricePaise?: string;
+    mode: 'set' | 'add';
+  },
   toolCallId: string,
-  noteId?: string,
+  { noteId, displayedCardPrice, tx: choiceTx }: CartWriteOptions = {},
 ) {
   assertQuantity(input.quantity, context.maxQuantity, input.mode === 'set');
   if (!toolCallId || toolCallId.length > 200) throw new Error('INVALID_INPUT');
-  const addresses = await deps.addresses.list(context.userId);
-  const current = await deps.cart.get(context.userId);
-  const address = input.addressId
-    ? addresses.find((item) => item.id === input.addressId)
-    : (addresses.find((item) => item.isDefault) ??
-      addresses.find((item) => item.id === current?.addressId));
-  if (!address) throw new Error(input.addressId ? 'ADDRESS_NOT_FOUND' : 'ADDRESS_REQUIRED');
-  const hash = hashCanonical(input);
-  return deps.db.transaction().execute(async (tx) => {
-    const user =
-      await sql`SELECT id FROM users WHERE id=${context.userId}::uuid AND status='ACTIVE' FOR UPDATE`.execute(
-        tx,
-      );
-    if (!user.rows.length) throw new Error('ACCOUNT_DISABLED');
-    await requireAgentPermission(context.userId, tx);
-    const thread = await sql<{
-      status: string;
-    }>`SELECT status FROM agent_threads WHERE id=${context.threadId}::uuid AND user_id=${context.userId}::uuid FOR UPDATE`.execute(
-      tx,
-    );
-    if (!thread.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
-    if (thread.rows[0].status !== 'active') throw new Error('THREAD_ARCHIVED');
-    if (noteId) {
-      const active =
-        await sql`SELECT 1 FROM agent_jobs WHERE thread_id=${context.threadId}::uuid AND user_id=${context.userId}::uuid AND state IN ('queued','running') LIMIT 1`.execute(
-          tx,
-        );
-      if (active.rows.length) throw new Error('RUN_IN_PROGRESS');
+  // Model-initiated writes must name a variant the server resolved for this
+  // same message; explicit taps on an owned product card (noteId) keep the
+  // existing card-action checks instead.
+  const guarded =
+    !noteId && context.candidates !== undefined && context.clientMessageId !== undefined;
+  if (guarded) {
+    const candidates = context.candidates!.get(context.userId, context.clientMessageId!);
+    const match = assertWriteCandidate(candidates, input);
+    const quantity = context.userText
+      ? requestedAddQuantity(context.userText, match, candidates!)
+      : null;
+    if (quantity !== null) {
+      assertQuantity(quantity, context.maxQuantity, false);
+      if (quantity > match.maxPerOrder) throw new Error('INVALID_QUANTITY');
+      input = { ...input, mode: 'add', quantity, displayedUnitPricePaise: match.sellingPaise };
     }
-    await assertAgentCommitAllowed(tx, context.userId, context.threadId);
+  }
+  if (
+    !choiceTx &&
+    input.addressId &&
+    !(await deps.addresses.list(context.userId)).some((item) => item.id === input.addressId)
+  )
+    throw new Error('ADDRESS_NOT_FOUND');
+  const hash = guarded
+    ? stableOperationHash({
+        messageId: context.clientMessageId!,
+        variantId: input.variantId,
+        quantity: input.quantity,
+        mode: input.mode,
+        ...(input.addressId ? { addressId: input.addressId } : {}),
+        ...((input.displayedUnitPricePaise ?? displayedCardPrice)
+          ? { displayedUnitPricePaise: (input.displayedUnitPricePaise ?? displayedCardPrice)! }
+          : {}),
+      })
+    : hashCanonical(input);
+  const write = async (tx: TransactionContext) => {
+    if (!choiceTx) await lockAgentThread(tx, context.userId, context.threadId);
     const prior = await sql<{
       request_hash: string;
       result: Json;
@@ -76,7 +102,21 @@ async function writeAgentCart(
       if (prior.rows[0].request_hash !== hash) throw new Error('IDEMPOTENCY_KEY_REUSED');
       return prior.rows[0].result;
     }
-    const cart = await deps.cart.getOrCreateActiveCart(context.userId, address.id, tx);
+    if (guarded) {
+      const duplicate = await sql<{
+        result: Json;
+      }>`SELECT result FROM agent_tool_operations WHERE thread_id=${context.threadId}::uuid AND user_id=${context.userId}::uuid AND request_hash=${hash} LIMIT 1`.execute(
+        tx,
+      );
+      if (duplicate.rows[0]) return duplicate.rows[0].result;
+    }
+    const cart = await deps.cart.getOrCreateActiveCart(
+      context.userId,
+      choiceTx ? input.addressId : undefined,
+      tx,
+    );
+    if (choiceTx && cart.addressId !== (input.addressId ?? null))
+      throw new Error('CONCURRENT_MODIFICATION');
     const quantity =
       input.mode === 'add'
         ? Number(cart.lines.find((line) => line.variantId === input.variantId)?.quantity ?? 0) +
@@ -85,7 +125,8 @@ async function writeAgentCart(
     assertQuantity(quantity, context.maxQuantity, input.mode === 'set');
     const updated = await deps.cart.putItem(context.userId, input.variantId, String(quantity), {
       expectedVersion: cart.version,
-      addressId: address.id,
+      displayedUnitPricePaise: input.displayedUnitPricePaise ?? displayedCardPrice,
+      ...(choiceTx ? { acceptPriceChange: true, requireAvailableQuantity: true } : {}),
       tx,
     });
     const result = {
@@ -115,12 +156,18 @@ async function writeAgentCart(
       tx,
     );
     return result;
-  });
+  };
+  return choiceTx ? write(choiceTx) : deps.db.transaction().execute(write);
 }
 export function setAgentCartQuantity(
   deps: Dependencies,
   context: Context,
-  input: { variantId: string; quantity: number; addressId?: string },
+  input: {
+    variantId: string;
+    quantity: number;
+    addressId?: string;
+    displayedUnitPricePaise?: string;
+  },
   toolCallId: string,
 ) {
   return writeAgentCart(deps, context, { ...input, mode: 'set' }, toolCallId);
@@ -128,18 +175,23 @@ export function setAgentCartQuantity(
 export function addAgentCartItem(
   deps: Dependencies,
   context: Context,
-  input: { variantId: string; quantity: number; addressId?: string },
+  input: {
+    variantId: string;
+    quantity: number;
+    addressId?: string;
+    displayedUnitPricePaise?: string;
+  },
   toolCallId: string,
-  noteId?: string,
+  options?: CartWriteOptions,
 ) {
-  return writeAgentCart(deps, context, { ...input, mode: 'add' }, toolCallId, noteId);
+  return writeAgentCart(deps, context, { ...input, mode: 'add' }, toolCallId, options);
 }
 
 export function createWriteTools(deps: Dependencies, context: Context, kit: AgentToolKit) {
   return [
     kit.define(
       'save_address',
-      'Save a written address only when the customer explicitly asks you to add or save it and supplies the street, PIN, contact name and Indian mobile number in their current message. Never invent a location or any field. The address is saved without a delivery location; the customer must confirm the location before shopping at that address.',
+      'Save a written address only when the customer explicitly asks you to add or save it and supplies the street, PIN, contact name and Indian mobile number in their current message. Never invent a location or any field. The address is saved without a delivery location; if required, the customer confirms the location before ordering.',
       z.object({
         line1: z.string().min(1).max(200),
         line2: z.string().max(200).optional(),
@@ -238,11 +290,16 @@ export function createWriteTools(deps: Dependencies, context: Context, kit: Agen
     ),
     kit.define(
       'set_cart_item_qty',
-      'Set the absolute quantity of a product after the customer asks to change the cart. Use zero only when explicitly asked to remove an item.',
+      'Set the absolute quantity of a product after the customer asks to change the cart. Use only a variant id from the exact matches returned by product search for this same message. For a new item, pass the current displayed price returned by search. Use zero only when explicitly asked to remove an item.',
       z.object({
         variantId: z.string().uuid().describe('A product variant id returned by search'),
         quantity: z.number().int().min(0).describe('Desired total quantity; zero removes the item'),
         addressId: z.string().uuid().optional().describe('Optional saved address id'),
+        displayedUnitPricePaise: z
+          .string()
+          .regex(/^(0|[1-9][0-9]{0,11})$/)
+          .optional()
+          .describe('Current sellingPaise returned by product search'),
       }),
       async (input, runtime) => setAgentCartQuantity(deps, context, input, runtime.toolCallId),
     ),

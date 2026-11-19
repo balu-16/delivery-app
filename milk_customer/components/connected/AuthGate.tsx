@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { KeyboardAvoidingView, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { AppState, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FormSkeleton } from '@/components/animations/Skeleton';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
-import { Screen } from '@/components/ui/Screen';
 import { colors, fonts } from '@/constants/theme';
 import { images } from '@/constants/assets';
 import { AuthError } from '@/src/auth/cognito';
@@ -22,7 +23,12 @@ type Notice = { text: string; error: boolean };
 type Field = 'name' | 'email' | 'phone' | 'password' | 'newPassword' | 'code' | 'referral';
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { status, initialize, load, logout, error } = useCustomer();
+  const status = useCustomer(state => state.status);
+  const initialize = useCustomer(state => state.initialize);
+  const load = useCustomer(state => state.load);
+  const logout = useCustomer(state => state.logout);
+  const error = useCustomer(state => state.status === 'unavailable' ? state.error : null);
+  const checkPendingPlacement = useCustomer(state => state.checkPendingPlacement);
   const insets = useSafeAreaInsets();
   const [stage, setStage] = useState<Stage>('login');
   const [name, setName] = useState('');
@@ -34,11 +40,22 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [code, setCode] = useState('');
   const [referral, setReferral] = useState('');
   const [skipReferral, setSkipReferral] = useState(false);
+  const [showReferral, setShowReferral] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [fields, setFields] = useState<Partial<Record<Field, string>>>({});
   useEffect(() => { void initialize(); }, [initialize]);
   useEffect(() => () => cancelPasswordChange(), []);
+  useEffect(() => {
+    if (status !== 'signedIn') return;
+    let previous = AppState.currentState;
+    const subscription = AppState.addEventListener('change', next => {
+      if (next === 'active' && previous !== 'active') void checkPendingPlacement();
+      previous = next;
+    });
+    return () => subscription.remove();
+  }, [status, checkPendingPlacement]);
   if (status === 'signedIn') return <>{children}</>;
 
   const handleLogin = async (result: LoginResult) => {
@@ -126,50 +143,78 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const goTo = (next: Stage) => {
     cancelPasswordChange(); setNewPassword(''); setRequired([]); setStage(next); setNotice(null); setSkipReferral(false); setFields({});
   };
-  const title = stage === 'signup' ? 'Create your account' : stage === 'verify' ? 'Verify your email' : stage === 'forgot' ? 'Reset your password' : stage === 'reset' || stage === 'newPassword' ? 'Choose a new password' : 'Welcome to DairyDirect';
+  const title = stage === 'signup' ? 'Create account' : stage === 'verify' ? 'Verify your email' : stage === 'forgot' ? 'Reset your password' : stage === 'reset' || stage === 'newPassword' ? 'Choose a new password' : 'Customer Login';
   const label = stage === 'login' ? 'Sign in' : stage === 'signup' ? 'Create account' : stage === 'verify' ? 'Verify email' : stage === 'forgot' ? 'Send reset code' : 'Update password';
   const clear = (field: Field) => setFields(previous => ({ ...previous, [field]: undefined }));
   const fieldError = (field: Field) => fields[field] ? <AppText accessibilityLiveRegion="polite" style={styles.errorText}>{fields[field]}</AppText> : null;
 
-  return <Screen><KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}><View style={[styles.page, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 24 }]}>
-    <Image source={images.logoEmblem} style={styles.logo} contentFit="contain" />
-    <AppText style={styles.title}>{title}</AppText>
-    <AppText style={styles.subtitle}>Sign in to see your deliveries, dairy and wallet.</AppText>
-    {status === 'loading' ? <View style={styles.card}><FormSkeleton label="Restoring your account" /></View> : <ScrollView style={styles.formScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-    {status === 'unavailable' ? <View style={styles.card}>
-      <AppText style={styles.body}>{error ?? 'The service is temporarily unavailable.'}</AppText>
-      <Button label="Try again" onPress={() => void initialize()} fullWidth />
-      <Button label="Sign out" variant="soft" onPress={() => void logout()} fullWidth />
-    </View> : <View style={styles.card}>
-      {(stage === 'signup' || (stage === 'newPassword' && required.includes('name'))) && <><TextInput style={[styles.input, fields.name && styles.invalid]} value={name} onChangeText={value => { setName(value); clear('name'); }} placeholder="Your name" autoComplete="name" accessibilityLabel="Your name" />{fieldError('name')}</>}
-      <TextInput style={[styles.input, fields.email && styles.invalid]} value={email} onChangeText={value => { setEmail(value); clear('email'); }} placeholder="Email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" accessibilityLabel="Email address" editable={stage !== 'newPassword'} />{fieldError('email')}
-      {stage === 'newPassword' && required.includes('phone_number') && <><View style={[styles.input, styles.phoneRow, fields.phone && styles.invalid]}><AppText style={styles.prefix}>+91</AppText><TextInput style={styles.phoneInput} value={phone} onChangeText={value => { setPhone(indianPhoneInput(value)); clear('phone'); }} placeholder="10-digit phone number" keyboardType="phone-pad" autoComplete="tel-national" accessibilityLabel="Phone number" /></View>{fieldError('phone')}</>}
-      {(stage === 'login' || stage === 'signup' || stage === 'reset') && <><TextInput style={[styles.input, fields.password && styles.invalid]} value={password} onChangeText={value => { setPassword(value); clear('password'); }} placeholder={stage === 'reset' ? 'New password' : 'Password'} secureTextEntry autoComplete={stage === 'login' ? 'current-password' : 'new-password'} accessibilityLabel={stage === 'reset' ? 'New password' : 'Password'} />{fieldError('password')}</>}
-      {stage === 'newPassword' && <><TextInput style={[styles.input, fields.newPassword && styles.invalid]} value={newPassword} onChangeText={value => { setNewPassword(value); clear('newPassword'); }} placeholder="New password" secureTextEntry autoComplete="new-password" accessibilityLabel="New password" />{fieldError('newPassword')}</>}
-      {(stage === 'login' || stage === 'signup') && <><TextInput style={[styles.input, fields.referral && styles.invalid]} value={referral} onChangeText={value => { setReferral(value); clear('referral'); }} placeholder="Referral code (optional for new accounts)" autoCapitalize="characters" maxLength={16} accessibilityLabel="Referral code" />{fieldError('referral')}</>}
-      {(stage === 'verify' || stage === 'reset') && <><TextInput style={[styles.input, fields.code && styles.invalid]} value={code} onChangeText={value => { setCode(value); clear('code'); }} placeholder={stage === 'reset' ? 'Password reset code' : 'Email verification code'} keyboardType="number-pad" accessibilityLabel={stage === 'reset' ? 'Password reset code' : 'Verification code'} />{fieldError('code')}</>}
-      {notice && <View accessibilityLiveRegion="polite" style={[styles.notice, notice.error ? styles.errorNotice : styles.infoNotice]}><AppText style={[styles.body, notice.error && styles.errorText]}>{notice.text}</AppText></View>}
-      <Button label={label} fullWidth onPress={() => void submit()} loading={pending} disabled={pending} />
-      {skipReferral && <Button label="Sign in without referral" variant="soft" fullWidth disabled={pending || !email.trim() || !password} onPress={() => void submit(true)} />}
-      {stage === 'verify' && <Button label="Resend verification code" variant="ghost" fullWidth disabled={pending || !email.trim()} onPress={() => void resend()} />}
-      {stage === 'login' ? <><Button label="Create account" variant="soft" fullWidth disabled={pending} onPress={() => goTo('signup')} /><Button label="Verify email" variant="ghost" fullWidth disabled={pending} onPress={() => goTo('verify')} /><Button label="Forgot password?" variant="ghost" fullWidth disabled={pending} onPress={() => goTo('forgot')} /></> : <Button label="Back to sign in" variant="soft" fullWidth disabled={pending} onPress={() => goTo('login')} />}
-    </View>}
-    </ScrollView>}
-  </View></KeyboardAvoidingView></Screen>;
+  const authScreen = (
+    <View style={styles.root}>
+      <View style={styles.background} pointerEvents="none">
+        <Image source={images.authCountryside} style={StyleSheet.absoluteFill} contentFit="cover" />
+        <LinearGradient colors={[colors.background, 'rgba(251,243,231,0.65)', 'rgba(251,243,231,0)']} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
+      </View>
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        <ScrollView style={styles.formScroll} contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <View style={styles.brand}>
+            <Image source={images.authLogo} style={styles.authLogo} contentFit="contain" />
+            <AppText style={styles.brandText}>DairyDirect</AppText>
+          </View>
+          <AppText style={styles.title}>{title}</AppText>
+          {stage !== 'login' && stage !== 'signup' ? <AppText style={styles.subtitle}>Use the code sent to your email to continue.</AppText> : null}
+          {status === 'loading' ? <View style={styles.card}><FormSkeleton label="Restoring your account" /></View> : status === 'unavailable' ? <View style={styles.card}>
+            <AppText style={styles.body}>{error ?? 'The service is temporarily unavailable.'}</AppText>
+            <Button label="Try again" onPress={() => void initialize()} fullWidth />
+            <Button label="Sign out" variant="soft" onPress={() => void logout()} fullWidth />
+          </View> : <View style={styles.form}>
+            {(stage === 'signup' || (stage === 'newPassword' && required.includes('name'))) && <><View style={[styles.field, fields.name && styles.invalid]}><Ionicons name="person-outline" size={20} color={colors.textSecondary} /><TextInput style={styles.inputText} value={name} onChangeText={value => { setName(value); clear('name'); }} placeholder="Your name" autoComplete="name" accessibilityLabel="Your name" /></View>{fieldError('name')}</>}
+            <View style={[styles.field, fields.email && styles.invalid]}><Ionicons name="mail-outline" size={20} color={colors.textSecondary} /><TextInput style={styles.inputText} value={email} onChangeText={value => { setEmail(value); clear('email'); }} placeholder="Email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" accessibilityLabel="Email address" editable={stage !== 'newPassword'} /></View>{fieldError('email')}
+            {stage === 'newPassword' && required.includes('phone_number') && <><View style={[styles.field, fields.phone && styles.invalid]}><AppText style={styles.prefix}>+91</AppText><TextInput style={[styles.inputText, { paddingVertical: 0 }]} value={phone} onChangeText={value => { setPhone(indianPhoneInput(value)); clear('phone'); }} placeholder="10-digit phone number" keyboardType="phone-pad" autoComplete="tel-national" accessibilityLabel="Phone number" /></View>{fieldError('phone')}</>}
+            {(stage === 'login' || stage === 'signup' || stage === 'reset') && <><View style={[styles.field, fields.password && styles.invalid]}><Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} /><TextInput style={styles.inputText} value={password} onChangeText={value => { setPassword(value); clear('password'); }} placeholder={stage === 'reset' ? 'New password' : 'Password'} secureTextEntry={!showPassword} autoComplete={stage === 'login' ? 'current-password' : 'new-password'} accessibilityLabel={stage === 'reset' ? 'New password' : 'Password'} /><Pressable onPress={() => setShowPassword(value => !value)} accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide password' : 'Show password'} hitSlop={8}><Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={21} color={colors.textSecondary} /></Pressable></View>{fieldError('password')}</>}
+            {stage === 'newPassword' && <><View style={[styles.field, fields.newPassword && styles.invalid]}><Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} /><TextInput style={styles.inputText} value={newPassword} onChangeText={value => { setNewPassword(value); clear('newPassword'); }} placeholder="New password" secureTextEntry={!showPassword} autoComplete="new-password" accessibilityLabel="New password" /><Pressable onPress={() => setShowPassword(value => !value)} accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide password' : 'Show password'} hitSlop={8}><Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={21} color={colors.textSecondary} /></Pressable></View>{fieldError('newPassword')}</>}
+            {(stage === 'login' || stage === 'signup') && <View style={styles.linkRow}>
+              <Pressable onPress={() => setShowReferral(value => !value)} accessibilityRole="button" accessibilityLabel={showReferral ? 'Hide referral code' : 'Add referral code'} hitSlop={6}><AppText style={styles.link}>{showReferral ? 'Hide referral code' : 'Add referral code'}</AppText></Pressable>
+              {stage === 'login' && <Pressable onPress={() => goTo('forgot')} accessibilityRole="button" accessibilityLabel="Forgot password?" hitSlop={6}><AppText style={styles.link}>Forgot password?</AppText></Pressable>}
+            </View>}
+            {(stage === 'login' || stage === 'signup') && showReferral && <><View style={[styles.field, fields.referral && styles.invalid]}><Ionicons name="ticket-outline" size={20} color={colors.textSecondary} /><TextInput style={styles.inputText} value={referral} onChangeText={value => { setReferral(value); clear('referral'); }} placeholder="Referral code (optional)" autoCapitalize="characters" maxLength={16} accessibilityLabel="Referral code" /></View>{fieldError('referral')}</>}
+            {(stage === 'verify' || stage === 'reset') && <><View style={[styles.field, fields.code && styles.invalid]}><Ionicons name="key-outline" size={20} color={colors.textSecondary} /><TextInput style={styles.inputText} value={code} onChangeText={value => { setCode(value); clear('code'); }} placeholder={stage === 'reset' ? 'Password reset code' : 'Email verification code'} keyboardType="number-pad" accessibilityLabel={stage === 'reset' ? 'Password reset code' : 'Verification code'} /></View>{fieldError('code')}</>}
+            {notice && <View accessibilityLiveRegion="polite" style={[styles.notice, notice.error ? styles.errorNotice : styles.infoNotice]}><AppText style={[styles.body, notice.error && styles.errorText]}>{notice.text}</AppText></View>}
+            <Button label={label} fullWidth onPress={() => void submit()} loading={pending} disabled={pending} style={styles.primaryBtn} />
+            {skipReferral && <Button label="Sign in without referral" variant="soft" fullWidth disabled={pending || !email.trim() || !password} onPress={() => void submit(true)} />}
+            {stage === 'verify' && <Button label="Resend verification code" variant="ghost" fullWidth disabled={pending || !email.trim()} onPress={() => void resend()} />}
+            {stage === 'login' ? <><View style={styles.footerRow}><AppText style={styles.footerText}>New here? </AppText><Pressable onPress={() => goTo('signup')} accessibilityRole="button" accessibilityLabel="Create account"><AppText style={styles.link}>Create account</AppText></Pressable></View><Pressable style={styles.footerCenter} onPress={() => goTo('verify')} accessibilityRole="button" accessibilityLabel="Verify email"><AppText style={styles.link}>Verify email</AppText></Pressable></> : stage === 'signup' ? <View style={styles.footerRow}><AppText style={styles.footerText}>Already have an account? </AppText><Pressable onPress={() => goTo('login')} accessibilityRole="button" accessibilityLabel="Sign in"><AppText style={styles.link}>Sign in</AppText></Pressable></View> : <Button label="Back to sign in" variant="soft" fullWidth disabled={pending} onPress={() => goTo('login')} />}
+          </View>}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
+  return authScreen;
 }
+
 const styles = StyleSheet.create({
-  page: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 22, gap: 12 },
-  formScroll: { width: '100%', maxWidth: 420, flexGrow: 0, flexShrink: 1 },
-  logo: { width: 85, height: 78 }, title: { fontFamily: fonts.bold, fontSize: 25, color: colors.brownDark, textAlign: 'center' },
+  root: { flex: 1, backgroundColor: colors.background },
+  background: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '54%' },
+  formScroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 24, gap: 14 },
+  brand: { alignItems: 'center', gap: 2 },
+  authLogo: { width: 150, height: 76 },
+  brandText: { fontFamily: fonts.bold, fontSize: 26, lineHeight: 32, color: colors.greenDark },
+  title: { fontFamily: fonts.bold, fontSize: 27, lineHeight: 34, color: colors.greenDark },
   subtitle: { color: colors.textSecondary, textAlign: 'center', fontSize: 13 },
-  card: { width: '100%', maxWidth: 420, padding: 18, borderRadius: 20, backgroundColor: colors.surfaceRaised, gap: 12, borderWidth: 1, borderColor: colors.line },
-  input: { minHeight: 48, borderWidth: 1, borderColor: colors.lineStrong, backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 12, color: colors.text },
+  card: { width: '100%', padding: 18, borderRadius: 20, backgroundColor: colors.surfaceRaised, gap: 12, borderWidth: 1, borderColor: colors.line },
+  form: { gap: 12 },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 54, borderWidth: 1, borderColor: colors.lineStrong, backgroundColor: 'rgba(255,252,246,0.92)', borderRadius: 14, paddingHorizontal: 14 },
   invalid: { borderColor: colors.danger },
-  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  inputText: { flex: 1, minHeight: 52, color: colors.text, fontSize: 15 },
   prefix: { color: colors.text, borderRightWidth: 1, borderRightColor: colors.lineStrong, paddingRight: 10 },
-  phoneInput: { flex: 1, minHeight: 48, color: colors.text, paddingVertical: 0 },
   body: { color: colors.textSecondary, fontSize: 13, lineHeight: 20 },
   notice: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
   errorNotice: { backgroundColor: colors.dangerSoft }, infoNotice: { backgroundColor: colors.greenSoft },
   errorText: { color: colors.danger },
+  linkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  link: { color: colors.green, fontFamily: fonts.semibold, fontSize: 14, textDecorationLine: 'underline' },
+  primaryBtn: { borderRadius: 14 },
+  footerRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 8 },
+  footerCenter: { alignSelf: 'center', marginTop: 6 },
+  footerText: { color: colors.text, fontSize: 14 },
 });

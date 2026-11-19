@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { OrderCodeService } from '../../../src/modules/orders/infrastructure/delivery-codes.js';
 import { PostgresLocationIngest } from '../../../src/modules/tracking/infrastructure/postgres-location-ingest.js';
 import { ActiveOrderResolverHolder } from '../../../src/modules/tracking/contracts/tracking.js';
@@ -13,7 +14,7 @@ import {
   type Json,
 } from '../../../src/platform/database/database.js';
 import { consumeOnce } from '../../../src/platform/events/consume.js';
-import { envSchema } from '../../../src/config/env.schema.js';
+import { envSchema, readEnv } from '../../../src/config/env.schema.js';
 import { ConfigService } from '../../../src/config/config.service.js';
 import { DatabaseIdentityAccess } from '../../../src/modules/identity/infrastructure/identity-access.js';
 import { PostgresPacking } from '../../../src/modules/picking/infrastructure/postgres-packing.js';
@@ -56,6 +57,10 @@ import type {
   OrderDeliverySummary,
   OrderSystemCancel,
 } from '../../../src/modules/dispatch/contracts/dependencies.js';
+import { OlaMaps } from '../../../src/adapters/maps/ola.js';
+import { ResilientMaps } from '../../../src/adapters/maps/resilient.js';
+import { buildOlaConfig } from '../../../src/adapters/maps/config.js';
+import type { MapsPort } from '../../../src/modules/serviceability/contracts/maps.js';
 
 let services: TestServices,
   db: DatabaseHandle,
@@ -72,6 +77,8 @@ let services: TestServices,
   consumer: OrderConfirmedConsumer,
   trigger: PickTriggerConsumer,
   packing: PostgresPacking;
+
+if (process.env.AWS_P13_INTEGRATION === 'yes') jest.setTimeout(300000);
 
 const deliveredOrders: string[] = [];
 const failedOrders: { orderId: string; reason: string }[] = [];
@@ -280,9 +287,18 @@ test('holds prevent dispatch, offer acceptance and manual assignment until resum
 
 /** Per-test isolation: the suite shares one world, so operational state resets. */
 beforeEach(async () => {
-  await sql`UPDATE rider_status SET online=true,active_tasks=0,idle_since=clock_timestamp() - interval '10 minutes',unreachable_since=NULL`.execute(
+  // Locations must stay fresh: eligibility rejects PG points older than
+  // riderStaleLocationSeconds and GEO hashes TTL fast, while a slow AWS run
+  // outlasts a single beforeAll seed.
+  await sql`UPDATE rider_status SET online=true,active_tasks=0,idle_since=clock_timestamp() - interval '10 minutes',unreachable_since=NULL,last_location_at=clock_timestamp(),last_heartbeat_at=clock_timestamp()`.execute(
     db.db,
   );
+  for (const rider of [world.rider1, world.rider2, world.rider3])
+    await geo.updateMember(
+      rider,
+      { lat: world.storeLat, lng: world.storeLng, ts: new Date().toISOString() },
+      300,
+    );
   await sql`UPDATE rider_offers SET status='EXPIRED' WHERE status='SENT'`.execute(db.db);
   await sql`UPDATE delivery_tasks SET status='CANCELLED',cancel_reason='suite reset',rider_id=NULL,offered_rider_id=NULL WHERE status IN ('UNASSIGNED','OFFERED','ASSIGNED','AT_STORE','PICKED_UP','ARRIVED')`.execute(
     db.db,
@@ -299,12 +315,21 @@ beforeAll(async () => {
     migrationsTable: 'pgmigrations',
   });
   db = createDatabase(services.databaseUrl, 30);
-  redis = new Redis(services.redisUrl, { lazyConnect: false });
+  redis = new Redis(services.redisUrl, {
+    lazyConnect: false,
+    keyPrefix: `${services.redisPrefix}:`,
+  });
   world = await seedDispatchWorld(db);
   const config = fakeConfig();
   settings = new DispatchSettings(config);
   broadcasts = new BroadcastRecorder();
-  geo = new RedisRiderGeo(redis);
+  // Unique GEO namespace per run: GEO members outlive their freshness hashes,
+  // so the shared namespace accumulates stale members that crowd fresh riders
+  // out of the COUNT-limited search.
+  geo = new RedisRiderGeo(
+    redis,
+    `t${Date.now().toString(36)}${uuidV7().replaceAll('-', '').slice(0, 8)}`,
+  );
   const riderSettings = new RiderSettings(config);
   const identity = new DatabaseIdentityAccess(db.db);
   const runtime = new ConfigService(envSchema.parse({}));
@@ -920,4 +945,331 @@ test('scheduled dispatch stays gated and no-rider age begins at release', async 
     status: string;
   }>`SELECT status FROM delivery_tasks WHERE order_id=${order.orderId}::uuid`.execute(db.db);
   expect(task.rows[0]!.status).not.toBe('CANCELLED');
+});
+
+test('plan4: reversed trigger and confirmation still releases and offers once', async () => {
+  const order = await emitConfirmedOrder(db, world);
+  await sql`UPDATE orders SET status='PICKING' WHERE id=${order.orderId}::uuid`.execute(db.db);
+  const event = await sql<{
+    payload: unknown;
+  }>`SELECT payload FROM outbox_events WHERE id=${order.eventId}::uuid`.execute(db.db);
+  const handle = () =>
+    consumeOnce(db.db, order.eventId, 'dispatch', async (tx) =>
+      consumer.handle(
+        tx,
+        envelope(order.eventId, 'ORDER_CONFIRMED', order.orderId, event.rows[0]!.payload),
+      ),
+    );
+  await handle();
+  await handle();
+  const tasks = await sql<{
+    count: string;
+    released: Date | null;
+  }>`SELECT count(*)::text AS count, max(released_at) AS released FROM delivery_tasks WHERE order_id=${order.orderId}::uuid`.execute(
+    db.db,
+  );
+  expect(tasks.rows[0]!.count).toBe('1');
+  expect(tasks.rows[0]!.released).not.toBeNull();
+  const started = Date.now();
+  expect(await engine.dispatchOne(order.orderId)).toBe('OFFERED');
+  expect(Date.now() - started).toBeGreaterThanOrEqual(0);
+});
+
+test('plan4: reconciliation releases missed triggers but respects holds and schedules', async () => {
+  const ready = await confirmOrder();
+  await sql`UPDATE orders SET status='PICKING' WHERE id=${ready.orderId}::uuid`.execute(db.db);
+  const held = await confirmOrder();
+  await sql`UPDATE orders SET status='PICKING' WHERE id=${held.orderId}::uuid`.execute(db.db);
+  await new OrderHoldService(db.db).set(held.orderId, world.admin, true, 'review');
+  const scheduled = await confirmOrder();
+  await sql`UPDATE orders SET status='PICKING' WHERE id=${scheduled.orderId}::uuid`.execute(db.db);
+  await sql`UPDATE delivery_tasks SET dispatch_not_before=clock_timestamp()+interval '1 hour' WHERE order_id=${scheduled.orderId}::uuid`.execute(
+    db.db,
+  );
+  const queued = await sql<{
+    n: string;
+  }>`SELECT count(*)::text AS n FROM delivery_tasks WHERE order_id IN (${ready.orderId}::uuid,${held.orderId}::uuid,${scheduled.orderId}::uuid) AND next_dispatch_at='infinity'::timestamptz`.execute(
+    db.db,
+  );
+  expect(queued.rows[0]!.n).toBe('3');
+  expect(await engine.reconcileStuckTasks()).toBeGreaterThanOrEqual(1);
+  const released = await sql<{
+    order_id: string;
+  }>`SELECT order_id FROM delivery_tasks WHERE order_id IN (${ready.orderId}::uuid,${held.orderId}::uuid,${scheduled.orderId}::uuid) AND next_dispatch_at<>'infinity'::timestamptz`.execute(
+    db.db,
+  );
+  expect(released.rows.map((row) => row.order_id)).toEqual([ready.orderId]);
+  expect(await engine.dispatchOne(ready.orderId)).toBe('OFFERED');
+});
+
+test('plan4: expired offers cool down among ten riders and stale GPS is skipped', async () => {
+  const extra: string[] = [];
+  for (let index = 0; index < 7; index++) {
+    const rider = uuidV7();
+    extra.push(rider);
+    await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${rider}::uuid,'WORKFORCE',${rider},${`plan4rider${index}@example.invalid`},${`plan4rider${index}`})`.execute(
+      db.db,
+    );
+    await sql`INSERT INTO user_roles(user_id,role) VALUES(${rider}::uuid,'RIDER')`.execute(db.db);
+    await sql`INSERT INTO rider_profiles(user_id,status,vehicle_type,vehicle_no) VALUES(${rider}::uuid,'APPROVED','SCOOTER',${`KA-9${index}`})`.execute(
+      db.db,
+    );
+    await sql`INSERT INTO rider_status(rider_id,online,last_heartbeat_at,last_location,last_location_at,last_location_source,active_tasks,idle_since)
+      VALUES(${rider}::uuid,true,clock_timestamp(),ST_SetSRID(ST_MakePoint(${world.storeLng + 0.001 * (index + 1)}, ${world.storeLat}),4326)::geography,
+      clock_timestamp() - interval '5 seconds','GPS',0,clock_timestamp() - interval '10 minutes')`.execute(
+      db.db,
+    );
+    await geo.updateMember(
+      rider,
+      {
+        lat: world.storeLat,
+        lng: world.storeLng + 0.001 * (index + 1),
+        ts: new Date().toISOString(),
+      },
+      120,
+    );
+  }
+  await sql`UPDATE rider_status SET last_location_at=clock_timestamp()-interval '1 hour' WHERE rider_id=${extra[0]!}::uuid`.execute(
+    db.db,
+  );
+  const order = await confirmOrder();
+  await releaseAndDispatch(order.orderId);
+  const first = await sql<{
+    rider_id: string;
+    id: string;
+  }>`SELECT rider_id,id FROM rider_offers WHERE task_id=(SELECT id FROM delivery_tasks WHERE order_id=${order.orderId}::uuid) AND status='SENT' ORDER BY sent_at DESC LIMIT 1`.execute(
+    db.db,
+  );
+  expect(first.rows).toHaveLength(1);
+  expect(first.rows[0]!.rider_id).not.toBe(extra[0]!);
+  await sql`UPDATE rider_offers SET expires_at=clock_timestamp()-interval '1 second' WHERE id=${first.rows[0]!.id}::uuid`.execute(
+    db.db,
+  );
+  expect(await engine.expireOffers()).toBeGreaterThanOrEqual(1);
+  expect(await engine.dispatchOne(order.orderId)).toBe('OFFERED');
+  const second = await sql<{
+    rider_id: string;
+  }>`SELECT rider_id FROM rider_offers WHERE task_id=(SELECT id FROM delivery_tasks WHERE order_id=${order.orderId}::uuid) ORDER BY sent_at DESC LIMIT 1`.execute(
+    db.db,
+  );
+  expect(second.rows[0]!.rider_id).not.toBe(first.rows[0]!.rider_id);
+  await sql`DELETE FROM rider_status WHERE rider_id=ANY(${extra}::uuid[])`.execute(db.db);
+  await sql`DELETE FROM rider_profiles WHERE user_id=ANY(${extra}::uuid[])`.execute(db.db);
+});
+
+test('plan4: concurrent accepts assign exactly once', async () => {
+  const order = await confirmOrder();
+  await releaseAndDispatch(order.orderId);
+  const offer = await sql<{
+    id: string;
+    rider_id: string;
+  }>`SELECT id,rider_id FROM rider_offers WHERE task_id=(SELECT id FROM delivery_tasks WHERE order_id=${order.orderId}::uuid) AND status='SENT'`.execute(
+    db.db,
+  );
+  const attempts = await Promise.allSettled([
+    tasks.accept(offer.rows[0]!.rider_id, offer.rows[0]!.id, uuidV7()),
+    tasks.accept(offer.rows[0]!.rider_id, offer.rows[0]!.id, uuidV7()),
+  ]);
+  expect(attempts.filter((attempt) => attempt.status === 'fulfilled')).toHaveLength(1);
+  const assigned = await sql<{
+    status: string;
+    accepted: string;
+  }>`SELECT t.status,(SELECT count(*)::text FROM rider_offers WHERE task_id=t.id AND status='ACCEPTED') AS accepted
+    FROM delivery_tasks t WHERE t.order_id=${order.orderId}::uuid`.execute(db.db);
+  expect(assigned.rows[0]!.status).not.toBe('UNASSIGNED');
+  expect(assigned.rows[0]!.accepted).toBe('1');
+});
+
+test('plan4: no eligible rider retries with backoff and tracks no-rider time', async () => {
+  const order = await confirmOrder();
+  await sql`UPDATE rider_status SET online=false`.execute(db.db);
+  await releaseAndDispatch(order.orderId);
+  expect(await engine.dispatchOne(order.orderId)).toBe('RETRY');
+  const waiting = await sql<{
+    attempts: number;
+    since: Date | null;
+  }>`SELECT dispatch_attempts AS attempts,no_rider_since AS since FROM delivery_tasks WHERE order_id=${order.orderId}::uuid`.execute(
+    db.db,
+  );
+  expect(waiting.rows[0]!.attempts).toBeGreaterThanOrEqual(1);
+  expect(waiting.rows[0]!.since).not.toBeNull();
+  await sql`UPDATE rider_status SET online=true WHERE rider_id IN (${world.rider1}::uuid,${world.rider2}::uuid,${world.rider3}::uuid)`.execute(
+    db.db,
+  );
+  expect(await engine.dispatchOne(order.orderId)).toBe('OFFERED');
+  const recovered = await sql<{
+    seconds: string;
+    since: Date | null;
+  }>`SELECT no_rider_seconds::text AS seconds,no_rider_since AS since FROM delivery_tasks WHERE order_id=${order.orderId}::uuid`.execute(
+    db.db,
+  );
+  expect(recovered.rows[0]!.since).toBeNull();
+  expect(Number(recovered.rows[0]!.seconds)).toBeGreaterThanOrEqual(0);
+});
+
+describe('plan5 Ola dispatch', () => {
+  const olaPaths = {
+    autocomplete: '/places/v1/autocomplete',
+    details: '/places/v1/details',
+    geocode: '/places/v1/geocode',
+    reverse: '/places/v1/reverse-geocode',
+    directions: '/routing/v1/directions',
+    matrix: '/routing/v1/distanceMatrix/basic',
+  };
+  const mapsSettings = async () => ({ cacheTtlSeconds: 60, speedKph: 20, topK: 5, maxPairs: 50 });
+  const storeCache = () => {
+    const seen = new Map<string, string>();
+    return {
+      get: async (key: string) => seen.get(key) ?? null,
+      set: async (key: string, value: string) => {
+        seen.set(key, value);
+      },
+    };
+  };
+  const recorder = () => {
+    const records: Array<Record<string, unknown>> = [];
+    return {
+      records,
+      logger: {
+        info: (fields: Record<string, unknown>) => records.push({ level: 'info', ...fields }),
+        warn: (fields: Record<string, unknown>) => records.push({ level: 'warn', ...fields }),
+        error: (fields: Record<string, unknown>) => records.push({ level: 'error', ...fields }),
+      },
+    };
+  };
+  const resilient = (fetcher: typeof fetch, rec: ReturnType<typeof recorder>, timeoutMs = 1000) =>
+    new ResilientMaps(
+      new OlaMaps(
+        {
+          baseUrl: 'https://api.olamaps.io',
+          apiKey: 'fixture',
+          timeoutMs,
+          maxAttempts: 1,
+          breakerFailures: 5,
+          breakerCooldownMs: 10000,
+          paths: olaPaths,
+        },
+        mapsSettings,
+        fetcher,
+        rec.logger as never,
+      ),
+      storeCache(),
+      mapsSettings,
+      'ola',
+      rec.logger as never,
+    );
+  async function dispatchWith(maps: MapsPort, config = fakeConfig()) {
+    const order = await confirmOrder();
+    await sql`UPDATE delivery_tasks SET dispatch_not_before=clock_timestamp() WHERE order_id=${order.orderId}::uuid`.execute(
+      db.db,
+    );
+    const contender = new DispatchEngine(
+      db.db,
+      settings,
+      config,
+      broadcasts,
+      geo,
+      new PostgresRiderEligibility(db.db, new RiderSettings(config)),
+      orderSystemCancel,
+      cancellation,
+      maps,
+    );
+    const outcome = await contender.dispatchOne(order.orderId);
+    const offers =
+      await sql`SELECT 1 FROM rider_offers o JOIN delivery_tasks t ON t.id=o.task_id WHERE t.order_id=${order.orderId}::uuid AND o.status='SENT'`.execute(
+        db.db,
+      );
+    return { outcome, sent: offers.rows.length, orderId: order.orderId };
+  }
+
+  async function acceptOnce(orderId: string) {
+    const offers = await sql<{
+      id: string;
+      rider_id: string;
+    }>`SELECT o.id,o.rider_id FROM rider_offers o
+      JOIN delivery_tasks t ON t.id=o.task_id WHERE t.order_id=${orderId}::uuid AND o.status='SENT'`.execute(
+      db.db,
+    );
+    const offer = offers.rows[0]!;
+    const assigned = await tasks.accept(offer.rider_id, offer.id, uuidV7());
+    expect(assigned.riderId).toBe(offer.rider_id);
+    const recorded = await sql`SELECT 1 FROM rider_offers o JOIN delivery_tasks t ON t.id=o.task_id
+      WHERE t.order_id=${orderId}::uuid AND o.status='ACCEPTED' AND t.rider_id=o.rider_id`.execute(
+      db.db,
+    );
+    expect(recorded.rows).toHaveLength(1);
+  }
+
+  it('keeps valid road cells and estimates only the failed cells in one batch', async () => {
+    const rec = recorder();
+    let matrixCalls = 0;
+    const fetcher: typeof fetch = async (request) => {
+      matrixCalls++;
+      const url = new URL(String(request));
+      const origins = (url.searchParams.get('origins') ?? '').split('|');
+      return Response.json({
+        status: 'SUCCESS',
+        rows: origins.map((_, index) =>
+          index === 0
+            ? { elements: [{ status: 'OK', distance: 4000, duration: 600 }] }
+            : { elements: [{ status: 'ZERO_RESULTS' }] },
+        ),
+      });
+    };
+    const { outcome, sent } = await dispatchWith(
+      resilient(fetcher, rec),
+      fakeConfig({ mapMatrixMaxPairs: 2 }),
+    );
+    expect(outcome).toBe('OFFERED');
+    expect(sent).toBe(1);
+    // One logical matrix batch per scoring attempt.
+    expect(matrixCalls).toBe(1);
+    expect(rec.records).toContainEqual(
+      expect.objectContaining({
+        operation: 'distanceMatrix',
+        outcome: 'partial_fallback',
+        pairs: 2,
+        fallbackCells: 1,
+      }),
+    );
+  });
+
+  it.each([
+    ['rejected key', async () => new Response('no', { status: 401 })],
+    [
+      'timeout',
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return new Response('late', { status: 200 });
+      },
+    ],
+    ['bad envelope', async () => Response.json({ status: 'SUCCESS', rows: [] })],
+  ])('estimates the whole batch after %s and still offers exactly once', async (_name, fetcher) => {
+    const rec = recorder();
+    const { outcome, sent, orderId } = await dispatchWith(
+      resilient(fetcher as typeof fetch, rec, _name === 'timeout' ? 20 : 1000),
+    );
+    expect(outcome).toBe('OFFERED');
+    expect(sent).toBe(1);
+    const fallback = rec.records.find(
+      (r) => r.operation === 'distanceMatrix' && r.outcome === 'fallback',
+    );
+    expect(fallback).toMatchObject({ pairs: 3, fallbackCells: 3 });
+    if (_name === 'rejected key') await acceptOnce(orderId);
+  });
+
+  const live =
+    process.env.AWS_P13_INTEGRATION === 'yes' && process.env.OLA_DISPATCH_LIVE_TEST === 'yes';
+  (live ? it : it.skip)('uses Ola road ETAs and assigns the winning rider once', async () => {
+    const rec = recorder();
+    const env = readEnv(process.env);
+    const remote = new OlaMaps(buildOlaConfig(env), mapsSettings, fetch, rec.logger as never);
+    const maps = new ResilientMaps(remote, storeCache(), mapsSettings, 'ola', rec.logger as never);
+    const { outcome, sent, orderId } = await dispatchWith(maps);
+    expect({ outcome, sent }).toEqual({ outcome: 'OFFERED', sent: 1 });
+    expect(
+      rec.records.find((r) => r.operation === 'distanceMatrix' && r.fallbackCells === 0),
+    ).toMatchObject({ outcome: 'success', pairs: 3 });
+    await acceptOnce(orderId);
+  });
 });

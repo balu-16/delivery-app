@@ -61,9 +61,9 @@ test('requires an explicit HTTPS API outside development', () => {
 test('rejects missing or public Expo hosts and invalid ports', () => {
   expect(() => resolveApiAddress({ development: true })).toThrow(ApiAddressError);
   expect(() => resolveApiAddress({ development: true, developmentHost: 'example.exp.direct:443' }))
-    .toThrow('Could not find the local customer server');
+    .toThrow('Couldn’t find the local customer server');
   expect(() => resolveApiAddress({ development: true, developmentHost: '172.16.1.10:8081', developmentPort: '70000' }))
     .toThrow('port is invalid');
   expect(() => resolveApiAddress({ development: true, developmentHost: 'exp://user:secret@192.168.1.10:8081' }))
-    .toThrow('Could not find the local customer server');
+    .toThrow('Couldn’t find the local customer server');
 });

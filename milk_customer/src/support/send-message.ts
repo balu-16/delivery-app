@@ -33,9 +33,19 @@ export async function sendSupportMessage(userId: string, token: string, body: st
 }
 
 export function supportSendError(error: unknown): string {
-  if (error instanceof Error && error.message === 'SUPPORT_RECOVERY_REQUIRED') return 'An earlier message may still be processing. Check your support requests, or retry that same message before sending a different one.';
-  if (error instanceof ApiError && error.status === 401) return 'Your session has expired. Sign in again, then retry your message.';
-  if (error instanceof ApiError && error.status === 429) return 'Too many requests right now. Please wait a little and retry.';
-  const reference = error instanceof ApiError && error.traceId && /^[a-zA-Z0-9-]{1,80}$/.test(error.traceId) ? ` Reference: ${error.traceId}` : '';
-  return `We could not confirm that your message was sent. Check your connection and retry the same message safely.${reference}`;
+  if (error instanceof Error && error.message === 'SUPPORT_RECOVERY_REQUIRED') return 'We’re checking if your message was sent.';
+  if (error instanceof ApiError) {
+    if (error.status === 401) return 'Sign in again to continue.';
+    if (error.status === 429) return 'Too many requests right now.';
+    // Definitive rejections (4xx except 408/429) are safe to explain directly;
+    // anything ambiguous stays a checking message so the same key retries.
+    if (error.status >= 400 && error.status < 500 && error.status !== 408) {
+      return 'This message couldn’t be sent.';
+    }
+    return 'We’re checking if your message was sent.';
+  }
+  if (error instanceof TypeError || (error instanceof Error && error.name === 'AbortError')) {
+    return 'We’re checking if your message was sent.';
+  }
+  return 'We’re checking if your message was sent.';
 }

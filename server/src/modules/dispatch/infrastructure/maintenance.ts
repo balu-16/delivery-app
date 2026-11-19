@@ -25,11 +25,13 @@ export class DispatchMaintenance {
     escalated: number;
     expired: number;
     offered: number;
+    reconciled: number;
   }> {
+    const reconciled = await this.engine.reconcileStuckTasks();
     const offered = await this.engine.dispatchDue();
     const expired = await this.engine.expireOffers();
     const custody = await this.sweepUnreachable();
-    return { offered, expired, ...custody };
+    return { offered, expired, reconciled, ...custody };
   }
 
   private async sweepUnreachable(): Promise<{ redispatched: number; escalated: number }> {

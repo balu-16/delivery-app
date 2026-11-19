@@ -2,6 +2,14 @@
 
 Last reviewed: **19 November 2026**. This document tracks the customer assistant and the latest admin operational controls; it is not a complete audit of the whole DairyDirect application. The previous usual-order, model-comparison and disposable-database results below are historical and do not verify the current working tree.
 
+## Address-free cart and shared prices — work in progress
+
+The current working tree contains an address-free server cart, immediate cart controls with a persistent idempotent retry queue, and shared product prices across stores. Checkout still binds a saved address and checks delivery and inventory; price changes require customer review. The assistant uses the same cart, and the admin product drawer manages one price for all stores. Migrations `060`–`062` add the required schema, set the requested ten dairy prices, and add a concurrent lookup index.
+
+**Not deployed or verified on AWS yet:** Aurora reports available, but its endpoint is private and the computer's Tailscale connection was stopped; the database connection timed out. The migrations and new prices have not been applied to the application database. Reconnect the existing VPN, test these migrations and cart/checkout flows in an isolated AWS test database, confirm recovery/backup availability, then apply the migrations and check the local server against AWS. Do not start the changed server against the application database before the migrations. Perform the customer walkthrough in Expo Go and measure on-device response times. Do not start a native or EAS build without the owner's approval.
+
+Local verification has covered cart changes, retries and restart recovery, and generated API contracts. Customer and server lint/type checks and unit tests passed; admin tests passed with six real-backend cases skipped. These checks do not verify the SQL migrations, real AWS integrations, or the phone UI.
+
 ## AWS development rollout and delivery areas — 19 November 2026
 
 This entry supersedes the earlier warning that migrations 057–059 are missing. At the owner's request, those three migrations were applied to the configured AWS development application database. The migration records, all new tables and the concurrent wallet index were checked. The existing `delivery_runtime` role received only `SELECT`, `INSERT` and `UPDATE` on the three new tables; the broad runtime-grant reset was not run. An Aurora automated backup and point-in-time recovery were available before the migration. The customer and admin server readiness endpoints both returned HTTP 200 after the change.

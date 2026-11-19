@@ -32,6 +32,9 @@ type FlyPayload = {
 
 type FlyingEntry = FlyPayload & { key: number };
 
+export const FLY_TO_CART_MS = 800;
+export const MAX_FLY_TO_CART = 3;
+
 type FlyContextValue = {
   fly: (image: FlyImage, sourceRef: RefObject<unknown>, event?: GestureResponderEvent) => void;
 };
@@ -62,7 +65,7 @@ export function FlyToCartProvider({ children }: { children: ReactNode }) {
     const enqueue = (box: LayoutBox) => {
       counter.current += 1;
       const key = counter.current;
-      setEntries((current) => [...current.slice(-3), { image, from: box, key }]);
+      setEntries((current) => [...current.slice(-(MAX_FLY_TO_CART - 1)), { image, from: box, key }]);
     };
     const x = event?.nativeEvent?.pageX;
     const y = event?.nativeEvent?.pageY;
@@ -126,7 +129,7 @@ function FlyingItem({
     }
     progress.value = withTiming(
       1,
-      { duration: 720, easing: Easing.bezier(0.22, 0.61, 0.36, 1) },
+      { duration: FLY_TO_CART_MS, easing: Easing.bezier(0.22, 0.61, 0.36, 1) },
       (finished) => {
         if (finished) runOnJS(onComplete)(entry.key);
       },

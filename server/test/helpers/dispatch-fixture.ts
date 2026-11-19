@@ -208,6 +208,7 @@ export function fakeConfig(values: Record<string, unknown> = {}): AppConfig {
     riderMaxConcurrentTasks: 2,
     mapFallbackSpeedKph: 20,
     mapMatrixTopK: 5,
+    mapMatrixMaxPairs: 50,
     handoverMaxAttempts: 5,
     handoverLockoutSeconds: 300,
     ...values,

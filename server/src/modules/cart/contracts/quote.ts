@@ -1,4 +1,5 @@
 import type { TransactionContext } from '../../../platform/database/database.js';
+import type { CartView } from './cart.js';
 export interface QuoteIssue {
   code:
     | 'ITEM_UNAVAILABLE'
@@ -77,6 +78,16 @@ export interface CartQuotes {
     /** Join the caller's placement transaction instead of opening one. */
     tx?: TransactionContext;
   }): Promise<QuoteSnapshot>;
+  /** Same as refresh plus the cart view from the same evaluation (no second read). */
+  refreshWithCart(input: {
+    userId: string;
+    addressId: string;
+    tipPaise?: string;
+    couponCode?: string | null;
+    wallet?: WalletBalanceInput;
+    /** Join the caller's placement transaction instead of opening one. */
+    tx?: TransactionContext;
+  }): Promise<{ quote: QuoteSnapshot; cart: CartView }>;
   get(quoteId: string, userId: string, tx?: TransactionContext): Promise<QuoteSnapshot>;
   markConsumed(quoteId: string, tx?: TransactionContext): Promise<void>;
 }

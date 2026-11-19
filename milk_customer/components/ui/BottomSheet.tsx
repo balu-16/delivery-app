@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { ReactNode } from 'react';
+import type { ReactNode, ReactElement } from 'react';
 import { useEffect } from 'react';
 import {
   Modal,
@@ -32,6 +32,7 @@ export function BottomSheet({
   scroll = true,
   maxHeight = '86%',
   keyboardAware = false,
+  refreshControl,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -41,6 +42,7 @@ export function BottomSheet({
   scroll?: boolean;
   maxHeight?: `${number}%`;
   keyboardAware?: boolean;
+  refreshControl?: ReactElement;
 }) {
   const enabled = useMotionEnabled();
   const insets = useSafeAreaInsets();
@@ -105,7 +107,8 @@ export function BottomSheet({
           showsVerticalScrollIndicator={false}
           bounces={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 6 }}
+          refreshControl={refreshControl}
+          contentContainerStyle={{ paddingBottom: 6, flexGrow: 1 }}
         >{children}</ScrollView>
       ) : <View>{children}</View>}
     </Animated.View>

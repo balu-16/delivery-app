@@ -267,5 +267,5 @@ export async function signOut() {
   if (previous?.mode === 'cognito') {
     try { await cognitoRequest('GlobalSignOut', { AccessToken: previous.accessToken }); } catch { /* Always clear the local session. */ }
   }
-  if (storageError) throw new Error('Could not securely remove the saved session. Please try signing out again.');
+  if (storageError) throw new Error('Couldn’t securely remove the saved session. Please try signing out again.');
 }

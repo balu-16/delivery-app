@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type pino from 'pino';
 import type {
   MapsCache,
   MapsPort,
@@ -9,6 +10,8 @@ import type {
 } from '../../modules/serviceability/contracts/maps.js';
 import { FakeMaps } from './fake.js';
 import { MapsProviderError } from './ola.js';
+
+type MapsLogger = Pick<pino.Logger, 'info' | 'warn' | 'error'>;
 
 /** Cache keys contain hashes, never plaintext addresses or coordinates. */
 export class ResilientMaps implements MapsPort {
@@ -21,6 +24,8 @@ export class ResilientMaps implements MapsPort {
       topK: number;
       maxPairs: number;
     }>,
+    private readonly provider: string = 'unknown',
+    private readonly logger?: MapsLogger,
   ) {}
   private async cachedPlaces(
     operation: string,
@@ -30,7 +35,7 @@ export class ResilientMaps implements MapsPort {
     const { cacheTtlSeconds } = await this.settings();
     if (!Number.isSafeInteger(cacheTtlSeconds) || cacheTtlSeconds < 1)
       throw new Error('INVALID_MAP_CACHE_TTL');
-    const key = `maps:${operation}:${createHash('sha256').update(input).digest('hex')}`;
+    const key = `maps:${this.provider}:${operation}:${createHash('sha256').update(input).digest('hex')}`;
     const fresh = await this.cache.get(key).catch(() => null);
     if (fresh) return JSON.parse(fresh) as Place[];
     try {
@@ -74,12 +79,19 @@ export class ResilientMaps implements MapsPort {
     try {
       return await this.remote.directions(origin, destination);
     } catch (error) {
-      if (!(error instanceof MapsProviderError) || error.code === 'ExternalServiceRejected')
-        throw error;
-      return new FakeMaps([], (await this.settings()).speedKph).directions(origin, destination);
+      if (!(error instanceof MapsProviderError)) throw error;
+      const estimate = await new FakeMaps([], (await this.settings()).speedKph).directions(
+        origin,
+        destination,
+      );
+      this.logger?.warn({ operation: 'directions', outcome: 'fallback' }, 'maps estimate fallback');
+      return estimate;
     }
   }
-  async distanceMatrix(origins: Point[], destinations: Point[]): Promise<RouteEstimate[][]> {
+  async distanceMatrix(
+    origins: Point[],
+    destinations: Point[],
+  ): Promise<(RouteEstimate | null)[][]> {
     const settings = await this.settings();
     if (
       !Number.isSafeInteger(settings.topK) ||
@@ -93,12 +105,48 @@ export class ResilientMaps implements MapsPort {
       origins.length * destinations.length > settings.maxPairs
     )
       throw new Error('MATRIX_BUDGET_EXCEEDED');
+    const pairs = origins.length * destinations.length;
     try {
-      return await this.remote.distanceMatrix(origins, destinations);
+      const remote = await this.remote.distanceMatrix(origins, destinations);
+      if (remote.length !== origins.length)
+        throw new MapsProviderError('ExternalServiceUnavailable');
+      if (remote.some((row) => row.length !== destinations.length))
+        throw new MapsProviderError('ExternalServiceUnavailable');
+      let fallbackCells = 0;
+      const fallback = new FakeMaps([], settings.speedKph);
+      const filled: RouteEstimate[][] = [];
+      for (let i = 0; i < origins.length; i++) {
+        const row: RouteEstimate[] = [];
+        for (let j = 0; j < destinations.length; j++) {
+          const cell = remote[i]?.[j];
+          if (cell) {
+            row.push(cell);
+          } else {
+            row.push(await fallback.directions(origins[i]!, destinations[j]!));
+            fallbackCells += 1;
+          }
+        }
+        filled.push(row);
+      }
+      if (fallbackCells > 0)
+        this.logger?.warn(
+          { operation: 'distanceMatrix', outcome: 'partial_fallback', pairs, fallbackCells },
+          'maps estimate fallback',
+        );
+      else
+        this.logger?.info(
+          { operation: 'distanceMatrix', outcome: 'success', pairs, fallbackCells },
+          'maps provider request',
+        );
+      return filled;
     } catch (error) {
-      if (!(error instanceof MapsProviderError) || error.code === 'ExternalServiceRejected')
-        throw error;
-      return new FakeMaps([], settings.speedKph).distanceMatrix(origins, destinations);
+      if (!(error instanceof MapsProviderError)) throw error;
+      const whole = await new FakeMaps([], settings.speedKph).distanceMatrix(origins, destinations);
+      this.logger?.warn(
+        { operation: 'distanceMatrix', outcome: 'fallback', pairs, fallbackCells: pairs },
+        'maps estimate fallback',
+      );
+      return whole;
     }
   }
 }

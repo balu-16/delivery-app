@@ -33,7 +33,11 @@ export function isDispatchTrigger(value: unknown): value is DispatchTrigger {
   return value === 'ON_PICK_START' || value === 'ON_PACKED';
 }
 
-/** Radius for a dispatch attempt: base + widening steps, capped at the steps. */
+/**
+ * Radius for a dispatch attempt: base, then widening steps. Widening never
+ * shrinks below the base radius, so a misconfigured first step cannot pull
+ * the default 3 km search back to 1.5 km on the first retry.
+ */
 export function radiusForAttempt(
   attempt: number,
   baseMetres: number,
@@ -42,5 +46,6 @@ export function radiusForAttempt(
   if (attempt <= 0) return baseMetres;
   const index = Math.min(attempt, wideningSteps.length) - 1;
   const step = wideningSteps[index];
-  return step !== undefined && step > 0 ? step : baseMetres;
+  if (step === undefined || step <= 0) return baseMetres;
+  return Math.max(baseMetres, step);
 }

@@ -6,5 +6,44 @@
   "matrix": {
     "rows": [{ "elements": [{ "duration": 719, "distance": 3224, "status": "OK" }] }],
     "status": "SUCCESS"
+  },
+  "directionsMultiLeg": {
+    "routes": [
+      {
+        "legs": [
+          { "distance": 1000, "duration": 200 },
+          { "distance": 2500, "duration": 400 }
+        ]
+      }
+    ],
+    "status": "OK"
+  },
+  "matrixMixed": {
+    "rows": [
+      {
+        "elements": [
+          { "duration": 600, "distance": 3000, "status": "OK" },
+          { "status": "ZERO_RESULTS" }
+        ]
+      }
+    ],
+    "status": "SUCCESS"
+  },
+  "placeWithPincode": {
+    "place_id": "ola-platform:pin",
+    "formatted_address": "Vijayawada Junction, Vijayawada, Andhra Pradesh 520001, India",
+    "geometry": { "location": { "lat": 16.5169, "lng": 80.6169 } },
+    "address_components": [
+      { "types": ["locality", "political"], "long_name": "Vijayawada", "short_name": "Vijayawada" },
+      { "types": ["postal_code"], "long_name": "520001", "short_name": "520001" }
+    ]
+  },
+  "placeWithBadPincode": {
+    "place_id": "ola-platform:badpin",
+    "formatted_address": "Vijayawada, Andhra Pradesh, India",
+    "geometry": { "location": { "lat": 16.5169, "lng": 80.6169 } },
+    "address_components": [
+      { "types": ["postal_code"], "long_name": "52001", "short_name": "52001" }
+    ]
   }
 }

@@ -14,6 +14,7 @@ const groups: Array<{ title: string; items: Setting[] }> = [
     {key:'handlingFeePaise',label:'Handling fee',hint:'Fee applied to an order',kind:'money'},
     {key:'smallCartThresholdPaise',label:'Small order threshold',hint:'Orders below this value may have a small-order fee',kind:'money'},
     {key:'smallCartFeePaise',label:'Small order fee',hint:'Fee below the small order threshold',kind:'money'},
+    {key:'surgeFeePaise',label:'Surge fee',hint:'Extra fee applied only while surge pricing is enabled',kind:'money'},
     {key:'catalogMaxPerOrder',label:'Maximum quantity per product',hint:'Maximum units of one product in a cart',kind:'integer'},
     {key:'maxCartLines',label:'Maximum different cart items',hint:'Maximum number of products in a cart',kind:'integer'},
   ]},

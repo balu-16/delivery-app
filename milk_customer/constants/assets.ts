@@ -15,6 +15,8 @@ export const images = {
   onboardingFresh: require('../assets/images/onboarding-fresh.png') as AssetSource,
   onboardingDelivery: require('../assets/images/onboarding-delivery.png') as AssetSource,
   logoEmblem: require('../assets/images/logo-emblem.png') as AssetSource,
+  authLogo: require('../assets/images/auth-logo.png') as AssetSource,
+  authCountryside: require('../assets/images/auth-countryside.jpg') as AssetSource,
   avatarRahul: require('../assets/images/avatar-hd.png') as AssetSource,
 
   // Scenes

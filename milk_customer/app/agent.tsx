@@ -3,7 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { randomUUID } from 'expo-crypto';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AccessibilityInfo, ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image } from 'expo-image';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AssistantCard } from '@/components/connected/AssistantCard';
@@ -23,11 +24,16 @@ import { usePushStatus } from '@/src/notifications/push';
 import { customerApi, customerDetailsApi } from '@/src/api/customer';
 import { accessToken } from '@/src/auth/session';
 import { ApiError } from '@/src/api/client';
-import { requestMessage } from '@/src/api/messages';
+import { agentRunErrorMessage, requestMessage } from '@/src/api/messages';
 import { distinctAddressCards, pendingLocationAddressId } from '@/src/agent/distinct-address-cards';
 import { requireLocationServices } from '@/src/utils/location-policy';
+import { cartChoiceOpen, cartChoiceReference, pendingCartChoiceKey, readPendingCartChoice, type CartChoiceReference, type PendingCartChoice } from '@/src/agent/cart-choice';
+import { welcomeFor } from '@/src/agent/welcome';
+import { images } from '@/constants/assets';
 
 const initialConfig: AgentConfig = { enabled: false, suggestedPrompts: [], maxMessageChars: 2000, disclosureVersion: '1', supportedLocales: ['en'] };
+
+
 function extractCard(data: Record<string, unknown>): AgentCard | null {
   if (typeof data.cardId !== 'string' || typeof data.type !== 'string' || !data.payload || typeof data.payload !== 'object' || Array.isArray(data.payload)) return null;
   return { cardId: data.cardId, type: data.type as AgentCard['type'], payload: data.payload as Record<string, unknown> };
@@ -52,6 +58,10 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
   const [cardStorage, setCardStorage] = useState<{ threadId: string; recover: boolean } | null>(null);
   const cardStorageReady = !!thread && cardStorage?.threadId === thread.id;
   const recoverCardAction = cardStorageReady && cardStorage?.recover === true;
+  const [choiceStorage, setChoiceStorage] = useState<{ threadId: string; recover: boolean } | null>(null);
+  const choiceStorageReady = !!thread && choiceStorage?.threadId === thread.id;
+  const recoverChoice = choiceStorageReady && choiceStorage?.recover === true;
+  const [submittedChoices, setSubmittedChoices] = useState<Record<string, true>>({});
   const [loadingHistory, setLoadingHistory] = useState(false), [feedback, setFeedback] = useState<Record<string, 'up' | 'down'>>({});
   const [addressOpen, setAddressOpen] = useState(false);
   const [pendingContinuation, setPendingContinuation] = useState<AddressContinuation | null>(null);
@@ -66,8 +76,9 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
   const [pendingAttach, setPendingAttach] = useState<{ threadId: string; runId: string } | null>(null);
   const [showBrowseNotice, setShowBrowseNotice] = useState(false), [alertsEnabled, setAlertsEnabled] = useState(false);
   const pushStatus = usePushStatus(state => state.status);
-  const controller = useRef<AbortController | null>(null), pending = useRef<{ id: string; text: string } | null>(null);
+  const controller = useRef<AbortController | null>(null), pending = useRef<{ id: string; text: string; choice?: CartChoiceReference } | null>(null);
   const cardActionInFlight = useRef(false);
+  const pendingChoice = useRef<PendingCartChoice | null>(null);
   const locationCheckInFlight = useRef(false);
   const pendingCardAction = useRef<PendingCardAction | null>(null);
   const pendingDecision = useRef<{ draftId: string; decision: 'approve' | 'reject'; clientActionId: string } | null>(null);
@@ -76,6 +87,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
   const continuationWrites = useRef(Promise.resolve());
   const mounted = useRef(false), stopRequested = useRef(false);
   const threadRef = useRef<AgentThread | null>(null);
+  const refreshRequest = useRef(0);
   const attachRef = useRef<(threadId: string, runId: string) => void>(() => undefined);
   const continuationRunRef = useRef<(id: string, text: string) => void>(() => undefined);
   const attachedRun = useRef(''), sentContinuation = useRef('');
@@ -93,7 +105,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       const saved = readAddressContinuation(raw);
       if (saved) {continuationRef.current = saved;continuationThread.current = thread.id;setPendingContinuation(saved);}
       else setError('The saved order continuation could not be restored. Please ask the assistant again.');
-    }).catch(() => {if (active) setError('Could not restore the previous request. Please ask the assistant again.');});
+    }).catch(() => {if (active) setError('Couldn’t restore the previous request. Please ask the assistant again.');});
     return () => {active = false;};
   }, [userId, thread?.id]);
   const saveContinuation = (value: AddressContinuation) => {
@@ -102,7 +114,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
     const key = addressContinuationKey(userId, thread.id);
     continuationWrites.current = continuationWrites.current.then(() => AsyncStorage.setItem(key, JSON.stringify(value))).catch(() => {
       if (continuationRef.current?.id === value.id) {continuationRef.current = null;setPendingContinuation(null);}
-      setError('Could not save the order continuation. Please ask the assistant again after confirming your location.');
+      setError('Couldn’t save the order continuation. Please ask the assistant again after confirming your location.');
     });
   };
 
@@ -124,7 +136,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
         if (active && job && (job.state === 'queued' || job.state === 'running')) {
           const latest = await agentClient.thread(current.id);
           if (active) { setThread(latest); setPendingAttach({ threadId: current.id, runId: job.id }); }
-        } else if (active && job?.state === 'failed') setError(t.error);
+        } else if (active && job?.state === 'failed') setError(agentRunErrorMessage(job.errorCode ?? 'AGENT_UNAVAILABLE', 'send this message'));
       }
     }).catch(() => { if (active) { setError(t.error); setConsent('loading'); } });
     return () => { active = false; mounted.current = false; controller.current?.abort(); };
@@ -143,13 +155,26 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
         return;
       }
       pendingCardAction.current = saved; setCardStorage({ threadId, recover: !!saved });
-    }).catch(() => { if (active) setError('Could not restore your cart update. Check your connection and reopen the chat.'); });
+    }).catch(() => { if (active) setError('Couldn’t restore your cart update.'); });
+    pendingChoice.current = null;
+    void AsyncStorage.getItem(pendingCartChoiceKey(threadId)).then(raw => {
+      if (!active) return;
+      const saved = raw ? readPendingCartChoice(raw) : null;
+      if (raw && !saved) {
+        setError('A previous cart choice could not be restored safely. Please ask for the item again.');
+        return;
+      }
+      pendingChoice.current = saved; setChoiceStorage({ threadId, recover: !!saved });
+    }).catch(() => { if (active) setError('Couldn’t restore your cart choice.'); });
     return () => { active = false; };
   }, [thread?.id]);
   const refresh = useCallback(async () => {
     const id = threadRef.current?.id;
+    const request = ++refreshRequest.current;
+    const subject = useCustomer.getState().profile?.userId;
     const current = id ? await agentClient.thread(id) : await agentClient.current();
-    if (mounted.current) setThread(current);
+    if (mounted.current && request === refreshRequest.current && threadRef.current?.id === id && useCustomer.getState().profile?.userId === subject)
+      setThread(current);
     return current;
   }, []);
   const accept = async () => {
@@ -165,7 +190,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
   };
   const createChat = async () => {
     if (busy) return;
-    if (!cardStorageReady || pendingCardAction.current) { setError('Finish the previous cart update before starting a new chat.'); return; }
+    if (!cardStorageReady || !choiceStorageReady || pendingCardAction.current || pendingChoice.current) { setError('Finish the previous cart update before starting a new chat.'); return; }
     setBusy(true); setError('');
     try { setThread(await agentClient.create()); pending.current = null; setCanRetry(false); router.setParams({ threadId: undefined, nudgeName: undefined }); }
     catch { setError(t.error); } finally { setBusy(false); }
@@ -190,7 +215,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       const page = await agentClient.threads(cursor);
       setChatHistory(current => cursor ? [...current, ...page.items] : page.items);
       setHistoryCursor(page.nextCursor);
-    } catch { setHistoryError('Could not load your chats. Please try again.'); }
+    } catch { setHistoryError('Couldn’t load your chats.'); }
     finally { setHistoryBusy(false); }
   };
   const loadEarlier = async () => {
@@ -207,16 +232,16 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
     try { await agentClient.feedback(messageId, rating); setFeedback(current => ({ ...current, [messageId]: rating })); }
     catch { setError(t.error); }
   };
-  const run = async (kind: 'message' | 'resume' | 'attach', details: { id: string; text?: string; decision?: 'approve' | 'reject'; threadId?: string }) => {
+  const run = async (kind: 'message' | 'resume' | 'attach', details: { id: string; text?: string; choice?: CartChoiceReference; decision?: 'approve' | 'reject'; threadId?: string }) => {
     const threadId = details.threadId ?? thread?.id;
     if (!threadId || streaming || (kind !== 'attach' && thread?.status === 'archived')) return;
-    if (kind !== 'attach' && (!cardStorageReady || pendingCardAction.current)) { setError('Finish the previous cart update before continuing.'); return; }
+    if (kind !== 'attach' && (!cardStorageReady || !choiceStorageReady || pendingCardAction.current || pendingChoice.current)) { setError('Finish the previous cart update before continuing.'); return; }
     const isOrderApproval = kind === 'resume' && details.decision === 'approve' && thread?.messages.some(message => message.cards.some(card => card.type === 'order_confirm' && card.payload.draftId === details.id));
     if (isOrderApproval && !pendingDecision.current) {
       if (locationCheckInFlight.current) return;
       locationCheckInFlight.current = true;
       try { if (await useCustomer.getState().refreshDeliverySettings()) await requireLocationServices(); }
-      catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not check location. Please try again.'); return; }
+      catch (cause) { setError(cause instanceof Error ? cause.message : 'Couldn’t check location.'); return; }
       finally { locationCheckInFlight.current = false; }
     }
     stopRequested.current = false;
@@ -238,7 +263,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       if (event.event === 'run.error') {
         runFailure = typeof event.data.code === 'string' ? event.data.code : 'AGENT_UNAVAILABLE';
         setStatus('');
-        if (!(runFailure === 'RUN_ABORTED' && stopRequested.current)) setError(runFailure === 'DRAFT_PENDING' ? t.draftPending : t.error);
+        if (!(runFailure === 'RUN_ABORTED' && stopRequested.current)) setError(runFailure === 'DRAFT_PENDING' ? t.draftPending : agentRunErrorMessage(runFailure, kind === 'resume' ? 'continue your request' : 'send this message'));
       }
       if (event.event === 'message.delta' && typeof event.data.text === 'string') {
         const delta = event.data.text;
@@ -262,7 +287,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
     };
     try {
       try {
-        if (kind === 'message') await agentClient.message(threadId, details.id, details.text ?? '', locale, abort.signal, onEvent);
+        if (kind === 'message') await agentClient.message(threadId, details.id, details.text ?? '', locale, abort.signal, onEvent, details.choice);
         else if (kind === 'resume') {
           const decision = details.decision!;
           const action = pendingDecision.current?.draftId === details.id && pendingDecision.current.decision === decision
@@ -278,6 +303,8 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       pending.current = null; setCanRetry(false);
       if (kind === 'resume') pendingDecision.current = null;
       const refreshed = await refresh();
+      // Tool calls can change the same cart used by the shopping screens.
+      void useCustomer.getState().refreshCart();
       if (kind === 'message' && continuationRef.current?.id === details.id) {
         continuationRef.current = null; setPendingContinuation(null);
         await continuationWrites.current;
@@ -294,7 +321,10 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       else if (!runFailure) void AccessibilityInfo.announceForAccessibility(t.completed);
     } catch (failure) {
       if (!abort.signal.aborted && mounted.current) {
-        setError(failure instanceof ApiError ? requestMessage(failure, 'send this message') : runId ? t.activityOffline : t.offline);
+        if (runFailure) setError(agentRunErrorMessage(runFailure, kind === 'resume' ? 'continue your request' : 'send this message'));
+        else setError(failure instanceof ApiError ? requestMessage(failure, 'send this message') : runId ? t.activityOffline : t.offline);
+        // Keep the draft and its message id so the same text can be resent later.
+        if (kind === 'message' && details.text) setInput(current => current || details.text || '');
         try {
           const refreshed = await refresh();
           if (kind === 'resume' && details.decision && decisionWasRecorded(refreshed, details.id, details.decision)) {
@@ -316,13 +346,14 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
   };
   const send = (value = input) => {
     const text = value.trim(); if (!text || streaming || busy || thread?.status === 'archived' || text.length > config.maxMessageChars) return;
-    if (!cardStorageReady || pendingCardAction.current) { setError('Finish the previous cart update before continuing.'); return; }
+    if (!cardStorageReady || !choiceStorageReady || pendingCardAction.current || pendingChoice.current) { setError('Finish the previous cart update before continuing.'); return; }
     if (/\b(?:never mind|nevermind|forget|cancel|stop)\b/i.test(text) && continuationRef.current && thread && userId) {
       continuationRef.current = null; setPendingContinuation(null);
       const key = addressContinuationKey(userId, thread.id);
       continuationWrites.current = continuationWrites.current.then(() => AsyncStorage.removeItem(key)).catch(() => undefined);
     }
-    const current = pending.current?.text === text ? pending.current : { id: randomUUID(), text };
+    const choice = activeChoice && cartChoiceReference(activeChoice);
+    const current = pending.current?.text === text ? pending.current : { id: randomUUID(), text, choice };
     pending.current = current; setCanRetry(true); setInput(''); void run('message', current);
   };
   const setRecoverCardAction = (recover: boolean) => setCardStorage(current =>
@@ -351,9 +382,9 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
         const service = await customerApi.serviceability(await accessToken(),address.pincode);
         if (continuationRef.current?.id !== pendingContinuation.id) return;
         if (useCustomer.getState().selectedAddress !== address.id) {setError('Select the saved delivery address before continuing your request.');return;}
-        if (!service.serviceable) {setError('Your address is saved, but delivery is not available there right now. Please try again later or choose another address.');return;}
+        if (!service.serviceable) {setError('Delivery isn’t available here.');return;}
         continuationRunRef.current(pendingContinuation.id,text);
-      }).catch(() => setError('Your location is saved, but we could not check delivery. Check your connection and try your request again.'));
+      }).catch(() => setError('Couldn’t check delivery.'));
     }
   }, [pendingContinuation, addressList, thread, busy, streaming, cardStorageReady, recoverCardAction]);
   const cardAction = async (cardId: string, action: string, payload: Record<string, unknown>) => {
@@ -381,13 +412,63 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       else if (payload.screen === 'cart') router.push('/cart' as Href);
       else if (payload.screen === 'products') router.push('/products' as Href);
       else if (payload.screen === 'orders') router.push('/my-dairy' as Href);
+      else if (payload.screen === 'support') router.push({ pathname: '/profile', params: { open: 'support' } });
       return;
     }
-    if (streaming || busy || cardActionInFlight.current) return;
-    if (!cardStorageReady) { setError('Your cart update is still being restored. Please try again.'); return; }
+    if (streaming || busy || cardActionInFlight.current) {
+      if (action === 'cart_choice') throw new Error('RUN_IN_PROGRESS');
+      return;
+    }
+    if (!cardStorageReady) { setError('Your cart update is still being restored.'); return; }
     if (action === 'retry_confirmation') {
       const type = typeof payload.type === 'string' ? payload.type : '';
       send(type === 'cancel_confirm' ? 'Please prepare the cancellation again.' : type === 'refund_confirm' ? 'Please prepare the refund request again.' : 'Please prepare my order again.');
+      return;
+    }
+    if (action === 'cart_choice') {
+      if (!choiceStorageReady) { setError('Your cart choice is still being restored.'); throw new Error('CHOICE_STORAGE_NOT_READY'); }
+      const choiceId = typeof payload.choiceId === 'string' && payload.choiceId ? payload.choiceId : cardId;
+      const choiceVersion = typeof payload.choiceVersion === 'number' && Number.isSafeInteger(payload.choiceVersion) ? payload.choiceVersion : undefined;
+      const variantId = typeof payload.variantId === 'string' ? payload.variantId : '';
+      const quantity = typeof payload.quantity === 'number' ? payload.quantity : NaN;
+      const old = pendingChoice.current;
+      if (old && (old.cardId !== cardId || old.choiceId !== choiceId || old.choiceVersion !== choiceVersion || old.variantId !== variantId || old.quantity !== quantity)) {
+        setError('The previous cart choice may still be processing. Please retry it before making another change.');
+        throw new Error('CHOICE_PENDING');
+      }
+      if (!variantId || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100) {
+        setError('That choice looks incomplete. Please pick a size and quantity again.');
+        throw new Error('CHOICE_INVALID');
+      }
+      const current: PendingCartChoice = old ?? { cardId, choiceId, choiceVersion, variantId, quantity, actionId: randomUUID() };
+      const decision = { choiceId, choiceVersion, variantId, quantity };
+      pendingChoice.current = current;
+      cardActionInFlight.current = true;
+      setBusy(true); setError(''); setStatus(t.activityAdding);
+      try {
+        await AsyncStorage.setItem(pendingCartChoiceKey(thread.id), JSON.stringify(current));
+        await agentClient.action(thread.id, cardId, action, decision, current.actionId);
+        await AsyncStorage.removeItem(pendingCartChoiceKey(thread.id));
+        pendingChoice.current = null;
+        setChoiceStorage((value) => value && value.threadId === thread.id ? { ...value, recover: false } : value);
+        setSubmittedChoices((value) => ({ ...value, [cardId]: true }));
+        void refresh().catch(() => undefined);
+        void useCustomer.getState().refreshCart();
+      } catch (failure) {
+        if (failure instanceof ApiError && failure.status >= 400 && failure.status < 500 && failure.status !== 408 && failure.status !== 429 && failure.code !== 'RUN_IN_PROGRESS') {
+          try { await AsyncStorage.removeItem(pendingCartChoiceKey(thread.id)); pendingChoice.current = null; setChoiceStorage((value) => value && value.threadId === thread.id ? { ...value, recover: false } : value); }
+          catch { setChoiceStorage((value) => value && value.threadId === thread.id ? { ...value, recover: true } : value); setError('This cart choice needs a safe retry before another change.'); throw failure; }
+          if (['PRICE_CHANGED', 'DRAFT_EXPIRED', 'INVENTORY_INSUFFICIENT', 'ITEM_UNAVAILABLE', 'DRAFT_NOT_PENDING', 'CONCURRENT_MODIFICATION'].includes(failure.code ?? '')) {
+            setError(failure.code === 'PRICE_CHANGED' ? 'The price changed. Review the latest choice.' : 'Review the latest choice or ask for the item again.');
+            void refresh().catch(() => undefined);
+          } else if (failure.code === 'ADDRESS_NOT_SERVICEABLE') setError('Delivery is unavailable here. Choose another address.');
+          else setError('Couldn’t save this choice. Please pick again.');
+          throw failure;
+        }
+        setChoiceStorage((value) => value && value.threadId === thread.id ? { ...value, recover: true } : value);
+        setError('This cart choice may already be saved. Retry safely to check.');
+        throw failure;
+      } finally { cardActionInFlight.current = false; setBusy(false); setStatus(''); }
       return;
     }
     const encoded = JSON.stringify(payload);
@@ -414,9 +495,9 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       if (failure instanceof ApiError && failure.status >= 400 && failure.status < 500 && failure.status !== 408 && failure.status !== 429 && failure.code !== 'RUN_IN_PROGRESS') {
         try { await AsyncStorage.removeItem(pendingCardActionKey(thread.id)); pendingCardAction.current = null; setRecoverCardAction(false); }
         catch { setRecoverCardAction(true); setError('This cart update needs a safe retry before another change.'); return; }
-        if (failure.code === 'INVENTORY_INSUFFICIENT') appendIssueCard({ cardId: randomUUID(), type: 'out_of_stock', payload: { title: 'Item unavailable', description: 'This item is no longer available. Browse other products or review your cart.' } });
+        if (failure.code === 'INVENTORY_INSUFFICIENT' || failure.code === 'ITEM_UNAVAILABLE') appendIssueCard({ cardId: randomUUID(), type: 'out_of_stock', payload: { title: 'Item unavailable', description: 'This item is no longer available. Browse other products or review your cart.' } });
         else if (failure.code === 'ADDRESS_NOT_SERVICEABLE') appendIssueCard({ cardId: randomUUID(), type: 'delivery_unavailable', payload: { title: 'Delivery is unavailable here', description: 'Choose another address or try again later.' } });
-        else setError(failure.code === 'CONCURRENT_MODIFICATION' ? 'Your delivery address changed. Search for the item again.' : 'Could not add this item. Check its availability and try again.');
+        else setError(failure.code === 'PRICE_CHANGED' ? 'This price has changed. Search for the item again to review its current price.' : failure.code === 'CONCURRENT_MODIFICATION' ? 'Your cart changed. Search for the item again.' : 'Couldn’t add this item. Check its availability and try again.');
       } else { setRecoverCardAction(true); setError('This cart update may already be applied. Retry safely to check.'); }
     }
     finally { cardActionInFlight.current = false; setBusy(false); setStatus(''); }
@@ -439,16 +520,21 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       <Pressable accessibilityRole="button" accessibilityLabel={t.feedbackDown} accessibilityState={{ selected: feedback[item.id] === 'down' }} onPress={() => void rate(item.id, 'down')} hitSlop={8}><Ionicons name={feedback[item.id] === 'down' ? 'thumbs-down' : 'thumbs-down-outline'} size={18} color="#526c39" /></Pressable>
     </View>}
   </View>;
+  const activeChoice = thread?.messages.flatMap(message => message.cards).reverse()
+    .find(card => !submittedChoices[card.cardId] && cartChoiceOpen(card));
+  const choicePending = !!activeChoice;
+  const footerStatus = status || (consent === 'loading' ? t.loading : '') || (choicePending && !streaming && !busy ? t.activityChoice : '');
   return <View style={[styles.root, { paddingTop: insets.top }]}>
     <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel={t.close} hitSlop={12} onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#263520" /></Pressable><Text style={styles.headerTitle}>{t.title}</Text>{consent === 'accepted' && <><Pressable accessibilityRole="button" accessibilityLabel="Chat history" hitSlop={10} disabled={busy || streaming} onPress={() => { setHistoryOpen(true); void loadChatHistory(); }} style={styles.headerButton}><Ionicons name="time-outline" size={23} color="#365a25" /></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Ask support" hitSlop={10} onPress={() => setSupportOpen(true)} style={styles.headerButton}><Ionicons name="headset-outline" size={23} color="#365a25" /></Pressable><Pressable accessibilityRole="button" disabled={busy || streaming} onPress={newChat} style={styles.headerButton}><Text style={styles.link}>{t.newChat}</Text></Pressable></>}</View>
     {consent === 'required' ? <View style={styles.consent}><Ionicons name="chatbubble-ellipses-outline" size={36} color="#405f29" /><Text style={styles.heading}>{t.consentTitle}</Text><Text style={styles.body}>{t.consentBody}</Text>{!!error && <Text style={styles.error}>{error}</Text>}<Pressable accessibilityRole="button" disabled={busy} onPress={() => void accept()} style={styles.primary}><Text style={styles.primaryText}>{t.agree}</Text></Pressable><Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.secondary}><Text style={styles.link}>{t.decline}</Text></Pressable></View>
-    : consent === 'loading' ? <View style={styles.consent}><Text style={styles.body}>{error || t.loading}</Text>{!!error && <><Pressable accessibilityRole="button" onPress={() => { setError(''); setLoadAttempt(value => value + 1); }} style={styles.primary}><Text style={styles.primaryText}>{t.retry}</Text></Pressable><Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.secondary}><Text style={styles.link}>{t.close}</Text></Pressable></>}</View>
+    : consent === 'loading' && !thread ? <View style={styles.consent}><View style={styles.branding}><Image source={images.profileBanner} style={styles.brandArt} contentFit="cover" cachePolicy="memory-disk" accessibilityLabel="DairyDirect farm" /><View style={styles.brandRow}><ActivityIndicator size="small" color="#405f29" /><Text style={styles.body} accessibilityLiveRegion="polite">{error ? '' : t.opening}</Text></View></View>{!!error && <><Text style={styles.error}>{error}</Text><Pressable accessibilityRole="button" onPress={() => { setError(''); setLoadAttempt(value => value + 1); }} style={styles.primary}><Text style={styles.primaryText}>{t.retry}</Text></Pressable><Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.secondary}><Text style={styles.link}>{t.close}</Text></Pressable></>}</View>
     : <KeyboardAvoidingView style={styles.grow} behavior="padding" automaticOffset>
-      <FlatList ref={list} data={thread?.messages ?? []} keyExtractor={item => item.id} renderItem={renderMessage} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" onScroll={event => { const {contentOffset,contentSize,layoutMeasurement} = event.nativeEvent; shouldScrollToEnd.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 100; }} scrollEventThrottle={32} onContentSizeChange={() => { if (shouldScrollToEnd.current) list.current?.scrollToEnd({ animated: false }); }} ListFooterComponent={status ? <Text style={styles.activity} accessibilityLiveRegion="polite">{status}</Text> : undefined} ListHeaderComponent={thread?.nextCursor ? <Pressable accessibilityRole="button" disabled={loadingHistory} onPress={() => void loadEarlier()} style={styles.chip}><Text style={styles.link}>{loadingHistory ? t.loadingEarlier : t.earlier}</Text></Pressable> : undefined} ListEmptyComponent={<View style={styles.empty}><Text style={styles.heading}>{t.greeting}</Text><View style={styles.suggestions}>{config.suggestedPrompts.map(prompt => <Pressable key={prompt} style={styles.chip} onPress={() => send(prompt)} accessibilityRole="button"><Text style={styles.link}>{prompt}</Text></Pressable>)}</View></View>} />
+      <FlatList ref={list} data={thread?.messages ?? []} keyExtractor={item => item.id} renderItem={renderMessage} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" onScroll={event => { const {contentOffset,contentSize,layoutMeasurement} = event.nativeEvent; shouldScrollToEnd.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 100; }} scrollEventThrottle={32} onContentSizeChange={() => { if (shouldScrollToEnd.current) list.current?.scrollToEnd({ animated: false }); }} ListFooterComponent={footerStatus ? <Text style={styles.activity} accessibilityLiveRegion="polite">{footerStatus}</Text> : undefined} ListHeaderComponent={thread?.nextCursor ? <Pressable accessibilityRole="button" disabled={loadingHistory} onPress={() => void loadEarlier()} style={styles.chip}><Text style={styles.link}>{loadingHistory ? t.loadingEarlier : t.earlier}</Text></Pressable> : undefined} ListEmptyComponent={<View style={styles.empty}><Text style={styles.heading}>{welcomeFor(thread?.id)}</Text><View style={styles.suggestions}>{config.suggestedPrompts.map(prompt => <Pressable key={prompt} style={styles.chip} onPress={() => send(prompt)} accessibilityRole="button"><Text style={styles.link}>{prompt}</Text></Pressable>)}</View></View>} />
       {showBrowseNotice && <View style={styles.browseNotice}><Text style={styles.browseText}>{pushStatus === 'enabled' && alertsEnabled ? t.browseNotice : t.browseNoticeNoPush}</Text><Pressable accessibilityRole="button" accessibilityLabel={t.dismissNotice} hitSlop={8} onPress={() => setShowBrowseNotice(false)}><Ionicons name="close" size={18} color="#526c39" /></Pressable></View>}
       {nudgeVisible && <View style={styles.browseNotice}><Pressable accessibilityRole="button" disabled={busy || streaming} style={{ flex: 1 }} onPress={() => { setInput(`Show me ${nudgeName} again`); setNudgeVisible(false); }}><Text style={styles.browseText}>Suggested: Show me {nudgeName} again</Text><Text style={styles.link}>Use suggestion</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Dismiss suggestion" hitSlop={8} onPress={() => setNudgeVisible(false)}><Ionicons name="close" size={18} color="#526c39" /></Pressable></View>}
       {recoverCardAction && <View style={styles.browseNotice}><Text style={styles.browseText}>A cart update needs to be checked before you continue.</Text><Pressable accessibilityRole="button" disabled={busy || streaming} onPress={() => { const action = pendingCardAction.current; if (action) void cardAction(action.cardId, action.action, JSON.parse(action.payload) as Record<string, unknown>); }}><Text style={styles.link}>Retry safely</Text></Pressable></View>}
-      {!!error && <View style={styles.errorRow}><Text style={styles.error}>{error}</Text>{canRetry && <Pressable onPress={() => send(pending.current?.text)}><Text style={styles.link}>{t.retry}</Text></Pressable>}</View>}
+      {recoverChoice && <View style={styles.browseNotice}><Text style={styles.browseText}>A cart choice needs to be checked before you continue.</Text><Pressable accessibilityRole="button" disabled={busy || streaming} onPress={() => { const choice = pendingChoice.current; if (choice) void cardAction(choice.cardId, 'cart_choice', { choiceId: choice.choiceId, choiceVersion: choice.choiceVersion, variantId: choice.variantId, quantity: choice.quantity }).catch(() => undefined); }}><Text style={styles.link}>Retry safely</Text></Pressable></View>}
+      {!!error && <View style={styles.errorRow}><Text style={styles.error}>{error}</Text>{canRetry ? <Pressable onPress={() => send(pending.current?.text)}><Text style={styles.link}>{t.retry}</Text></Pressable> : consent === 'loading' ? <Pressable onPress={() => { setError(''); setLoadAttempt(value => value + 1); }}><Text style={styles.link}>{t.retry}</Text></Pressable> : null}</View>}
       {thread?.status === 'archived' ? <Text style={styles.status}>{t.archived}</Text> : <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 10) }]}><TextInput style={styles.input} multiline value={input} onChangeText={setInput} placeholder={t.input} accessibilityLabel={t.input} maxLength={config.maxMessageChars} editable={!streaming && !busy} /><Pressable style={styles.send} accessibilityRole="button" accessibilityLabel={streaming ? t.stop : t.send} disabled={!streaming && !input.trim()} onPress={() => streaming ? void stop() : send()}><Ionicons name={streaming ? 'stop' : 'send'} size={20} color="#fff" /></Pressable></View>}
     </KeyboardAvoidingView>}
     <AddressPanel visible={addressOpen} seed={addressSeed} onClose={() => setAddressOpen(false)} onAddressSaved={id => {if (continuationRef.current) saveContinuation({...continuationRef.current,addressId:id,waitingForLocation:true,selected:false});}} onLocationConfirmed={id => {if (continuationRef.current) saveContinuation({...continuationRef.current,addressId:id,waitingForLocation:false,selected:true});}} />
@@ -461,7 +547,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
     <BottomSheet visible={historyOpen} onClose={() => setHistoryOpen(false)} title="Chat history">
       <View style={{ gap: 8 }}>
         {chatHistory.map(chat => <Pressable key={chat.id} accessibilityRole="button" style={styles.historyItem} onPress={() => { setHistoryOpen(false); setTimeout(() => router.setParams({ threadId: chat.id, nudgeName: undefined }), 150); }}>
-          <Text style={styles.historyTitle}>{chat.title || 'Conversation'}</Text>
+          <Text style={styles.historyTitle}>{chat.title || 'New chat'}</Text>
           <Text style={styles.status}>{new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(new Date(chat.lastMessageAt))}{chat.status === 'active' ? ' · Current' : ''}</Text>
         </Pressable>)}
         {!!historyError && <Text style={styles.error}>{historyError}</Text>}
@@ -474,7 +560,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
 }
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f8f9f6' }, grow: { flex: 1 }, header: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#e1e3dc' }, headerTitle: { flex: 1, fontSize: 19, fontWeight: '700', color: '#263520' }, headerButton: { minHeight: 44, justifyContent: 'center' }, historyItem: { padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#e1e3dc', gap: 4 }, historyTitle: { fontSize: 15, fontWeight: '600', color: '#263520' },
-  consent: { flex: 1, justifyContent: 'center', padding: 28, gap: 18 }, heading: { color: '#263520', fontSize: 22, fontWeight: '700' }, body: { fontSize: 15, lineHeight: 22, color: '#293027' }, link: { color: '#365a25', fontWeight: '700' }, primary: { backgroundColor: '#405f29', minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 12 }, primaryText: { color: '#fff', fontWeight: '700' }, secondary: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  consent: { flex: 1, justifyContent: 'center', padding: 28, gap: 18 }, branding: { alignItems: 'center', gap: 16 }, brandArt: { width: '100%', height: 180, borderRadius: 22 }, brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 }, heading: { color: '#263520', fontSize: 22, fontWeight: '700' }, body: { fontSize: 15, lineHeight: 22, color: '#293027' }, link: { color: '#365a25', fontWeight: '700' }, primary: { backgroundColor: '#405f29', minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 12 }, primaryText: { color: '#fff', fontWeight: '700' }, secondary: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   list: { padding: 16, gap: 12, flexGrow: 1 }, empty: { paddingVertical: 28, gap: 16 }, suggestions: { gap: 8, alignItems: 'flex-start' }, chip: { padding: 12, minHeight: 44, borderRadius: 18, borderWidth: 1, borderColor: '#d8dfd0', backgroundColor: '#fff' }, message: { maxWidth: '92%', borderRadius: 14, padding: 12, gap: 8 }, userMessage: { alignSelf: 'flex-end', backgroundColor: '#e3eddb' }, assistantMessage: { alignSelf: 'flex-start', backgroundColor: '#fff', borderWidth: 1, borderColor: '#e6e9e3' },
   status: { paddingHorizontal: 18, paddingBottom: 5, color: '#687263' }, browseNotice: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 8, padding: 10, borderRadius: 10, backgroundColor: '#edf3e7' }, browseText: { flex: 1, color: '#405f29', fontSize: 13, lineHeight: 18 }, errorRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 6 }, error: { color: '#a2382e', flexShrink: 1 }, composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, backgroundColor: '#fff', paddingHorizontal: 12, paddingTop: 10, borderTopWidth: 1, borderColor: '#e1e3dc' }, input: { flex: 1, backgroundColor: '#f4f5f2', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10, minHeight: 46, maxHeight: 120, color: '#252820', fontSize: 15 }, send: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: '#405f29' },
   feedback: { flexDirection: 'row', gap: 18, alignItems: 'center', paddingTop: 6 }, activity: {alignSelf:'flex-start', color:'#687263', fontSize:13, paddingHorizontal:4, paddingVertical:4},

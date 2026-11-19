@@ -1,4 +1,5 @@
 import type { TransactionContext } from '../../../platform/database/database.js';
+import type { CartView } from '../../cart/contracts/cart.js';
 import type { QuoteSnapshot } from '../../cart/contracts/quote.js';
 import type { OrderView } from '../../orders/contracts/orders.js';
 import type { IdempotencyOwner } from '../../../common/idempotency/idempotency.js';
@@ -26,6 +27,8 @@ export interface CheckoutQuoteResult {
   readonly intentExpiresAt: string;
   /** Advisory only; placement rechecks the same policy inside its transaction. */
   readonly codAvailable: boolean;
+  /** Additive cart view from the same evaluation as the quote and intent. */
+  readonly cart: CartView;
 }
 
 export type PreferredMethod = 'GATEWAY' | 'COD';
@@ -58,8 +61,17 @@ export interface CheckoutPlaceResult {
   readonly order: OrderView;
   /** Null for zero-due and COD confirmations (no gateway call, ever). */
   readonly payment: CheckoutPaymentView | null;
-  readonly confirmation: 'CONFIRMED' | 'PENDING_PAYMENT';
+  /** A recovered cancelled, expired or failed order is not awaiting payment. */
+  readonly confirmation: 'CONFIRMED' | 'PENDING_PAYMENT' | 'ORDER_CLOSED';
 }
+
+/** Status checks never claim a request, place an order, or initiate payment. */
+export type CheckoutPlacementStatus =
+  | {
+      state: 'ORDER_FOUND';
+      order: Pick<OrderView, 'orderId' | 'orderNumber' | 'status' | 'paymentStatus'>;
+    }
+  | { state: 'PROCESSING' | 'UNKNOWN' };
 
 /** Internal callers may fence and record an approval in the placement transaction. */
 export interface CheckoutPlacementGuard {
@@ -99,6 +111,10 @@ export interface CheckoutOperations {
   ): Promise<{ orderId: string; unitPricePaise: string; totalPaise: string }>;
   /** Re-prices the cart, persists the expiring snapshot and issues the intent. */
   quote(userId: string, input: CheckoutQuoteRequest): Promise<CheckoutQuoteResult>;
+  /** A read-only lookup of the authenticated customer's original HTTP request. */
+  placementStatus(userId: string, key: string): Promise<CheckoutPlacementStatus>;
+  /** Read an already committed order without placing it or initializing payment. */
+  recoverCommitted(userId: string, operationId: string): Promise<CheckoutPlaceResult | null>;
   /**
    * Consumes the cart intent and places the order in ONE transaction:
    * capacity/coupon/stock/wallet obligations, frozen order + history +

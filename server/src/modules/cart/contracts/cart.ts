@@ -8,14 +8,15 @@ export interface CartLineView {
   image: string | null;
   quantity: string;
   unitPricePaise: string;
+  currentUnitPricePaise: string | null;
   mrpPaise: string;
   lineSubtotalPaise: string;
 }
 export interface CartView {
   cartId: string;
   userId: string;
-  storeId: string;
-  addressId: string;
+  storeId: string | null;
+  addressId: string | null;
   version: number;
   couponCode: string | null;
   lines: CartLineView[];
@@ -31,15 +32,21 @@ export interface CartMutationOptions {
   expectedVersion: number;
   /** Establishes the first cart at this address's store when the user has none. */
   addressId?: string;
+  /** Reject a stale catalog price rather than silently charging a different one. */
+  displayedUnitPricePaise?: string;
+  /** Explicit customer approval of the current price of an existing line. */
+  acceptPriceChange?: boolean;
+  /** Require the full confirmed quantity to be available at the cart's store. */
+  requireAvailableQuantity?: boolean;
   /** Join the caller's transaction (idempotent HTTP execution) instead of opening one. */
   tx?: TransactionContext;
 }
 export const CART_SERVICE = Symbol('CART_SERVICE');
 export interface CartService {
-  /** Resolve the single active cart for the user; rebinds store when the address moved stores. */
+  /** Resolve the single active cart; an optional address rebinds it to that store. */
   getOrCreateActiveCart(
     userId: string,
-    addressId: string,
+    addressId: string | undefined,
     tx?: TransactionContext,
   ): Promise<CartView>;
   /** Read-only view with freshly computed issues; never mutates the cart. */

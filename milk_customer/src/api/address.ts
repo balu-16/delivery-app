@@ -58,7 +58,7 @@ export function resolveApiAddress({ configuredUrl, development, developmentHost,
     if (!['http:', 'https:', 'exp:', 'exps:'].includes(host.protocol) || host.username || host.password || !isLocalHost(host.hostname)) throw new Error();
     return `http://${host.hostname}:${Number(port)}`;
   } catch {
-    throw new ApiAddressError('BACKEND_DISCOVERY', 'Could not find the local customer server from the Expo connection.');
+    throw new ApiAddressError('BACKEND_DISCOVERY', 'Couldn’t find the local customer server from the Expo connection.');
   }
 }
 

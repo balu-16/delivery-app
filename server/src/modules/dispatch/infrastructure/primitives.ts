@@ -126,6 +126,9 @@ export type TaskRow = {
   dispatch_attempts: number;
   next_dispatch_at: Date | null;
   no_rider_alerted_at: Date | null;
+  released_at: Date | null;
+  no_rider_since: Date | null;
+  no_rider_seconds: string;
   distance_metres: number | null;
   cancel_reason: string | null;
   version: string;
@@ -133,7 +136,7 @@ export type TaskRow = {
 };
 
 const TASK_COLUMNS =
-  'id,order_id,store_id,customer_user_id,status,rider_id,attempt_no,offered_rider_id,pickup_at,arrived_store_at,arrived_customer_at,dispatched_at,delivered_at,failure_reason,failure_evidence,pod_media_id,geofence_store_distance_m,geofence_customer_distance_m,eta_min_minutes,eta_max_minutes,eta_updated_at,dispatch_attempts,next_dispatch_at,no_rider_alerted_at,distance_metres,cancel_reason,version::text AS "version",created_at';
+  'id,order_id,store_id,customer_user_id,status,rider_id,attempt_no,offered_rider_id,pickup_at,arrived_store_at,arrived_customer_at,dispatched_at,delivered_at,failure_reason,failure_evidence,pod_media_id,geofence_store_distance_m,geofence_customer_distance_m,eta_min_minutes,eta_max_minutes,eta_updated_at,dispatch_attempts,next_dispatch_at,no_rider_alerted_at,released_at,no_rider_since,no_rider_seconds::text AS "no_rider_seconds",distance_metres,cancel_reason,version::text AS "version",created_at';
 
 export async function loadTask(
   tx: TransactionContext | Database,

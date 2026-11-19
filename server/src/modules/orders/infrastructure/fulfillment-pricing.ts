@@ -16,7 +16,7 @@ export async function priceFulfillment(
   tx: TransactionContext,
   item: FulfillmentSource,
   fulfilled: string,
-  storeId: string,
+  _storeId: string,
   replacementId?: string,
 ) {
   let variantId = item.variant_id,
@@ -34,10 +34,9 @@ export async function priceFulfillment(
       mrp: string;
     }>`SELECT p.name||' — '||v.name AS name,
       COALESCE(p.hsn_code,'') AS hsn,COALESCE(p.gst_rate_bps,0) AS tax_bps,cp.selling_paise::text AS selling,cp.mrp_paise::text AS mrp
-      FROM catalog_variants v JOIN catalog_products p ON p.id=v.product_id JOIN catalog_prices cp ON cp.variant_id=v.id
-      WHERE v.id=${replacementId}::uuid AND cp.store_id=${storeId}::uuid AND cp.valid_from<=clock_timestamp()
-        AND (cp.valid_to IS NULL OR cp.valid_to>clock_timestamp()) AND p.published AND p.deleted_at IS NULL AND v.deleted_at IS NULL
-      LIMIT 1 FOR SHARE OF v,p,cp`.execute(tx);
+      FROM catalog_variants v JOIN catalog_products p ON p.id=v.product_id JOIN catalog_global_prices cp ON cp.variant_id=v.id
+      WHERE v.id=${replacementId}::uuid AND p.published AND p.deleted_at IS NULL AND v.deleted_at IS NULL
+      LIMIT 1 FOR SHARE OF v,p`.execute(tx);
     const row = found.rows[0];
     if (!row) throw new Error('SUBSTITUTION_NOT_PERMITTED');
     variantId = replacementId;

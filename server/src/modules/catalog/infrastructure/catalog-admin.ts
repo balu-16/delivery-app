@@ -190,7 +190,7 @@ export class PostgresCatalogAdmin extends CatalogWrite implements CatalogAdmin {
     if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     const previous = await sql<{
       selling_paise: string;
-    }>`SELECT selling_paise::text FROM catalog_prices WHERE store_id=${data.storeId}::uuid AND variant_id=${data.variantId}::uuid AND valid_from<=clock_timestamp() AND (valid_to IS NULL OR valid_to>clock_timestamp())`.execute(
+    }>`SELECT selling_paise::text FROM catalog_global_prices WHERE variant_id=${data.variantId}::uuid`.execute(
       this.db,
     );
     const old = previous.rows[0]?.selling_paise;
@@ -235,14 +235,14 @@ export class PostgresCatalogAdmin extends CatalogWrite implements CatalogAdmin {
         tx,
       );
     if (!locked.rows.length) throw new Error('RESOURCE_NOT_FOUND');
-    // Serializes all changes to a variant/store, including the first price.
-    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${data.storeId}:${data.variantId}`},0))`.execute(
+    // A price applies to the variant across all stores.
+    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`price:${data.variantId}`},0))`.execute(
       tx,
     );
     if (!approved) {
       const current = await sql<{
         selling_paise: string;
-      }>`SELECT selling_paise::text FROM catalog_prices WHERE store_id=${data.storeId}::uuid AND variant_id=${data.variantId}::uuid AND valid_from<=clock_timestamp() AND (valid_to IS NULL OR valid_to>clock_timestamp())`.execute(
+      }>`SELECT selling_paise::text FROM catalog_global_prices WHERE variant_id=${data.variantId}::uuid`.execute(
         tx,
       );
       const old = current.rows[0]?.selling_paise;

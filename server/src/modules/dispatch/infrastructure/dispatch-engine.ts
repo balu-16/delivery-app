@@ -157,6 +157,46 @@ export class DispatchEngine {
     return result;
   }
 
+  /**
+   * Bounded reconciliation for tasks that missed their trigger: an UNASSIGNED
+   * task queued at infinity whose persisted order status already passed the
+   * configured picking/packing gate is released to the pool. Holds and
+   * scheduled delivery times are respected, and each pass is capped.
+   */
+  async reconcileStuckTasks(limit = 100): Promise<number> {
+    const mode = await this.settings.trigger();
+    const passed = mode === 'ON_PACKED' ? ['PACKED'] : ['PICKING', 'PACKED'];
+    const stuck = await sql<{
+      id: string;
+    }>`SELECT t.id FROM delivery_tasks t JOIN orders o ON o.id=t.order_id
+      WHERE t.status='UNASSIGNED' AND t.next_dispatch_at='infinity'::timestamptz
+      AND t.dispatch_not_before <= clock_timestamp() AND NOT COALESCE(o.on_hold,false)
+      AND o.status=ANY(${passed}) ORDER BY t.created_at, t.id LIMIT ${limit}`.execute(this.db);
+    let released = 0;
+    for (const row of stuck.rows) {
+      const done = await transactionWithRetry(this.db, async (tx) => {
+        const updated = await sql<{
+          id: string;
+        }>`UPDATE delivery_tasks SET next_dispatch_at=clock_timestamp(),
+          released_at=COALESCE(released_at,clock_timestamp())
+          WHERE id=${row.id}::uuid AND status='UNASSIGNED' AND next_dispatch_at='infinity'::timestamptz
+          RETURNING id`.execute(tx);
+        if (!updated.rows[0]) return false;
+        await taskHistory(
+          tx,
+          row.id,
+          'UNASSIGNED',
+          'UNASSIGNED',
+          null,
+          'released by reconciliation: trigger missed',
+        );
+        return true;
+      }).catch(() => false);
+      if (done) released += 1;
+    }
+    return released;
+  }
+
   /** Sweep: each due task is revalidated under lock by dispatchOne. */
   async dispatchDue(limit = 20): Promise<number> {
     const due = await sql<{ order_id: string }>`SELECT order_id FROM delivery_tasks
@@ -230,6 +270,9 @@ export class DispatchEngine {
     task: TaskRow,
     now: Date,
   ): Promise<boolean> {
+    // The no-rider timer starts at the first dispatch attempt, so an old
+    // recovered task gets a fair chance before auto-cancel can fire.
+    if (!task.dispatched_at) return false;
     const autoCancelMinutes = await this.settings.number('dispatchAutoCancelMinutes');
     const release = await sql<{
       release_at: Date;
@@ -267,23 +310,29 @@ export class DispatchEngine {
 
   private async scheduleRetry(tx: TransactionContext, task: TaskRow, now: Date): Promise<void> {
     const next = new Date(now.getTime() + NO_CANDIDATE_BACKOFF_SECONDS * 1000);
-    await sql`UPDATE delivery_tasks SET dispatch_attempts=dispatch_attempts+1,dispatched_at=COALESCE(dispatched_at,${now.toISOString()}::timestamptz),next_dispatch_at=${next.toISOString()}::timestamptz WHERE id=${task.id}::uuid`.execute(
+    await sql`UPDATE delivery_tasks SET dispatch_attempts=dispatch_attempts+1,dispatched_at=COALESCE(dispatched_at,${now.toISOString()}::timestamptz),next_dispatch_at=${next.toISOString()}::timestamptz,no_rider_since=COALESCE(no_rider_since,${now.toISOString()}::timestamptz) WHERE id=${task.id}::uuid`.execute(
       tx,
     );
     await this.maybeAlertNoRider(tx, { ...task, dispatch_attempts: task.dispatch_attempts + 1 });
   }
 
-  /** Riders with a live offer or a recent decline for this task are excluded. */
+  /**
+   * Riders with a live offer, a recent decline, or a recently expired offer
+   * for this task are excluded. Ignored offers cool down like declines so an
+   * unresponsive rider is not immediately re-offered.
+   */
   private async excludedRiders(
     tx: TransactionContext | Database,
     taskId: string,
     now: Date,
   ): Promise<Set<string>> {
     const cooldownSeconds = await this.settings.number('offerDeclineCooldownSeconds');
+    const since = new Date(now.getTime() - cooldownSeconds * 1000).toISOString();
     const rows = await sql<{ rider_id: string }>`SELECT DISTINCT rider_id FROM rider_offers
       WHERE task_id=${taskId}::uuid AND (
         (status='SENT' AND expires_at > ${now.toISOString()}::timestamptz)
-        OR (status='DECLINED' AND responded_at > ${new Date(now.getTime() - cooldownSeconds * 1000).toISOString()}::timestamptz)
+        OR (status='DECLINED' AND responded_at > ${since}::timestamptz)
+        OR (status='EXPIRED' AND expires_at > ${since}::timestamptz)
         OR status='ACCEPTED')`.execute(tx);
     return new Set(rows.rows.map((row) => row.rider_id));
   }
@@ -292,8 +341,15 @@ export class DispatchEngine {
     candidates: string[],
     store: { lat: number; lng: number },
   ): Promise<CandidateScoreInput[]> {
-    const speedKph = await this.config.get('mapFallbackSpeedKph');
-    const speedMps = Math.max(speedKph, 1) / 3.6;
+    const keys = ['mapFallbackSpeedKph', 'mapMatrixTopK', 'mapMatrixMaxPairs'] as const;
+    const route = this.config.getMany
+      ? await this.config.getMany(keys)
+      : {
+          mapFallbackSpeedKph: await this.config.get('mapFallbackSpeedKph'),
+          mapMatrixTopK: await this.config.get('mapMatrixTopK'),
+          mapMatrixMaxPairs: await this.config.get('mapMatrixMaxPairs'),
+        };
+    const speedMps = Math.max(route.mapFallbackSpeedKph, 1) / 3.6;
     const rows = await sql<{
       rider_id: string;
       lat: number | null;
@@ -325,7 +381,8 @@ export class DispatchEngine {
           haversineMetres(store, { lat: Number(a.lat), lng: Number(a.lng) }) -
           haversineMetres(store, { lat: Number(b.lat), lng: Number(b.lng) }),
       );
-    const topK = Math.max(1, Math.min(await this.config.get('mapMatrixTopK'), GEO_CANDIDATE_LIMIT));
+    // One destination per attempt, so each selected rider consumes one pair.
+    const topK = Math.min(route.mapMatrixTopK, route.mapMatrixMaxPairs, 50, GEO_CANDIDATE_LIMIT);
     const selected = eligibleRows.slice(0, topK);
     const estimates = new Map<string, number>();
     if (this.maps && selected.length) {
@@ -370,7 +427,7 @@ export class DispatchEngine {
       VALUES(${offerId}::uuid,${task.id}::uuid,${riderId}::uuid,${task.attempt_no},'SENT',${now.toISOString()}::timestamptz,${expiresAt.toISOString()}::timestamptz)`.execute(
       tx,
     );
-    await sql`UPDATE delivery_tasks SET status='OFFERED',offered_rider_id=${riderId}::uuid,dispatch_attempts=dispatch_attempts+1,dispatched_at=COALESCE(dispatched_at,${now.toISOString()}::timestamptz),next_dispatch_at=${new Date(expiresAt.getTime() + 1000).toISOString()}::timestamptz,version=version+1 WHERE id=${task.id}::uuid`.execute(
+    await sql`UPDATE delivery_tasks SET status='OFFERED',offered_rider_id=${riderId}::uuid,dispatch_attempts=dispatch_attempts+1,dispatched_at=COALESCE(dispatched_at,${now.toISOString()}::timestamptz),next_dispatch_at=${new Date(expiresAt.getTime() + 1000).toISOString()}::timestamptz,version=version+1,no_rider_seconds=no_rider_seconds+COALESCE(EXTRACT(EPOCH FROM (${now.toISOString()}::timestamptz - no_rider_since))::bigint,0),no_rider_since=NULL WHERE id=${task.id}::uuid`.execute(
       tx,
     );
     await taskHistory(tx, task.id, task.status, 'OFFERED', null, 'offer sent');

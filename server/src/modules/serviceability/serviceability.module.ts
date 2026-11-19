@@ -13,8 +13,10 @@ import {
 } from '../stores/contracts/signals.js';
 import type { StoreAvailability } from '../stores/contracts/schedule.js';
 import { ConfigurableFakeMaps } from '../../adapters/maps/configurable-fake.js';
+import { buildOlaConfig } from '../../adapters/maps/config.js';
 import { OlaMaps } from '../../adapters/maps/ola.js';
 import { ResilientMaps } from '../../adapters/maps/resilient.js';
+import { createLogger } from '../../common/logging/logger.js';
 import { ServiceabilityQuery } from './application/serviceability.js';
 import { PostgresServiceability } from './infrastructure/postgres-serviceability.js';
 import { PostgresCapacityClaims } from './infrastructure/postgres-capacity.js';
@@ -80,55 +82,68 @@ import { IDENTITY_ACCESS, type IdentityAccess } from '../identity/contracts/iden
       provide: MAPS,
       inject: [ConfigService, APP_CONFIG, PLATFORM_REDIS],
       useFactory: (env: ConfigService, config: AppConfig, redis: Redis) => {
-        const settings = async () => ({
-          cacheTtlSeconds: await config.get('mapCacheTtlSeconds'),
-          speedKph: await config.get('mapFallbackSpeedKph'),
-          topK: await config.get('mapMatrixTopK'),
-          maxPairs: await config.get('mapMatrixMaxPairs'),
-        });
+        const settings = async () => {
+          const keys = [
+            'mapCacheTtlSeconds',
+            'mapFallbackSpeedKph',
+            'mapMatrixTopK',
+            'mapMatrixMaxPairs',
+          ] as const;
+          if (config.getMany) {
+            const values = await config.getMany(keys);
+            return {
+              cacheTtlSeconds: values.mapCacheTtlSeconds,
+              speedKph: values.mapFallbackSpeedKph,
+              topK: values.mapMatrixTopK,
+              maxPairs: values.mapMatrixMaxPairs,
+            };
+          }
+          const [cacheTtlSeconds, speedKph, topK, maxPairs] = await Promise.all([
+            config.get('mapCacheTtlSeconds'),
+            config.get('mapFallbackSpeedKph'),
+            config.get('mapMatrixTopK'),
+            config.get('mapMatrixMaxPairs'),
+          ]);
+          return { cacheTtlSeconds, speedKph, topK, maxPairs };
+        };
+        const logger = createLogger(env.get('LOG_LEVEL'));
+        const cache = {
+          get: (key: string) => redis.get(key),
+          set: async (key: string, value: string, ttl: number) => {
+            await redis.set(key, value, 'EX', ttl);
+          },
+        };
         if (env.get('MAPS_PROVIDER') === 'fake')
           return new ResilientMaps(
             new ConfigurableFakeMaps(async () => (await settings()).speedKph),
-            {
-              get: (key) => redis.get(key),
-              set: async (key, value, ttl) => {
-                await redis.set(key, value, 'EX', ttl);
-              },
-            },
+            cache,
             settings,
+            'fake',
+            logger,
           );
         const ola = new OlaMaps(
-          {
-            baseUrl: env.get('OLA_MAPS_BASE_URL'),
-            apiKey: env.get('OLA_MAPS_API_KEY'),
-            timeoutMs: env.get('OLA_MAPS_TIMEOUT_MS'),
-            maxAttempts: env.get('OLA_MAPS_MAX_ATTEMPTS'),
-            breakerFailures: env.get('OLA_MAPS_BREAKER_FAILURES'),
-            breakerCooldownMs: env.get('OLA_MAPS_BREAKER_COOLDOWN_MS'),
-            paths: {
-              autocomplete: env.get('OLA_MAPS_AUTOCOMPLETE_PATH'),
-              details: env.get('OLA_MAPS_DETAILS_PATH'),
-              geocode: env.get('OLA_MAPS_GEOCODE_PATH'),
-              reverse: env.get('OLA_MAPS_REVERSE_PATH'),
-              directions: env.get('OLA_MAPS_DIRECTIONS_PATH'),
-              matrix: env.get('OLA_MAPS_MATRIX_PATH'),
-            },
-          },
+          buildOlaConfig({
+            OLA_MAPS_API_KEY: env.get('OLA_MAPS_API_KEY'),
+            OLA_MAPS_BASE_URL: env.get('OLA_MAPS_BASE_URL'),
+            OLA_MAPS_TIMEOUT_MS: env.get('OLA_MAPS_TIMEOUT_MS'),
+            OLA_MAPS_MAX_ATTEMPTS: env.get('OLA_MAPS_MAX_ATTEMPTS'),
+            OLA_MAPS_BREAKER_FAILURES: env.get('OLA_MAPS_BREAKER_FAILURES'),
+            OLA_MAPS_BREAKER_COOLDOWN_MS: env.get('OLA_MAPS_BREAKER_COOLDOWN_MS'),
+            OLA_MAPS_AUTOCOMPLETE_PATH: env.get('OLA_MAPS_AUTOCOMPLETE_PATH'),
+            OLA_MAPS_DETAILS_PATH: env.get('OLA_MAPS_DETAILS_PATH'),
+            OLA_MAPS_GEOCODE_PATH: env.get('OLA_MAPS_GEOCODE_PATH'),
+            OLA_MAPS_REVERSE_PATH: env.get('OLA_MAPS_REVERSE_PATH'),
+            OLA_MAPS_DIRECTIONS_PATH: env.get('OLA_MAPS_DIRECTIONS_PATH'),
+            OLA_MAPS_MATRIX_PATH: env.get('OLA_MAPS_MATRIX_PATH'),
+          }),
           async () => {
             const s = await settings();
             return { topK: s.topK, maxPairs: s.maxPairs };
           },
+          fetch,
+          logger,
         );
-        return new ResilientMaps(
-          ola,
-          {
-            get: (key) => redis.get(key),
-            set: async (key, value, ttl) => {
-              await redis.set(key, value, 'EX', ttl);
-            },
-          },
-          settings,
-        );
+        return new ResilientMaps(ola, cache, settings, 'ola', logger);
       },
     },
   ],

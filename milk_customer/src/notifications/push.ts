@@ -39,7 +39,7 @@ async function readDevice(): Promise<DeviceRecord | null> {
     const value = JSON.parse(raw) as DeviceRecord;
     if (typeof value.userId !== 'string' || !Array.isArray(value.tokens) || !value.tokens.length || value.tokens.some(token => typeof token !== 'string' || token.length < 16) || !value.tokens.includes(value.primary)) throw new Error('Invalid device record');
     return value;
-  } catch { throw new Error('Could not read this device’s notification settings.'); }
+  } catch { throw new Error('Couldn’t read this device’s notification settings.'); }
 }
 async function unregister(token:string, sessionToken:string) {
   try { await customerDetailsApi.unregisterDevice(sessionToken,token); }
@@ -83,7 +83,7 @@ async function synchronize(userId:string, expected:number, askPermission:boolean
       if (token.type !== 'android' || typeof token.data !== 'string') throw new Error('No Android token');
       await register(userId,token.data,expected,true);
     } catch {
-      if (!suspended && expected === generation) setStatus('error','Could not enable delivery alerts. Check your connection and try again.');
+      if (!suspended && expected === generation) setStatus('error','Couldn’t enable delivery alerts.');
     }
   });
 }
@@ -103,7 +103,7 @@ export async function disablePushNotifications(userId:string) {
     });
     setStatus('available');
   } catch {
-    setStatus('enabled','Could not turn off delivery alerts. Check your connection and try again.');
+    setStatus('enabled','Couldn’t turn off delivery alerts.');
   } finally {suspended = false;}
 }
 
@@ -141,14 +141,14 @@ export function startPushSession(userId:string, onReceived:() => void, onOpen:(d
       if (!active || current !== generation) return;
       Notifications.setNotificationHandler({handleNotification:async () => ({shouldShowBanner:true,shouldShowList:true,shouldPlaySound:true,shouldSetBadge:false})});
       subscriptions = [
-        Notifications.addPushTokenListener(token => {if (active && !suspended && usePushStatus.getState().status === 'enabled' && token.type === 'android' && typeof token.data === 'string') void serial(() => register(userId,token.data as string,current)).catch(() => {if (active && !suspended && current === generation) setStatus('error','Could not update delivery alerts. Please try again.');});}),
+        Notifications.addPushTokenListener(token => {if (active && !suspended && usePushStatus.getState().status === 'enabled' && token.type === 'android' && typeof token.data === 'string') void serial(() => register(userId,token.data as string,current)).catch(() => {if (active && !suspended && current === generation) setStatus('error','Couldn’t update delivery alerts.');});}),
         Notifications.addNotificationReceivedListener(() => {if (active) onReceived();}),
         Notifications.addNotificationResponseReceivedListener(response => {if (active) onOpen(response.notification.request.content.data ?? {});}),
       ];
       const response = await Notifications.getLastNotificationResponseAsync();
       if (active && response) {await Notifications.clearLastNotificationResponseAsync();onOpen(response.notification.request.content.data ?? {});}
       if (active) await synchronize(userId,current,false);
-    } catch {if (active && current === generation) setStatus('error','Could not prepare delivery alerts. Please try again.');}
+    } catch {if (active && current === generation) setStatus('error','Couldn’t prepare delivery alerts.');}
   })();
   return () => {active=false;if (generation === current) generation++;subscriptions.forEach(subscription => subscription.remove());};
 }

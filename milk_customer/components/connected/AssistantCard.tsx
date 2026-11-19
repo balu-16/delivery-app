@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { AgentCard } from '@/src/agent/types';
 import { agentStrings } from '@/src/agent/strings';
+import { cartChoiceExpiresAt, cartChoiceId, cartChoiceQuestion, cartChoiceReference, cartChoiceSelection, cartChoiceSubmitted, cartChoiceVariants } from '@/src/agent/cart-choice';
 import { formatPaise } from '@/src/utils/money';
 
 type Props = { card: AgentCard; locale?: string | null; busy: boolean; onDecision: (id: string, decision: 'approve' | 'reject') => void; onAction: (cardId: string, action: string, payload: Record<string, unknown>) => void | Promise<void>; onReview: (card: AgentCard) => void };
@@ -83,6 +84,7 @@ export function AssistantCard({ card, locale, busy, onDecision, onAction, onRevi
     {card.type === 'order_confirm' && !!text(payload.walletCashPaise) && text(payload.walletCashPaise) !== '0' && <View style={styles.item}><Text style={styles.grow}>{t.wallet}</Text><Text>-{formatPaise(text(payload.walletCashPaise))}</Text></View>}
     {card.type === 'order_confirm' && !!text(payload.walletPromoPaise) && text(payload.walletPromoPaise) !== '0' && <View style={styles.item}><Text style={styles.grow}>{t.promotionalBalance}</Text><Text>-{formatPaise(text(payload.walletPromoPaise))}</Text></View>}
     {card.type === 'order_confirm' && !!text(payload.amountDuePaise) && <View style={styles.item}><Text style={styles.grow}>{t.dueOnDelivery}</Text><Text style={styles.title}>{formatPaise(text(payload.amountDuePaise))}</Text></View>}
+    {card.type === 'cart_choice' && <CartChoiceCard card={card} busy={busy} onAction={onAction} />}
     {card.type === 'order_confirm' && <Pressable accessibilityRole="button" onPress={() => onReview(card)} style={styles.option}><Text style={styles.optionText}>Payment details</Text></Pressable>}
     {Array.isArray(payload.missingFields) && payload.missingFields.length > 0 && <Text style={styles.body}>Still needed: {payload.missingFields.filter(field => typeof field === 'string').join(', ')}.</Text>}
     {!!text(payload.message) && <Text style={styles.body}>{text(payload.message)}</Text>}
@@ -102,6 +104,76 @@ export function AssistantCard({ card, locale, busy, onDecision, onAction, onRevi
     </>}
   </View>;
 }
+
+/**
+ * Durable cart choice: pick an exact catalog size, then how many packs.
+ * Quantity is asked even when only one size exists; "Other" leaves the
+ * typed answer to the composer. One tap on a quantity submits exactly once.
+ */
+function CartChoiceCard({ card, busy, onAction }: { card: AgentCard; busy: boolean; onAction: Props['onAction'] }) {
+  const question = cartChoiceQuestion(card);
+  const choiceId = cartChoiceId(card);
+  const reference = cartChoiceReference(card);
+  const variants = cartChoiceVariants(card);
+  const selection = cartChoiceSelection(card);
+  const status = text(card.payload.status);
+  const expiresAt = cartChoiceExpiresAt(card);
+  const [now, setNow] = useState(() => Date.now());
+  const [variantId, setVariantId] = useState(selection.variantId ?? '');
+  const [other, setOther] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const submitted = confirmed || cartChoiceSubmitted(card);
+  const closed = !!status && status !== 'pending';
+  const placing = useRef(false);
+  useEffect(() => {
+    if (!expiresAt || closed || submitted) return;
+    const timer = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(timer);
+  }, [closed, expiresAt, submitted]);
+  const expired = status === 'expired' || (expiresAt !== null && now >= expiresAt);
+  const blocked = busy || submitting || submitted || expired || closed;
+  const submit = (quantity: number) => {
+    if (!variantId || quantity < 1 || blocked || placing.current) return;
+    placing.current = true;
+    setSubmitting(true);
+    void Promise.resolve(onAction(card.cardId, 'cart_choice', { ...reference, choiceId, variantId, quantity }))
+      .then(() => setConfirmed(true))
+      .catch(() => undefined)
+      .finally(() => { placing.current = false; setSubmitting(false); });
+  };
+  const remaining = expiresAt === null ? null : Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  return <View style={styles.choice} accessibilityLabel={question}>
+    <Text style={styles.body}>{question}</Text>
+    {submitted
+      ? <Text style={styles.body} accessibilityLiveRegion="polite">Added to your cart.</Text>
+      : expired
+      ? <Text style={styles.muted}>This choice has expired. Ask for the item again.</Text>
+      : closed ? <Text style={styles.muted}>This choice has closed.</Text>
+      : variants.length === 0
+        ? <Text style={styles.muted}>Type your answer below — for example “2 packs of 500 g”.</Text>
+        : <>
+          <View style={styles.choiceRow} accessibilityLabel="Choose a size">
+            {variants.map((variant) => {
+              const active = variantId === variant.variantId;
+              return <Pressable key={variant.variantId} accessibilityRole="button" accessibilityLabel={`Choose ${variant.label}`} accessibilityState={{ selected: active, disabled: blocked }} disabled={blocked} onPress={() => { setOther(false); setVariantId(variant.variantId); }} style={[styles.choicePill, active && styles.choiceActive]}><Text style={[styles.choiceText, active && styles.choiceTextActive]}>{variant.label}{variant.sellingPaise ? ` · ${formatPaise(variant.sellingPaise)}` : ''}</Text></Pressable>;
+            })}
+          </View>
+          {!!variantId && (selection.quantity ?
+            <Pressable accessibilityRole="button" disabled={blocked} onPress={() => submit(selection.quantity!)} style={styles.choicePill}><Text style={styles.choiceText}>Add {selection.quantity} {selection.quantity === 1 ? 'pack' : 'packs'}</Text></Pressable>
+            : <>{question !== 'How many packs?' && <Text style={styles.muted}>How many packs?</Text>}<View style={styles.choiceRow} accessibilityLabel="Choose a quantity">
+            {[{ label: '1', value: 1 }, { label: '2', value: 2 }].map((option) => <Pressable key={option.label} accessibilityRole="button" accessibilityLabel={`${option.label} pack`} disabled={blocked} onPress={() => { setOther(false); submit(option.value); }} style={[styles.choicePill, submitting && styles.choiceActive]}><Text style={styles.choiceText}>{option.label}</Text></Pressable>)}
+            <Pressable accessibilityRole="button" accessibilityLabel="Other quantity" accessibilityState={{ selected: other }} onPress={() => setOther(true)} style={[styles.choicePill, other && styles.choiceActive]}><Text style={[styles.choiceText, other && styles.choiceTextActive]}>Other</Text></Pressable>
+          </View>{other && <Text style={styles.muted}>Type your answer, for example “4 packs of {variants.find(item => item.variantId === variantId)?.label}”.</Text>}</>)}
+          {remaining !== null && !expired && <Text style={styles.muted}>{t_expired(remaining)}</Text>}
+        </>}
+  </View>;
+}
+
+function t_expired(remainingSeconds: number): string {
+  return `This choice expires in ${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, '0')}`;
+}
+
 const styles = StyleSheet.create({
   card: { backgroundColor: '#fff', borderColor: '#deded8', borderWidth: 1, borderRadius: 12, padding: 14, gap: 8, minWidth: 220 },
   title: { color: '#252820', fontSize: 16, fontWeight: '700' }, body: { color: '#33372d', fontSize: 15, lineHeight: 22 }, muted: { color: '#62685d', fontSize: 13 },
@@ -109,4 +181,5 @@ const styles = StyleSheet.create({
   option: { borderRadius: 8, borderWidth: 1, borderColor: '#526c39', minHeight: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 14 }, optionText: { color: '#36551f', fontWeight: '600' },
   primary: { backgroundColor: '#405f29', borderRadius: 8, minHeight: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 18 }, primaryText: { color: '#fff', fontWeight: '700' }, disabled: { opacity: 0.45 },
   itemActions: { gap: 5, alignItems: 'center' }, stepper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#d8dfd0', borderRadius: 9 }, step: { minWidth: 34, minHeight: 36, alignItems: 'center', justifyContent: 'center' }, stepText: { color: '#36551f', fontSize: 19 }, quantity: { minWidth: 20, textAlign: 'center', color: '#263520' }, add: { minHeight: 36, minWidth: 68, borderRadius: 8, backgroundColor: '#405f29', justifyContent: 'center', alignItems: 'center' },
+  choice: { gap: 10 }, choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, choicePill: { borderRadius: 20, borderWidth: 1, borderColor: '#a7b893', minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, backgroundColor: '#fff' }, choiceActive: { backgroundColor: '#405f29', borderColor: '#405f29' }, choiceText: { color: '#36551f', fontWeight: '700', fontSize: 14 }, choiceTextActive: { color: '#fff' },
 });

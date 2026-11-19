@@ -26,6 +26,7 @@ import {
 import { PAYMENT_GATEWAY, type PaymentGatewayPort } from '../payments/contracts/gateway.js';
 import type { OrderOperations } from '../orders/contracts/orders.js';
 import type { CheckoutOperations } from './contracts/checkout.js';
+import { HttpMetrics } from '../../platform/metrics/http-metrics.js';
 import { CHECKOUT_PAYMENTS } from './contracts/customer-payments.js';
 import { CustomerPaymentService } from './infrastructure/customer-payments.js';
 import { ORDERS } from '../orders/contracts/orders.js';
@@ -87,6 +88,7 @@ import { CheckoutService, type CheckoutDependencies } from './infrastructure/che
         APP_CONFIG,
         ConfigService,
         PAYMENT_FRAUD_SIGNALS,
+        HttpMetrics,
       ],
       useFactory: (
         handle: DatabaseHandle,
@@ -103,6 +105,7 @@ import { CheckoutService, type CheckoutDependencies } from './infrastructure/che
         config: CheckoutDependencies['config'],
         env: ConfigService,
         fraud: PaymentFraudSignals,
+        metrics: HttpMetrics,
       ) =>
         new CheckoutService(
           handle.db,
@@ -121,6 +124,7 @@ import { CheckoutService, type CheckoutDependencies } from './infrastructure/che
           },
           env,
           fraud,
+          metrics,
         ),
     },
   ],

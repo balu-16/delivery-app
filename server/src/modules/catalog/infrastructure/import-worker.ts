@@ -143,7 +143,7 @@ export class CatalogImportWorker {
       const prices = await sql<{
         sku: string;
         selling_paise: string;
-      }>`SELECT v.sku,p.selling_paise::text FROM catalog_variants v JOIN catalog_prices p ON p.variant_id=v.id WHERE v.sku=ANY(${sku}::text[]) AND p.store_id=${job.options.storeId}::uuid AND p.valid_from<=clock_timestamp() AND (p.valid_to IS NULL OR p.valid_to>clock_timestamp())`.execute(
+      }>`SELECT v.sku,p.selling_paise::text FROM catalog_variants v JOIN catalog_global_prices p ON p.variant_id=v.id WHERE v.sku=ANY(${sku}::text[])`.execute(
         this.db,
       );
       const threshold = await this.config.get('catalogPriceApprovalPercent');

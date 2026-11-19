@@ -13,6 +13,14 @@ import type { AgentCard, AgentLocale } from '../contracts/agent.js';
 import { isPolicyTopic, policyText } from './policy.js';
 import { sanitizeAgentText } from './guards.js';
 import type { AgentToolKit } from './tool-kit.js';
+import {
+  canonicalProductKey,
+  catalogTextMatches,
+  isCartRequest,
+  resolveProducts,
+  type ResolverItem,
+} from './product-resolver.js';
+import type { AgentCandidateStore } from './product-candidates.js';
 
 interface AgentReadDependencies {
   addresses: AddressOperations;
@@ -122,7 +130,13 @@ export function parseAddressText(
 /** The caller supplies the identity; no tool accepts or infers a user id. */
 export function createReadTools(
   deps: AgentReadDependencies,
-  context: { userId: string; locale: AgentLocale },
+  context: {
+    userId: string;
+    locale: AgentLocale;
+    userText?: string;
+    clientMessageId?: string;
+    candidates?: AgentCandidateStore;
+  },
   kit: AgentToolKit,
 ) {
   return [
@@ -146,7 +160,7 @@ export function createReadTools(
     ),
     kit.define(
       'search_products',
-      'Search the catalog available at a saved delivery address. Ask for an address if none exists.',
+      'Search products and their current prices. An address is only needed when checking out.',
       z.object({
         query: z.string().min(1).max(100).describe('Product name or search phrase'),
         addressId: z.string().uuid().optional().describe('Optional id of a saved delivery address'),
@@ -158,27 +172,18 @@ export function createReadTools(
           ? addresses.find((address) => address.id === input.addressId)
           : (addresses.find((address) => address.isDefault) ??
             addresses.find((address) => address.id === cart?.addressId));
-        if (!chosen) {
-          if (!input.addressId) {
-            const label =
-              context.locale === 'hi'
-                ? 'पता जोड़ें'
-                : context.locale === 'te'
-                  ? 'చిరునామా జోడించండి'
-                  : 'Add address';
-            if (kit.showCardOnce('delivery-address-required'))
-              card(runtime.writer, 'info', {
-                title: 'Add a delivery address',
-                description: 'Add an address so we can check which products are available.',
-                options: [{ label, action: 'open_screen', payload: { screen: 'addresses' } }],
-              });
-          }
-          throw new Error(input.addressId ? 'ADDRESS_NOT_FOUND' : 'ADDRESS_REQUIRED');
-        }
-        const result = await deps.catalog.list(context.userId, chosen.id, {
-          q: sanitizeAgentText(input.query, 100),
-          limit: 8,
-        });
+        if (input.addressId && !chosen) throw new Error('ADDRESS_NOT_FOUND');
+        const result = chosen
+          ? await deps.catalog.list(context.userId, chosen.id, {
+              q: sanitizeAgentText(input.query, 100),
+              limit: 8,
+            })
+          : {
+              items: (await deps.catalog.preview()).items
+                .filter((item) => catalogTextMatches(input.query, item.name, item.variantName))
+                .slice(0, 8),
+            };
+        const maxQuantity = chosen ? 1 : await deps.appConfig.get('agent_max_qty_per_line');
         const items = result.items.slice(0, 8).map((value) => {
           const item = value as Record<string, unknown>;
           return {
@@ -187,21 +192,34 @@ export function createReadTools(
             name: text(item.name),
             variantName: text(item.variantName),
             sellingPaise: text(item.sellingPaise, 20),
-            availability: text(item.availability, 40),
-            maxPerOrder: typeof item.maxPerOrder === 'number' ? item.maxPerOrder : 0,
+            availability:
+              typeof item.availability === 'string'
+                ? text(item.availability, 40)
+                : 'CHECK_AT_CHECKOUT',
+            maxPerOrder: typeof item.maxPerOrder === 'number' ? item.maxPerOrder : maxQuantity,
           };
         });
+        const message = context.userText ?? input.query;
+        const resolution = resolveProducts(message, items as ResolverItem[]);
+        if (context.candidates && context.clientMessageId)
+          context.candidates.set(context.userId, context.clientMessageId, resolution.exact);
+        const exactIds = new Set(resolution.exact.map((item) => item.variantId));
+        const cartRequest = isCartRequest(message);
+        const sellable = (item: (typeof items)[number]): boolean =>
+          Boolean(item.variantId) && item.availability !== 'OUT_OF_STOCK' && item.maxPerOrder > 0;
         const addLabel =
           context.locale === 'hi' ? 'जोड़ें' : context.locale === 'te' ? 'జోడించు' : 'Add';
         const options = items
-          .filter(
-            (item) =>
-              item.variantId && item.availability !== 'OUT_OF_STOCK' && item.maxPerOrder > 0,
-          )
+          .filter((item) => sellable(item) && (!cartRequest || exactIds.has(item.variantId)))
           .map((item) => ({
             label: `${addLabel} ${item.name}`,
             action: 'add_to_cart',
-            payload: { variantId: item.variantId, quantity: 1, addressId: chosen.id },
+            payload: {
+              variantId: item.variantId,
+              quantity: 1,
+              displayedUnitPricePaise: item.sellingPaise,
+              ...(chosen ? { addressId: chosen.id } : {}),
+            },
           }));
         card(runtime.writer, 'product_list', { title: 'Products', items, options });
         if (items.some((item) => item.availability === 'OUT_OF_STOCK')) {
@@ -213,7 +231,32 @@ export function createReadTools(
               .map((item) => ({ name: item.name, variantName: item.variantName })),
           });
         }
-        return { addressId: chosen.id, items };
+        const exact = resolution.exact.map((item) => ({
+          variantId: item.variantId,
+          name: item.name,
+          variantName: item.variantName,
+          sellingPaise: item.sellingPaise,
+          availability: item.availability,
+        }));
+        if (!cartRequest)
+          return { addressId: chosen?.id ?? null, items, exact, needsChoice: false };
+        const inStock = resolution.exact.filter(
+          (item) => item.availability !== 'OUT_OF_STOCK' && item.availability !== 'UNAVAILABLE',
+        );
+        let clarification: string | undefined;
+        if (!resolution.requested.length)
+          clarification = `No exact match for "${sanitizeAgentText(input.query, 60)}". Ask which listed product the customer wants before changing the cart.`;
+        else if (!inStock.length)
+          clarification = `The requested ${resolution.requested.map((entry) => entry.phrase).join(' and ')} is unavailable. Offer the available choices and let the customer pick.`;
+        else if (resolution.ambiguous)
+          clarification = `Several ${resolution.requested[0]!.phrase} sizes are available. Ask which size the customer wants before changing the cart.`;
+        return {
+          addressId: chosen?.id ?? null,
+          items,
+          exact,
+          needsChoice: clarification !== undefined,
+          ...(clarification ? { clarification } : {}),
+        };
       },
     ),
     kit.define(
@@ -229,14 +272,12 @@ export function createReadTools(
           scope.storeId,
           scope.subtotalPaise,
         );
-        const items = offers
-          .slice(0, 8)
-          .map((offer) => ({
-            name: offer.code,
-            kind: offer.kind,
-            valuePaise: offer.valuePaise,
-            minOrderPaise: offer.minOrderPaise,
-          }));
+        const items = offers.slice(0, 8).map((offer) => ({
+          name: offer.code,
+          kind: offer.kind,
+          valuePaise: offer.valuePaise,
+          minOrderPaise: offer.minOrderPaise,
+        }));
         card(runtime.writer, 'info', {
           title: 'Available offers',
           description: items.length
@@ -289,14 +330,29 @@ export function createReadTools(
           (item) => ({ ...item, name: text(item.name, 120) }),
         );
         if (items.length) {
-          const [addresses, cart, maxQuantity] = await Promise.all([
-            deps.addresses.list(context.userId),
-            deps.cart.get(context.userId),
+          const [catalog, maxQuantity] = await Promise.all([
+            deps.catalog.preview(),
             deps.appConfig.get('agent_max_qty_per_line'),
           ]);
-          const chosen =
-            addresses.find((address) => address.isDefault) ??
-            addresses.find((address) => address.id === cart?.addressId);
+          const prices = new Map(catalog.items.map((item) => [item.variantId, item.sellingPaise]));
+          if (context.candidates && context.clientMessageId)
+            context.candidates.set(
+              context.userId,
+              context.clientMessageId,
+              items
+                .filter((item) => prices.has(item.variantId))
+                .map((item) => ({
+                  productId: '',
+                  variantId: item.variantId,
+                  productKey: canonicalProductKey(item.name),
+                  phrase: item.name,
+                  name: item.name,
+                  variantName: '',
+                  sellingPaise: prices.get(item.variantId)!,
+                  availability: 'CHECK_AT_CHECKOUT',
+                  maxPerOrder: maxQuantity,
+                })),
+            );
           card(runtime.writer, 'product_list', {
             title: 'Your usual items',
             items: items.map((item) => ({
@@ -304,20 +360,21 @@ export function createReadTools(
               name: item.name,
               quantity: String(item.lastQuantity),
               maxPerOrder: maxQuantity,
+              ...(prices.has(item.variantId)
+                ? { sellingPaise: prices.get(item.variantId), availability: 'CHECK_AT_CHECKOUT' }
+                : { availability: 'UNAVAILABLE' }),
             })),
-            options: chosen
-              ? items.map((item) => ({
-                  label: `Add ${item.name}`,
-                  action: 'add_to_cart',
-                  payload: { variantId: item.variantId, quantity: 1, addressId: chosen.id },
-                }))
-              : [
-                  {
-                    label: 'Choose delivery address',
-                    action: 'open_screen',
-                    payload: { screen: 'addresses' },
-                  },
-                ],
+            options: items
+              .filter((item) => prices.has(item.variantId))
+              .map((item) => ({
+                label: `Add ${item.name}`,
+                action: 'add_to_cart',
+                payload: {
+                  variantId: item.variantId,
+                  quantity: 1,
+                  displayedUnitPricePaise: prices.get(item.variantId),
+                },
+              })),
           });
         }
         return { items };

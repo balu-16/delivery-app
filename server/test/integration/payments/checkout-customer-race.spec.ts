@@ -38,6 +38,10 @@ beforeAll(
       await sql`INSERT INTO app_config(key,value) VALUES(${key},${JSON.stringify(value)}::jsonb)`.execute(
         world.db.db,
       );
+    // GATEWAY placement requires the online-payments flag; the race tests
+    // exercise inventory and idempotency behavior, not the payment gate.
+    await sql`INSERT INTO feature_flags(key,enabled) VALUES ('online_payments_enabled',true)
+      ON CONFLICT(key) DO UPDATE SET enabled=true`.execute(world.db.db);
     otherAddress = uuidV7();
     await sql`INSERT INTO addresses(id,user_id,line1,pincode,contact_name,contact_phone,point,is_default) SELECT ${otherAddress}::uuid,${world.otherCustomer}::uuid,line1,pincode,contact_name,contact_phone,point,true FROM addresses WHERE id=${world.address}::uuid`.execute(
       world.db.db,

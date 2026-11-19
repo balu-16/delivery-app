@@ -9,8 +9,8 @@ import { evaluateLines } from '../domain/cart.js';
 export interface CartRow {
   id: string;
   user_id: string;
-  store_id: string;
-  address_id: string;
+  store_id: string | null;
+  address_id: string | null;
   coupon_code: string | null;
   version: string;
 }
@@ -103,7 +103,7 @@ export function mapLine(row: LineRow): EvaluatedLine {
     saleable,
   };
 }
-const lineQuery = (cartId: string, storeId: string) =>
+const lineQuery = (cartId: string, storeId: string | null) =>
   sql<LineRow>`SELECT ci.variant_id::text AS variant_id,ci.quantity::text AS quantity,
   ci.unit_price_paise::text AS unit_price_paise,ci.mrp_paise::text AS mrp_paise,p.id::text AS product_id,
   p.name AS product_name,v.name AS variant_name,
@@ -111,15 +111,48 @@ const lineQuery = (cartId: string, storeId: string) =>
     WHERE im.product_id=p.id AND m.state='REGISTERED' AND m.purpose='PRODUCT_IMAGE'
     ORDER BY im.position,m.id LIMIT 1) AS image_id,
   p.category_id::text AS category_id,p.gst_rate_bps,p.published,p.deleted_at AS product_deleted,
-  v.deleted_at AS variant_deleted,price.id::text AS price_id,price.selling_paise::text AS fresh_price,price.mrp_paise::text AS fresh_mrp,COALESCE(a.available,0)::text AS available
+  v.deleted_at AS variant_deleted,price.id::text AS price_id,price.selling_paise::text AS fresh_price,price.mrp_paise::text AS fresh_mrp,
+  CASE WHEN ${storeId}::uuid IS NULL THEN ci.quantity::text ELSE COALESCE(a.available,0)::text END AS available
   FROM cart_items ci
   JOIN catalog_variants v ON v.id=ci.variant_id
   JOIN catalog_products p ON p.id=v.product_id
   LEFT JOIN inventory_saleable_availability a ON a.store_id=${storeId}::uuid AND a.variant_id=ci.variant_id
-  LEFT JOIN LATERAL (SELECT id,selling_paise,mrp_paise FROM catalog_prices cp WHERE cp.store_id=${storeId}::uuid
-    AND cp.variant_id=ci.variant_id AND cp.valid_from<=statement_timestamp()
-    AND (cp.valid_to IS NULL OR cp.valid_to>statement_timestamp()) LIMIT 1) price ON true
+  LEFT JOIN catalog_global_prices price ON price.variant_id=ci.variant_id
   WHERE ci.cart_id=${cartId}::uuid ORDER BY ci.variant_id`;
+/** Cart reads need only line and stock data; fee configuration is evaluated at checkout. */
+export async function evaluateCartLines(db: Database | TransactionContext, cart: CartRow) {
+  const rows = await lineQuery(cart.id, cart.store_id).execute(db);
+  const lines = rows.rows.map(mapLine);
+  const issues = evaluateLines(
+    lines.map((line) => ({
+      variantId: line.variantId,
+      storedQuantity: line.quantity,
+      storedUnitPricePaise: line.storedUnitPricePaise,
+      currentUnitPricePaise: line.freshUnitPricePaise,
+      available: line.available,
+      saleable: line.saleable,
+    })),
+  );
+  // A previous address can be out of stock while a shared price has changed.
+  // Surface the price independently so it can be reviewed without a new address.
+  for (const [index, line] of lines.entries()) {
+    const row = rows.rows[index]!;
+    if (
+      !line.saleable &&
+      row.published &&
+      row.product_deleted === null &&
+      row.variant_deleted === null &&
+      line.freshUnitPricePaise !== null &&
+      line.freshUnitPricePaise !== line.storedUnitPricePaise
+    )
+      issues.push({
+        code: 'PRICE_CHANGED',
+        variantId: line.variantId,
+        detail: 'The product price has changed.',
+      });
+  }
+  return { lines, issues };
+}
 /** Fresh prices, availability, config and revisions for a cart; pure reads. */
 export async function evaluateCart(
   db: Database | TransactionContext,

@@ -1,6 +1,8 @@
 import { sql } from 'kysely';
 import type { Database, TransactionContext } from '../../../platform/database/database.js';
 import { transactionWithRetry } from '../../../platform/database/database.js';
+import type { HttpMetrics } from '../../../platform/metrics/http-metrics.js';
+import { uuidV7 } from '../../../common/ids/ids.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import type { CouponValidation } from '../../coupons/contracts/coupons.js';
 import type {
@@ -11,13 +13,17 @@ import type {
 } from '../contracts/cart.js';
 import { clampToMaxPerOrder, parseQuantity, requireVersion } from '../domain/cart.js';
 import { normalizeCode } from '../../coupons/contracts/coupons.js';
-import { evaluateCart, resolveStoreForAddress, type CartRow } from './cart-evaluation.js';
+import {
+  evaluateCart,
+  evaluateCartLines,
+  resolveStoreForAddress,
+  type CartRow,
+} from './cart-evaluation.js';
 import { toCartView } from './cart-views.js';
 import {
   advisoryLockCart,
   availableAt,
   cartColumns,
-  currentPrice,
   getOrCreateCartRow,
   loadCart,
   lockCart,
@@ -32,6 +38,7 @@ export class PostgresCartService implements CartService {
     private readonly db: Database,
     private readonly config: AppConfig,
     private readonly coupons: CouponValidation,
+    private readonly metrics?: HttpMetrics,
   ) {}
   private run<T>(
     tx: TransactionContext | undefined,
@@ -41,12 +48,14 @@ export class PostgresCartService implements CartService {
   }
   async getOrCreateActiveCart(
     userId: string,
-    addressId: string,
+    addressId: string | undefined,
     outer?: TransactionContext,
   ): Promise<CartView> {
     return this.run(outer, async (tx) => {
       await advisoryLockCart(tx, userId);
-      const cart = await getOrCreateCartRow(tx, userId, addressId);
+      const cart = addressId
+        ? await getOrCreateCartRow(tx, userId, addressId)
+        : await this.lockedCart(tx, userId);
       return this.viewOf(tx, cart);
     });
   }
@@ -62,14 +71,17 @@ export class PostgresCartService implements CartService {
     addressId?: string,
   ): Promise<{ storeId: string; subtotalPaise: bigint } | null> {
     const row = await loadCart(this.db, userId);
-    if (row) {
+    if (row?.store_id && (!addressId || row.address_id === addressId)) {
       const evaluation = await evaluateCart(this.db, this.config, row);
       return { storeId: row.store_id, subtotalPaise: evaluation.subtotalPaise };
     }
     if (!addressId) return null;
     return transactionWithRetry(this.db, async (tx) => {
       const storeId = await resolveStoreForAddress(tx, userId, addressId);
-      return { storeId, subtotalPaise: 0n };
+      const evaluation = row
+        ? await evaluateCart(tx, this.config, { ...row, store_id: storeId, address_id: addressId })
+        : null;
+      return { storeId, subtotalPaise: evaluation?.subtotalPaise ?? 0n };
     });
   }
   async putItem(
@@ -79,43 +91,97 @@ export class PostgresCartService implements CartService {
     opts: CartMutationOptions,
   ): Promise<CartWriteResult> {
     const parsed = parseQuantity(quantity);
-    const [maxPerOrder, maxLines] = await Promise.all([
-      this.config.get('catalogMaxPerOrder'),
-      this.config.get('maxCartLines'),
-    ]);
     return this.run(opts.tx, async (tx) => {
+      // Use the same transaction as the idempotent write. Fetching config from
+      // the pool here can deadlock when that transaction owns the last client.
+      const { catalogMaxPerOrder: maxPerOrder, maxCartLines: maxLines } = this.config.getMany
+        ? await this.config.getMany(['catalogMaxPerOrder', 'maxCartLines'], tx)
+        : {
+            catalogMaxPerOrder: await this.config.get('catalogMaxPerOrder', tx),
+            maxCartLines: await this.config.get('maxCartLines', tx),
+          };
+      const lockStarted = performance.now();
       await advisoryLockCart(tx, userId);
       const cart = await this.lockedCart(tx, userId, opts.addressId);
+      this.metrics?.observeStage('cart_lock_wait', performance.now() - lockStarted);
       requireVersion(BigInt(cart.version), opts.expectedVersion);
       if (parsed === 0n) return this.removeItemLine(tx, cart, variantId);
+      // One read under the cart lock: current price, target line and line count.
+      const combined = await sql<{
+        selling_paise: string;
+        mrp_paise: string;
+        gst_rate_bps: number | null;
+        existing_quantity: string | null;
+        existing_unit_price: string | null;
+        line_count: string;
+      }>`SELECT p.selling_paise::text AS selling_paise,p.mrp_paise::text AS mrp_paise,prod.gst_rate_bps,
+        ci.quantity::text AS existing_quantity,ci.unit_price_paise::text AS existing_unit_price,
+        (SELECT count(*)::text FROM cart_items WHERE cart_id=${cart.id}::uuid) AS line_count
+        FROM catalog_global_prices p JOIN catalog_variants v ON v.id=p.variant_id JOIN catalog_products prod ON prod.id=v.product_id
+        LEFT JOIN cart_items ci ON ci.cart_id=${cart.id}::uuid AND ci.variant_id=${variantId}::uuid
+        WHERE p.variant_id=${variantId}::uuid AND prod.published AND prod.deleted_at IS NULL AND v.deleted_at IS NULL LIMIT 1`.execute(
+        tx,
+      );
       // An explicit write confirms current saleability and reprices the line.
-      const stock = await availableAt(tx, cart.store_id, variantId);
-      const price = await currentPrice(tx, cart.store_id, variantId);
-      if (stock <= 0n || !price) throw new Error('INVENTORY_INSUFFICIENT');
+      const price = combined.rows[0];
+      if (!price) throw new Error('ITEM_UNAVAILABLE');
+      if (
+        opts.displayedUnitPricePaise !== undefined &&
+        opts.displayedUnitPricePaise !== price.selling_paise
+      )
+        throw new Error('PRICE_CHANGED');
       const maxPerOrderClamp = clampToMaxPerOrder(parsed, maxPerOrder);
-      const finalQuantity = maxPerOrderClamp.quantity > stock ? stock : maxPerOrderClamp.quantity;
+      const finalQuantity = maxPerOrderClamp.quantity;
       const clamped = finalQuantity !== parsed;
-      const existing =
-        await sql`SELECT 1 AS one FROM cart_items WHERE cart_id=${cart.id}::uuid AND variant_id=${variantId}::uuid`.execute(
-          tx,
-        );
-      if (!existing.rows.length) {
-        const count = await sql<{
-          n: string;
-        }>`SELECT count(*)::text AS n FROM cart_items WHERE cart_id=${cart.id}::uuid`.execute(tx);
-        if (Number(count.rows[0]!.n) >= maxLines) throw new Error('INVALID_INPUT');
-        await sql`INSERT INTO cart_items(cart_id,variant_id,quantity,unit_price_paise,mrp_paise,tax_rate_bps)
-          VALUES(${cart.id}::uuid,${variantId}::uuid,${finalQuantity.toString()}::bigint,${price.selling_paise}::bigint,${price.mrp_paise}::bigint,${price.gst_rate_bps ?? 0})`.execute(
-          tx,
-        );
-      } else {
-        await sql`UPDATE cart_items SET quantity=${finalQuantity.toString()}::bigint,unit_price_paise=${price.selling_paise}::bigint,mrp_paise=${price.mrp_paise}::bigint,tax_rate_bps=${price.gst_rate_bps ?? 0},updated_at=clock_timestamp()
-          WHERE cart_id=${cart.id}::uuid AND variant_id=${variantId}::uuid`.execute(tx);
+      if (opts.requireAvailableQuantity) {
+        if (clamped) throw new Error('INVALID_QUANTITY');
+        if (cart.store_id && (await availableAt(tx, cart.store_id, variantId)) < parsed)
+          throw new Error('INVENTORY_INSUFFICIENT');
       }
+      const hasLine = price.existing_quantity !== null;
+      if (
+        hasLine &&
+        opts.displayedUnitPricePaise !== undefined &&
+        !opts.acceptPriceChange &&
+        price.existing_unit_price !== opts.displayedUnitPricePaise
+      )
+        throw new Error('PRICE_CHANGED');
+      if (!hasLine && Number(price.line_count) >= maxLines) throw new Error('INVALID_INPUT');
+      // Earlier app versions confirm a changed price by writing the same quantity
+      // with their address; ordinary quantity changes must keep the stored price.
+      const accepted =
+        opts.acceptPriceChange === true ||
+        (opts.acceptPriceChange === undefined &&
+          opts.addressId !== undefined &&
+          price.existing_quantity === parsed.toString());
+      // The line change and cart version bump apply in one statement; the
+      // returned row feeds the existing cart-view evaluation unchanged.
+      const bumped = hasLine
+        ? await sql<CartRow>`WITH updated_line AS (
+            UPDATE cart_items SET quantity=${finalQuantity.toString()}::bigint,
+            unit_price_paise=CASE WHEN ${accepted} THEN ${price.selling_paise}::bigint ELSE unit_price_paise END,
+            mrp_paise=CASE WHEN ${accepted} THEN ${price.mrp_paise}::bigint ELSE mrp_paise END,
+            tax_rate_bps=CASE WHEN ${accepted} THEN ${price.gst_rate_bps ?? 0} ELSE tax_rate_bps END,updated_at=clock_timestamp()
+            WHERE cart_id=${cart.id}::uuid AND variant_id=${variantId}::uuid RETURNING 1)
+          UPDATE carts SET version=version+1,updated_at=clock_timestamp() WHERE id=${cart.id}::uuid RETURNING ${cartColumns}`.execute(
+            tx,
+          )
+        : await sql<CartRow>`WITH inserted_line AS (
+            INSERT INTO cart_items(cart_id,variant_id,quantity,unit_price_paise,mrp_paise,tax_rate_bps)
+            VALUES(${cart.id}::uuid,${variantId}::uuid,${finalQuantity.toString()}::bigint,${price.selling_paise}::bigint,${price.mrp_paise}::bigint,${price.gst_rate_bps ?? 0})
+            RETURNING 1)
+          UPDATE carts SET version=version+1,updated_at=clock_timestamp() WHERE id=${cart.id}::uuid RETURNING ${cartColumns}`.execute(
+            tx,
+          );
+      const updated = bumped.rows[0];
+      if (!updated) throw new Error('CART_NOT_FOUND');
       const detail = clamped
-        ? `quantity clamped to ${finalQuantity} by ${maxPerOrderClamp.quantity > stock ? 'available stock' : 'the per-order maximum'}`
+        ? `quantity clamped to ${finalQuantity} by the per-order maximum`
         : null;
-      return this.bumpedView(tx, cart.id, clamped ? clampIssue(variantId, detail!) : null);
+      const extraIssue = clamped ? clampIssue(variantId, detail!) : null;
+      const evaluation = await evaluateCartLines(tx, updated);
+      const issues = extraIssue ? [...evaluation.issues, extraIssue] : evaluation.issues;
+      return { cart: toCartView(updated, evaluation.lines, issues), clamped: extraIssue !== null };
     });
   }
   async deleteItem(
@@ -147,6 +213,7 @@ export class PostgresCartService implements CartService {
       await advisoryLockCart(tx, userId);
       const cart = await lockCart(tx, userId);
       requireVersion(BigInt(cart.version), opts.expectedVersion);
+      if (!cart.store_id) throw new Error('ADDRESS_REQUIRED');
       const evaluation = await evaluateCart(tx, this.config, cart);
       if (cart.coupon_code !== null && cart.coupon_code !== normalized) {
         // A non-stackable coupon cannot stack on an already-applied coupon.
@@ -171,6 +238,7 @@ export class PostgresCartService implements CartService {
             unitPricePaise: line.freshUnitPricePaise!,
           })),
         subtotalPaise: evaluation.subtotalPaise,
+        tx,
       });
       const updated =
         await sql<CartRow>`UPDATE carts SET coupon_code=${normalized},version=version+1,updated_at=clock_timestamp() WHERE id=${cart.id}::uuid RETURNING ${cartColumns}`.execute(
@@ -198,11 +266,15 @@ export class PostgresCartService implements CartService {
         tx,
       );
     if (existing.rows[0]) return existing.rows[0];
-    if (!addressId) throw new Error('CART_NOT_FOUND');
-    return getOrCreateCartRow(tx, userId, addressId);
+    if (addressId) return getOrCreateCartRow(tx, userId, addressId);
+    const created =
+      await sql<CartRow>`INSERT INTO carts(id,user_id) VALUES(${uuidV7()}::uuid,${userId}::uuid) RETURNING ${cartColumns}`.execute(
+        tx,
+      );
+    return created.rows[0]!;
   }
   private async viewOf(db: Database | TransactionContext, cart: CartRow): Promise<CartView> {
-    const evaluation = await evaluateCart(db, this.config, cart);
+    const evaluation = await evaluateCartLines(db, cart);
     return toCartView(cart, evaluation.lines, evaluation.issues);
   }
   private async bumpedView(
@@ -214,7 +286,7 @@ export class PostgresCartService implements CartService {
       await sql<CartRow>`UPDATE carts SET version=version+1,updated_at=clock_timestamp() WHERE id=${cartId}::uuid RETURNING ${cartColumns}`.execute(
         tx,
       );
-    const evaluation = await evaluateCart(tx, this.config, updated.rows[0]!);
+    const evaluation = await evaluateCartLines(tx, updated.rows[0]!);
     const issues = extraIssue ? [...evaluation.issues, extraIssue] : evaluation.issues;
     return {
       cart: toCartView(updated.rows[0]!, evaluation.lines, issues),

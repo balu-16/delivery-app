@@ -6,6 +6,7 @@ export interface Place {
   id: string;
   description: string;
   location: Point;
+  pincode?: string;
   degraded?: boolean;
 }
 export interface Suggestion {
@@ -23,7 +24,7 @@ export interface MapsPort {
   geocode(address: string): Promise<Place[]>;
   reverseGeocode(point: Point): Promise<Place[]>;
   directions(origin: Point, destination: Point): Promise<RouteEstimate>;
-  distanceMatrix(origins: Point[], destinations: Point[]): Promise<RouteEstimate[][]>;
+  distanceMatrix(origins: Point[], destinations: Point[]): Promise<(RouteEstimate | null)[][]>;
 }
 export interface MapsCache {
   get(key: string): Promise<string | null>;

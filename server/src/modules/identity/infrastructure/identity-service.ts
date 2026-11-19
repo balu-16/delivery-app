@@ -9,14 +9,20 @@ import type {
 } from '../contracts/identity.js';
 import { authorizeIdentity, canBootstrapRole } from '../domain/identity-policy.js';
 import type { Referrals } from '../../referrals/contracts/referrals.js';
-import { queueVerifiedCustomerGroup, type CustomerGroupSync } from './customer-group-sync.js';
+import {
+  queueVerifiedCustomerGroup,
+  type CustomerGroupSync,
+  type CustomerGroupSyncFailure,
+} from './customer-group-sync.js';
 export class IdentityService {
   constructor(
     private readonly db: Database,
     private readonly access: IdentityAccess,
     private readonly referrals?: Referrals,
     private readonly customerGroupSync?: CustomerGroupSync,
-    private readonly onCustomerGroupSyncError: () => void = () => {},
+    private readonly onCustomerGroupSyncError: (
+      reason: CustomerGroupSyncFailure,
+    ) => void = () => {},
   ) {}
   async bootstrap(identity: VerifiedIdentity, referralCode?: string): Promise<Principal> {
     if (identity.pool !== 'CUSTOMER' || identity.tokenUse !== 'id' || !identity.email)

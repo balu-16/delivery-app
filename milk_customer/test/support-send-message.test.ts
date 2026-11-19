@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { customerDetailsApi } from '../src/api/customer';
-import { sendSupportMessage } from '../src/support/send-message';
+import { sendSupportMessage, supportSendError } from '../src/support/send-message';
+import { ApiError } from '../src/api/client';
 
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 jest.mock('expo-crypto', () => ({CryptoDigestAlgorithm:{SHA256:'SHA256'},digestStringAsync:jest.fn(async (_algorithm:string, value:string) => `hash:${value}`),randomUUID:jest.fn(() => 'safe-key')}));
@@ -16,4 +17,11 @@ test('an uncertain submission survives a restart and retries with the original k
   await expect(sendSupportMessage('user','token','Help',null)).resolves.toEqual({id:'ticket'});
   expect(create.mock.calls.map(call => call[2])).toEqual(['safe-key','safe-key']);
   expect(await AsyncStorage.getItem('@dairydirect/support-request:user:new')).toBeNull();
+});
+
+test('uncertain submissions use the checking message without leaking references', () => {
+  expect(supportSendError(new TypeError('offline'))).toBe('We’re checking if your message was sent.');
+  expect(supportSendError(new ApiError(503, 'UP', 'trace-9'))).toBe('We’re checking if your message was sent.');
+  expect(supportSendError(new ApiError(503, 'UP', 'trace-9'))).not.toContain('trace-9');
+  expect(supportSendError(new ApiError(401, 'SESSION_EXPIRED'))).toBe('Sign in again to continue.');
 });

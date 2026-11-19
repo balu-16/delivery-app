@@ -92,8 +92,9 @@ export class PlaceOrderSaga {
     // 2. Re-check the world: the bound store is still serviceable for this
     // address right now (zone, store open, paused/capacity reasons).
     const address = await this.addressContext(tx, quote.addressId, userId);
-    // Serialize the requirement with an admin changing the flag; no absent-row race.
-    await sql`SELECT pg_advisory_xact_lock(701001)`.execute(tx);
+    // Readers share this lock; config writers take it exclusively. Revalidation
+    // already takes the shared lock, so an upgrade here can deadlock checkouts.
+    await sql`SELECT pg_advisory_xact_lock_shared(701001)`.execute(tx);
     if (input.method === 'GATEWAY') {
       const online = await sql<{
         enabled: boolean;
@@ -265,6 +266,11 @@ export class PlaceOrderSaga {
         tx,
       });
     }
+    if (confirmed) {
+      // Preserve the cart row and its consumed quote/intent history. Only the
+      // exact purchased version is cleared, atomically with confirmation.
+      await this.deps.intents.completePurchase(userId, quote.cartId, quote.cartVersion, tx);
+    }
     await appendEvent(
       tx,
       {
@@ -286,6 +292,24 @@ export class PlaceOrderSaga {
         },
       },
       ['notifications'],
+    );
+    // Durable velocity obligation: committed with the order, consumed once
+    // by the worker. Never on the placement response path.
+    await appendEvent(
+      tx,
+      {
+        eventId: uuidV7(),
+        eventType: 'checkout.velocity_check',
+        schemaVersion: 1,
+        aggregateType: 'order',
+        aggregateId: orderId,
+        aggregateVersion: '1',
+        occurredAt: now.toISOString(),
+        correlationId: orderId,
+        causationId: null,
+        payload: { userId, orderId },
+      },
+      ['checkout-velocity'],
     );
     const order = await this.deps.orders.byId(orderId, { tx });
     if (!order) throw new Error('ORDER_NOT_FOUND');

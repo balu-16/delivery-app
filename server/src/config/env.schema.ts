@@ -98,7 +98,7 @@ const envBaseSchema = z
     AWS_S3_PROFILE: optional,
     S3_ENDPOINT: optional,
     CDN_BASE_URL: optional,
-    // A server-selected store supplies indicative prices before an address is chosen.
+    // Retained for existing deployments; catalog prices are now shared across stores.
     CATALOG_PREVIEW_STORE_ID: z.union([z.literal(''), z.string().uuid()]).default(''),
     SES_FROM_ADDRESS: optional,
     SMTP_URL: z.string().default('smtp://localhost:1025'),
@@ -352,7 +352,18 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
   }
   if (env.PAYMENTS_PROVIDER === 'razorpay')
     need(['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET']);
-  if (env.MAPS_PROVIDER === 'ola') need(['OLA_MAPS_API_KEY', 'OLA_MAPS_BASE_URL']);
+  if (env.MAPS_PROVIDER === 'ola') {
+    need(['OLA_MAPS_API_KEY', 'OLA_MAPS_BASE_URL']);
+    const key = env.OLA_MAPS_API_KEY.trim();
+    if (
+      key &&
+      (key.includes('<') ||
+        key.includes('>') ||
+        /\s/.test(key) ||
+        /^(placeholder|changeme|change-me)$/i.test(key))
+    )
+      fail('OLA_MAPS_API_KEY', 'The Ola Maps API key must be a real rotated key');
+  }
   for (const key of [
     'OLA_MAPS_AUTOCOMPLETE_PATH',
     'OLA_MAPS_DETAILS_PATH',
@@ -368,15 +379,17 @@ export const envSchema = envBaseSchema.superRefine((env, ctx) => {
     try {
       const mapsUrl = new URL(env.OLA_MAPS_BASE_URL);
       if (
-        !['http:', 'https:'].includes(mapsUrl.protocol) ||
+        mapsUrl.protocol !== 'https:' ||
+        mapsUrl.origin !== 'https://api.olamaps.io' ||
         mapsUrl.username ||
         mapsUrl.password ||
         mapsUrl.search ||
-        mapsUrl.hash
+        mapsUrl.hash ||
+        (mapsUrl.pathname !== '' && mapsUrl.pathname !== '/')
       )
-        fail('OLA_MAPS_BASE_URL', 'Expected a provider HTTP(S) base URL');
+        fail('OLA_MAPS_BASE_URL', 'Expected the official Ola Maps HTTPS origin');
     } catch {
-      fail('OLA_MAPS_BASE_URL', 'Expected a provider HTTP(S) base URL');
+      fail('OLA_MAPS_BASE_URL', 'Expected the official Ola Maps HTTPS origin');
     }
   }
   if (env.STORAGE_PROVIDER === 's3') {

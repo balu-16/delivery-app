@@ -26,6 +26,7 @@ const FLAG_LABELS: Array<{ key: string; label: string; hint: string }> = [
   { key: 'cod_enabled', label: 'Cash on delivery', hint: 'COD payment option across storefront flows' },
   { key: 'wallet_enabled', label: 'Wallet payments', hint: 'Allow customers to use their existing wallet balance. Top-ups are unavailable.' },
   { key: 'customer_location_required', label: 'Require customer location for orders', hint: 'When off, delivery eligibility uses the address PIN code. When on, the customer must confirm a location before ordering.' },
+  { key: 'surge_enabled', label: 'Surge pricing', hint: 'Apply the configured surge fee to checkout and delivery estimates.' },
   { key: 'agent_enabled', label: 'Customer assistant', hint: 'Allow the assistant when its server, worker and model are configured.' },
 ]
 

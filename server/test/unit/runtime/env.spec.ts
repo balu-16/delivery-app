@@ -92,7 +92,7 @@ describe('production environment', () => {
     RAZORPAY_KEY_SECRET: 'gateway-secret',
     RAZORPAY_WEBHOOK_SECRET: 'webhook-secret',
     OLA_MAPS_API_KEY: 'maps-secret',
-    OLA_MAPS_BASE_URL: 'https://maps.example.com',
+    OLA_MAPS_BASE_URL: 'https://api.olamaps.io',
     METRICS_BEARER_TOKEN: 'a'.repeat(32),
     PICKING_HANDOVER_SECRET: 'h'.repeat(32),
     // 32 base64 characters encode 24 bytes; production also demands a decodable

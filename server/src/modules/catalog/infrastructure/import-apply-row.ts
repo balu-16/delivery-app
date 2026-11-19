@@ -50,14 +50,12 @@ export async function applyImportRow(
   await sql`INSERT INTO store_inventory(store_id,variant_id) VALUES(${job.options.storeId}::uuid,${variant}::uuid) ON CONFLICT DO NOTHING`.execute(
     tx,
   );
-  await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${job.options.storeId}:${variant}`},0))`.execute(
-    tx,
-  );
+  await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`price:${variant}`},0))`.execute(tx);
   const time = await sql<{ now: Date }>`SELECT clock_timestamp() AS now`.execute(tx),
     now = time.rows[0]!.now;
   const current = await sql<{
     selling_paise: string;
-  }>`SELECT selling_paise::text FROM catalog_prices WHERE store_id=${job.options.storeId}::uuid AND variant_id=${variant}::uuid AND valid_from<=${now} AND (valid_to IS NULL OR valid_to>${now})`.execute(
+  }>`SELECT selling_paise::text FROM catalog_global_prices WHERE variant_id=${variant}::uuid`.execute(
     tx,
   );
   if (!approved && current.rows[0]) {

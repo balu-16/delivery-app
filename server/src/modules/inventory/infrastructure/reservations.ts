@@ -92,21 +92,37 @@ export class PostgresReservations implements InventoryReservations {
           expires_at: Date | null;
           min_seconds: number;
         }>;
-      }> = [];
-      for (const line of lines) {
-        if (missing.has(`${line.storeId}:${line.variantId}`)) {
-          candidates.push({ line, batches: [] });
-          continue;
+      }> = lines.map((line) => ({ line, batches: [] }));
+      const present = lines.filter((line) => !missing.has(`${line.storeId}:${line.variantId}`));
+      if (present.length) {
+        let pairs: ReturnType<typeof sql> | undefined;
+        for (const line of present) {
+          const pair = sql`(${line.storeId}::uuid,${line.variantId}::uuid)`;
+          pairs = pairs ? sql`${pairs},${pair}` : pair;
         }
         const rows = await sql<{
+          store_id: string;
+          variant_id: string;
           id: string;
           available: string;
           expires_at: Date | null;
           min_seconds: number;
-        }>`SELECT b.id,(b.on_hand-b.reserved)::text AS available,b.expires_at,COALESCE(s.min_seconds,0) AS min_seconds FROM inventory_batches b JOIN catalog_variants v ON v.id=b.variant_id JOIN catalog_products p ON p.id=v.product_id LEFT JOIN inventory_category_shelf_life s ON s.category_id=p.category_id WHERE b.store_id=${line.storeId}::uuid AND b.variant_id=${line.variantId}::uuid AND b.state='ACTIVE' AND b.on_hand>b.reserved ORDER BY b.expires_at ASC NULLS LAST,b.id FOR UPDATE OF b`.execute(
+        }>`SELECT b.store_id::text AS store_id,b.variant_id::text AS variant_id,b.id,(b.on_hand-b.reserved)::text AS available,b.expires_at,COALESCE(s.min_seconds,0) AS min_seconds FROM inventory_batches b JOIN catalog_variants v ON v.id=b.variant_id JOIN catalog_products p ON p.id=v.product_id LEFT JOIN inventory_category_shelf_life s ON s.category_id=p.category_id WHERE (b.store_id,b.variant_id) IN (VALUES ${pairs!}) AND b.state='ACTIVE' AND b.on_hand>b.reserved ORDER BY b.store_id,b.variant_id,b.expires_at ASC NULLS LAST,b.id FOR UPDATE OF b`.execute(
           tx,
         );
-        candidates.push({ line, batches: rows.rows });
+        // Preserve per-line FEFO order; rows arrive grouped and ordered.
+        const byLine = new Map<string, typeof rows.rows>();
+        for (const row of rows.rows) {
+          const key = `${row.store_id}:${row.variant_id}`;
+          const list = byLine.get(key) ?? [];
+          list.push(row);
+          byLine.set(key, list);
+        }
+        for (const candidate of candidates) {
+          if (missing.has(`${candidate.line.storeId}:${candidate.line.variantId}`)) continue;
+          candidate.batches =
+            byLine.get(`${candidate.line.storeId}:${candidate.line.variantId}`) ?? [];
+        }
       }
       const now = await databaseTimeAfterLock(tx);
       const shortfalls: Array<{

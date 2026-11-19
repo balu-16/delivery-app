@@ -1,29 +1,42 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
- * Small pull-to-refresh helper used by the four scrolling screens.
- * It refreshes a fake "last synced" timestamp after a short delay.
+ * Pull-to-refresh helper for scrollable views.
+ *
+ * The load function is a read/reconciliation action (revalidate the current
+ * filter/address/record, reconcile pending writes). Duplicate pulls while a
+ * refresh is already in flight share the same promise instead of issuing
+ * duplicate reads; each completed refresh updates `updatedAt`.
  */
-export function useRefresh(delay = 900) {
+export function useRefresh(load?: () => unknown | Promise<unknown>) {
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState(() => new Date());
-  const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlight = useRef<Promise<void> | null>(null);
+  const loadRef = useRef<(() => unknown | Promise<unknown>) | undefined>(load);
+  useEffect(() => { loadRef.current = load; });
 
   const onRefresh = useCallback(() => {
-    if (refreshing) return;
+    if (inFlight.current) return inFlight.current;
     setRefreshing(true);
-    timeout.current = setTimeout(() => {
-      setRefreshing(false);
-      setUpdatedAt(new Date());
-    }, delay);
-  }, [delay, refreshing]);
-
-  useEffect(
-    () => () => {
-      if (timeout.current) clearTimeout(timeout.current);
-    },
-    [],
-  );
+    let settle: () => void = () => undefined;
+    const task = new Promise<void>((resolve) => { settle = resolve; });
+    inFlight.current = task;
+    void (async () => {
+      try {
+        await loadRef.current?.();
+        setUpdatedAt(new Date());
+      } catch {
+        // Load errors surface through the screen's own state; keep content.
+      } finally {
+        if (inFlight.current === task) {
+          inFlight.current = null;
+          setRefreshing(false);
+        }
+        settle();
+      }
+    })();
+    return task;
+  }, []);
 
   return { refreshing, onRefresh, updatedAt };
 }

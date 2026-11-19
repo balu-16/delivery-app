@@ -1,6 +1,9 @@
 import type { components, operations } from './customer.generated';
 import { customerRequest } from './client';
 
+/** Addressed catalog page size shared by Home, category, favorites, and search. */
+export const CATALOG_PAGE_LIMIT = 24;
+
 export type CustomerProfile = components['schemas']['ProfileResponseDto'];
 export type CustomerPrincipal = components['schemas']['PrincipalResponseDto'];
 export type CustomerAddress = components['schemas']['AddressView'];
@@ -14,22 +17,34 @@ export type CatalogPreview = components['schemas']['CatalogPreviewView'];
 export type Serviceability = components['schemas']['ServiceabilityView'];
 type PutItem = components['schemas']['PutItemDto'];
 
-/** Server cart response types pending full response schemas in the backend OpenAPI. */
-export interface ServerCart {
-  cartId: string; userId: string; storeId: string; addressId: string; version: number; couponCode: string | null;
-  lines: { variantId: string; productId?: string; productName?: string; variantName?: string; image?: string | null; quantity: string; unitPricePaise: string; mrpPaise: string; lineSubtotalPaise: string }[];
-  issues: { code: string; variantId?: string; detail?: string }[];
-}
-export interface CartWriteResult { cart: ServerCart; clamped: boolean }
+export type ServerCart = components['schemas']['CartView'];
+export type CartWriteResult = components['schemas']['CartWriteView'];
+export type DeliverySettings = components['schemas']['DeliverySettingsView'];
+export type FeeEstimate = components['schemas']['FeeEstimateView'];
+export type FeeEstimateBand = components['schemas']['FeeEstimateBandView'];
 export interface Coupon { code:string; kind:'PERCENT' | 'FLAT' | 'FREE_DELIVERY'; valuePaise:string; maxCapPaise:string | null; minOrderPaise:string }
 export type QuoteRequest = operations['customerCheckoutQuote']['requestBody']['content']['application/json'];
 export type PlaceRequest = operations['customerCheckoutPlace']['requestBody']['content']['application/json'];
 export interface QuoteResult {
   quote: { quoteId: string; status: string; referralClaimId:string | null; lines: {variantId:string;unitPricePaise:string}[]; subtotalPaise: string; discountPaise: string; couponDiscountPaise: string; feeTotalPaise: string; taxTotalPaise: string; tipPaise: string; totalPaise: string; amountDuePaise: string; expiresAt: string; issues: { code: string; variantId?: string; detail?: string }[]; fees: { kind: string; amountPaise: string; taxPaise: string }[]; wallet: { promoPaise: string; cashPaise: string } | null };
   intentId: string; intentExpiresAt: string; codAvailable: boolean;
+  /** Additive cart from the same evaluation that built the quote; absent on older servers. */
+  cart?: ServerCart;
 }
-export interface PlaceResult { order: { orderId: string; status: string; paymentStatus: string }; confirmation: 'CONFIRMED' | 'PENDING_PAYMENT'; payment: { attemptId: string } | null }
+export interface PlacementOrder { orderId: string; orderNumber?: string; status: string; paymentStatus: string }
+export type PlacementStatus = components['schemas']['PlacementStatusView'];
+export interface PlaceResult { order: PlacementOrder; confirmation: 'CONFIRMED' | 'PENDING_PAYMENT'; payment: { attemptId: string } | null }
 export interface WalletBalances { userId: string; cashPaise: string; promoPaise: string; version: string }
+
+let previewInFlight: {token:string; request:Promise<CatalogPreview>} | null = null;
+function catalogPreview(token:string):Promise<CatalogPreview> {
+  if (previewInFlight?.token === token) return previewInFlight.request;
+  const request=customerRequest<CatalogPreview>('/v1/customer/catalog/preview',{token}).finally(() => {
+    if (previewInFlight?.request === request) previewInFlight=null;
+  });
+  previewInFlight={token,request};
+  return request;
+}
 
 export const customerApi = {
   bootstrap: (idToken: string, referralCode?:string, signal?: AbortSignal) => customerRequest<CustomerPrincipal>('/v1/customer/auth/bootstrap', { method: 'POST', token: idToken, ...(referralCode ? {body:{referralCode}} : {}), ...(signal ? {signal} : {}) }),
@@ -40,22 +55,26 @@ export const customerApi = {
   confirmAddressLocation: (token: string, id: string, body: components['schemas']['ConfirmAddressLocationDto']) => customerRequest<AddressResult>(`/v1/customer/addresses/${encodeURIComponent(id)}/location`, { method: 'PATCH', token, body }),
   selectDefaultAddress: (token: string, id: string) => customerRequest<void>(`/v1/customer/addresses/${encodeURIComponent(id)}/default`, { method: 'POST', token }),
   serviceability: (token: string, pincode: string) => customerRequest<Serviceability>(`/v1/customer/serviceability?pincode=${encodeURIComponent(pincode)}`, { token }),
-  deliverySettings: (token: string) => customerRequest<{locationRequired:boolean}>('/v1/customer/delivery-settings', { token }),
-  catalogPreview: (token: string) => customerRequest<CatalogPreview>('/v1/customer/catalog/preview', { token }),
-  catalog: (token: string, addressId: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/catalog/home?${new URLSearchParams({ addressId, limit: '50', ...(cursor ? { cursor } : {}) })}`, { token }),
+  deliverySettings: (token: string) => customerRequest<DeliverySettings>('/v1/customer/delivery-settings', { token }),
+  catalogPreview,
+  catalog: (token: string, addressId: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/catalog/home?${new URLSearchParams({ addressId, limit: String(CATALOG_PAGE_LIMIT), ...(cursor ? { cursor } : {}) })}`, { token }),
   categories: (token: string, addressId: string) => customerRequest<{items:{id:string; name:string}[]}>(`/v1/customer/catalog/categories?${new URLSearchParams({addressId})}`, {token}),
-  category: (token: string, addressId: string, category: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/catalog/categories/${encodeURIComponent(category)}/products?${new URLSearchParams({addressId,limit:'50',...(cursor ? {cursor} : {})})}`, {token}),
+  category: (token: string, addressId: string, category: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/catalog/categories/${encodeURIComponent(category)}/products?${new URLSearchParams({addressId,limit:String(CATALOG_PAGE_LIMIT),...(cursor ? {cursor} : {})})}`, {token}),
+  product: (token: string, addressId: string, productId: string, cursor?: string) => customerRequest<CatalogPage>(
+    `/v1/customer/catalog/products/${encodeURIComponent(productId)}?${new URLSearchParams({ addressId, limit: String(CATALOG_PAGE_LIMIT), ...(cursor ? { cursor } : {}) })}`, { token },
+  ),
   favorites: (token: string, cursor?: string) => customerRequest<{items:string[];nextCursor:string | null}>(`/v1/customer/favorites${cursor ? `?${new URLSearchParams({cursor})}` : ''}`, {token}),
-  favoriteProducts: (token: string, addressId: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/favorites/products?${new URLSearchParams({addressId,limit:'50',...(cursor ? {cursor} : {})})}`, {token}),
+  favoriteProducts: (token: string, addressId: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/favorites/products?${new URLSearchParams({addressId,limit:String(CATALOG_PAGE_LIMIT),...(cursor ? {cursor} : {})})}`, {token}),
   setFavorite: (token: string, productId:string, active:boolean) => customerRequest<void>(`/v1/customer/favorites/${encodeURIComponent(productId)}`, {token,method:active ? 'PUT' : 'DELETE'}),
-  search: (token: string, addressId: string, query: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/search?${new URLSearchParams({ addressId, q: query, limit:'50', ...(cursor ? {cursor} : {}) })}`, { token }),
+  search: (token: string, addressId: string, query: string, cursor?: string) => customerRequest<CatalogPage>(`/v1/customer/search?${new URLSearchParams({ addressId, q: query, limit:String(CATALOG_PAGE_LIMIT), ...(cursor ? {cursor} : {}) })}`, { token }),
   cart: (token: string) => customerRequest<ServerCart>('/v1/customer/cart', { token }),
-  putItem: (token: string, variantId: string, body: PutItem, key: string) => customerRequest<CartWriteResult>(`/v1/customer/cart/items/${encodeURIComponent(variantId)}`, { method: 'PUT', token, body, idempotencyKey: key }),
+  putItem: (token: string, variantId: string, body: PutItem, key: string) => customerRequest<CartWriteResult>(`/v1/customer/cart/items/${encodeURIComponent(variantId)}`, { method: 'PUT', token, body, idempotencyKey: key, timeoutMs:12000 }),
   coupons: (token:string,addressId:string) => customerRequest<{items:Coupon[]}>(`/v1/customer/coupons/available?${new URLSearchParams({addressId})}`, {token}),
   applyCoupon: (token:string,code:string,version:number,key:string) => customerRequest<ServerCart>('/v1/customer/cart/coupon', {token,method:'POST',body:{code,version},idempotencyKey:key}),
   removeCoupon: (token:string,version:number,key:string) => customerRequest<ServerCart>(`/v1/customer/cart/coupon?${new URLSearchParams({version:String(version)})}`, {token,method:'DELETE',idempotencyKey:key}),
-  quote: (token: string, body: QuoteRequest) => customerRequest<QuoteResult>('/v1/customer/checkout/quote', { method: 'POST', token, body }),
-  place: (token: string, body: PlaceRequest, key: string) => customerRequest<PlaceResult>('/v1/customer/checkout/place', { method: 'POST', token, body, idempotencyKey: key }),
+  quote: (token: string, body: QuoteRequest) => customerRequest<QuoteResult>('/v1/customer/checkout/quote', { method: 'POST', token, body, timeoutMs:20000 }),
+  place: (token: string, body: PlaceRequest, key: string) => customerRequest<PlaceResult>('/v1/customer/checkout/place', { method: 'POST', token, body, idempotencyKey: key, timeoutMs:30000 }),
+  placementStatus: (token:string,key:string) => customerRequest<PlacementStatus>('/v1/customer/checkout/placement-status',{token,idempotencyKey:key}),
   wallet: (token: string) => customerRequest<WalletBalances>('/v1/customer/wallet', { token }),
 };
 
@@ -104,8 +123,11 @@ export const customerDetailsApi = {
 };
 
 export type PlaceSuggestion = components['schemas']['SuggestionView'];
+// TODO(lead): regenerate customer.generated.ts — server PlaceView gained optional
+// `pincode` (6-digit); intersect here until the generated type includes it.
 export type PlaceDetails = components['schemas']['PlaceView'];
 export const customerPlacesApi = {
-  autocomplete: (token: string, input: string) => customerRequest<PlaceSuggestion[]>(`/v1/customer/places/autocomplete?${new URLSearchParams({ input })}`, { token }),
-  details: (token: string, placeId: string) => customerRequest<PlaceDetails>(`/v1/customer/places/details?${new URLSearchParams({ placeId })}`, { token }),
+  autocomplete: (token: string, input: string, signal?: AbortSignal) => customerRequest<PlaceSuggestion[]>(`/v1/customer/places/autocomplete?${new URLSearchParams({ input })}`, { token, ...(signal ? { signal } : {}) }),
+  details: (token: string, placeId: string, signal?: AbortSignal) => customerRequest<PlaceDetails>(`/v1/customer/places/details?${new URLSearchParams({ placeId })}`, { token, ...(signal ? { signal } : {}) }),
+  reverse: (token: string, lat: number, lng: number, signal?: AbortSignal) => customerRequest<PlaceDetails[]>(`/v1/customer/places/reverse?${new URLSearchParams({ lat: String(lat), lng: String(lng) })}`, { token, ...(signal ? { signal } : {}) }),
 };

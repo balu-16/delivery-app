@@ -4,7 +4,7 @@ import type { Env } from '../config/env.schema.js';
 import { HealthController } from '../platform/health/health.controller.js';
 import { type ReadinessProbe } from '../platform/health/contracts.js';
 import { MetricsController } from '../platform/metrics/metrics.controller.js';
-import { HttpMetrics } from '../platform/metrics/http-metrics.js';
+import { MetricsModule } from '../platform/metrics/metrics.module.js';
 import { PlatformModule } from '../platform/platform.module.js';
 import {
   AdminSurfaceModule,
@@ -65,6 +65,7 @@ export class RoleModule {
     return {
       module: RoleModule,
       imports: [
+        MetricsModule,
         RuntimeConfigModule.forRoot(env),
         probes ? PlatformModule.forMetadata(env, probes) : PlatformModule.forRoot(env),
         ...(ownsRealtime(env.APP_ROLE) && !probes ? [RealtimeModule.forRoot(env)] : []),
@@ -104,7 +105,7 @@ export class RoleModule {
         ...surfacesFor(env.APP_ROLE).map((surface) => surfaceModules[surface]),
       ],
       controllers: [HealthController, MetricsController],
-      providers: worker ? [HttpMetrics, StoreSignalsScheduler] : [HttpMetrics],
+      providers: worker ? [StoreSignalsScheduler] : [],
     };
   }
 }

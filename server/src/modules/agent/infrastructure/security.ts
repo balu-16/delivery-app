@@ -19,6 +19,25 @@ export async function requireAgentPermission(
   if (!consent.rows.length) throw new Error('CONSENT_REQUIRED');
 }
 
+/** Keep the same lock order for local replies, card actions, and queued work. */
+export async function lockAgentThread(
+  tx: TransactionContext,
+  userId: string,
+  threadId: string,
+): Promise<void> {
+  const user =
+    await sql`SELECT id FROM users WHERE id=${userId}::uuid AND status='ACTIVE' FOR UPDATE`.execute(
+      tx,
+    );
+  if (!user.rows.length) throw new Error('ACCOUNT_DISABLED');
+  await requireAgentPermission(userId, tx);
+  const thread = await sql<{ status: string }>`SELECT status FROM agent_threads
+    WHERE id=${threadId}::uuid AND user_id=${userId}::uuid FOR UPDATE`.execute(tx);
+  if (!thread.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
+  if (thread.rows[0].status !== 'active') throw new Error('THREAD_ARCHIVED');
+  await assertAgentCommitAllowed(tx, userId, threadId);
+}
+
 interface AgentJobLease {
   jobId: string;
   leaseToken: string;

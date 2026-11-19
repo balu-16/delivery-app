@@ -32,6 +32,8 @@ import { SqsConcernQueues } from './queue/sqs-concern-queues.js';
 import { SQS_LANES, SqsTransport, type SqsQueueUrls } from './queue/sqs-transport.js';
 import { createRedis, createIamRedis } from './redis/redis.js';
 import { RedisRateLimiter } from './redis/rate-limiter.js';
+import { HttpMetrics } from './metrics/http-metrics.js';
+import { MetricsModule } from './metrics/metrics.module.js';
 
 @Injectable()
 class PlatformLifecycle implements OnApplicationShutdown, OnApplicationBootstrap {
@@ -104,10 +106,12 @@ export class PlatformModule {
       throw new Error('Metadata-only composition is forbidden in production');
     return {
       module: PlatformModule,
+      imports: [MetricsModule],
       providers: [
         {
           provide: PLATFORM_DATABASE,
-          useFactory: () =>
+          inject: [HttpMetrics],
+          useFactory: (metrics: HttpMetrics) =>
             createDatabase(
               env.DATABASE_URL,
               env.DATABASE_POOL_MAX,
@@ -115,6 +119,7 @@ export class PlatformModule {
               undefined,
               env.DB_ACQUIRE_TIMEOUT_MS,
               env.DATABASE_AUTH === 'iam' ? env.AWS_REGION : undefined,
+              metrics,
             ),
         },
         {
@@ -155,6 +160,7 @@ export class PlatformModule {
     const worker = env.APP_ROLE === 'all' || env.APP_ROLE === 'worker';
     return {
       module: PlatformModule,
+      imports: [MetricsModule],
       providers: [
         { provide: 'PLATFORM_WORKER_ENABLED', useValue: worker },
         { provide: 'PLATFORM_OUTBOX_POLL_INTERVAL', useValue: env.OUTBOX_POLL_INTERVAL_MS },
@@ -178,7 +184,8 @@ export class PlatformModule {
         },
         {
           provide: PLATFORM_DATABASE,
-          useFactory: () =>
+          inject: [HttpMetrics],
+          useFactory: (metrics: HttpMetrics) =>
             createDatabase(
               env.DATABASE_URL,
               env.DATABASE_POOL_MAX,
@@ -186,6 +193,7 @@ export class PlatformModule {
               () => logger.error('Idle database connection failed'),
               env.DB_ACQUIRE_TIMEOUT_MS,
               env.DATABASE_AUTH === 'iam' ? env.AWS_REGION : undefined,
+              metrics,
             ),
         },
         {

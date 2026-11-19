@@ -820,6 +820,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/customer/checkout/placement-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["customerCheckoutPlacementStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/customer/orders": {
         parameters: {
             query?: never;
@@ -1494,10 +1510,16 @@ export interface components {
             /** @enum {string} */
             locale?: "en" | "hi" | "te";
         };
+        ChoiceReferenceDto: {
+            /** Format: uuid */
+            choiceId: string;
+            choiceVersion: number;
+        };
         MessageDto: {
             /** Format: uuid */
             clientMessageId: string;
             text: string;
+            choice?: components["schemas"]["ChoiceReferenceDto"];
             /** @enum {string} */
             locale?: "en" | "hi" | "te";
         };
@@ -1517,7 +1539,7 @@ export interface components {
             /** Format: uuid */
             clientActionId?: string;
             /** @enum {string} */
-            action: "add_to_cart";
+            action: "add_to_cart" | "cart_choice";
             payload: {
                 [key: string]: unknown;
             };
@@ -1620,8 +1642,20 @@ export interface components {
             etaRange: components["schemas"]["EtaView"] | null;
             reasons: ("OUTSIDE_ZONE" | "STORE_CLOSED" | "STORE_PAUSED" | "STORE_AT_CAPACITY" | "NO_RIDERS_AVAILABLE")[];
         };
+        FeeEstimateBandView: {
+            upToSubtotalPaise: string | null;
+            deliveryPaise: string;
+            handlingPaise: string;
+            smallCartPaise: string;
+            surgePaise: string;
+        };
+        FeeEstimateView: {
+            revision: string;
+            bands: components["schemas"]["FeeEstimateBandView"][];
+        };
         DeliverySettingsView: {
             locationRequired: boolean;
+            feeEstimate?: components["schemas"]["FeeEstimateView"];
         };
         SuggestionView: {
             id: string;
@@ -1631,6 +1665,8 @@ export interface components {
             id: string;
             description: string;
             location: components["schemas"]["PointView"];
+            /** @example 560095 */
+            pincode?: string;
             degraded?: boolean;
         };
         PreviewItemView: {
@@ -1640,6 +1676,7 @@ export interface components {
             description: string;
             /** Format: uuid */
             categoryId: string;
+            categoryName: string;
             /** Format: uuid */
             variantId: string;
             variantName: string;
@@ -1689,11 +1726,51 @@ export interface components {
             /** Format: uuid */
             nextCursor: string | null;
         };
+        CartLineView: {
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            productId: string;
+            productName: string;
+            variantName: string;
+            image: string | null;
+            quantity: string;
+            unitPricePaise: string;
+            currentUnitPricePaise: string | null;
+            mrpPaise: string;
+            lineSubtotalPaise: string;
+        };
+        CartIssueView: {
+            code: string;
+            /** Format: uuid */
+            variantId?: string;
+            detail?: string;
+        };
+        CartView: {
+            /** Format: uuid */
+            cartId: string;
+            /** Format: uuid */
+            userId: string;
+            /** Format: uuid */
+            storeId: string | null;
+            /** Format: uuid */
+            addressId: string | null;
+            version: number;
+            couponCode: string | null;
+            lines: components["schemas"]["CartLineView"][];
+            issues: components["schemas"]["CartIssueView"][];
+        };
         PutItemDto: {
             quantity: string;
             version: number;
             /** Format: uuid */
             addressId?: string;
+            displayedUnitPricePaise?: string;
+            acceptPriceChange?: boolean;
+        };
+        CartWriteView: {
+            cart: components["schemas"]["CartView"];
+            clamped: boolean;
         };
         ApplyCouponDto: {
             code: string;
@@ -1790,11 +1867,126 @@ export interface components {
             tipPaise?: string;
             couponCode?: string;
         };
+        QuoteLineView: {
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            storeId: string;
+            quantity: string;
+            unitPricePaise: string;
+            mrpPaise: string;
+            lineSubtotalPaise: string;
+            discountPaise: string;
+            taxRateBps: number;
+            taxPaise: string;
+            lineTotalPaise: string;
+        };
+        QuoteFeeView: {
+            /** @enum {string} */
+            kind: "DELIVERY" | "HANDLING" | "SMALL_CART" | "SURGE" | "TIP";
+            amountPaise: string;
+            taxPaise: string;
+            /** @enum {string|null} */
+            taxSplit: "CGST_SGST" | "IGST" | null;
+        };
+        QuoteWalletView: {
+            promoPaise: string;
+            cashPaise: string;
+        };
+        QuoteIssueView: {
+            code: string;
+            /** Format: uuid */
+            variantId?: string;
+            detail?: string;
+        };
+        QuoteSnapshotView: {
+            /** Format: uuid */
+            quoteId: string;
+            /** Format: uuid */
+            cartId: string;
+            cartVersion: number;
+            /** Format: uuid */
+            userId: string;
+            /** Format: uuid */
+            storeId: string;
+            /** Format: uuid */
+            addressId: string;
+            /** Format: uuid */
+            referralClaimId: string | null;
+            /** @enum {string} */
+            status: "ACTIVE" | "CONSUMED" | "EXPIRED" | "SUPERSEDED";
+            lines: components["schemas"]["QuoteLineView"][];
+            fees: components["schemas"]["QuoteFeeView"][];
+            couponCode: string | null;
+            couponDiscountPaise: string;
+            subtotalPaise: string;
+            discountPaise: string;
+            feeTotalPaise: string;
+            taxTotalPaise: string;
+            tipPaise: string;
+            totalPaise: string;
+            wallet: components["schemas"]["QuoteWalletView"] | null;
+            amountDuePaise: string;
+            priceVersion: string;
+            configVersion: string;
+            couponFingerprint: string | null;
+            expiresAt: string;
+            createdAt: string;
+            issues: components["schemas"]["QuoteIssueView"][];
+        };
+        QuoteCartLineView: {
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            productId: string;
+            productName: string;
+            variantName: string;
+            image: string | null;
+            quantity: string;
+            unitPricePaise: string;
+            currentUnitPricePaise: string | null;
+            mrpPaise: string;
+            lineSubtotalPaise: string;
+        };
+        QuoteCartView: {
+            /** Format: uuid */
+            cartId: string;
+            /** Format: uuid */
+            userId: string;
+            /** Format: uuid */
+            storeId: string | null;
+            /** Format: uuid */
+            addressId: string | null;
+            version: number;
+            couponCode: string | null;
+            lines: components["schemas"]["QuoteCartLineView"][];
+            issues: components["schemas"]["QuoteIssueView"][];
+        };
+        CheckoutQuoteView: {
+            quote: components["schemas"]["QuoteSnapshotView"];
+            /** Format: uuid */
+            intentId: string;
+            intentExpiresAt: string;
+            codAvailable: boolean;
+            cart: components["schemas"]["QuoteCartView"];
+        };
         PlaceDto: {
             quoteId: string;
             intentId: string;
             /** @enum {string} */
             method: "GATEWAY" | "COD";
+        };
+        PlacementStatusOrderView: {
+            /** Format: uuid */
+            orderId: string;
+            orderNumber: string;
+            status: string;
+            paymentStatus: string;
+        };
+        PlacementStatusView: {
+            /** @enum {string} */
+            state: "ORDER_FOUND" | "PROCESSING" | "UNKNOWN";
+            order?: components["schemas"]["PlacementStatusOrderView"];
         };
         CancelDto: {
             reason: string;
@@ -1989,7 +2181,7 @@ export interface components {
             /** @enum {integer} */
             status: 409;
             /** @enum {string} */
-            code: "ADDRESS_CHANGE_NOT_ALLOWED" | "ADDRESS_LIMIT_REACHED" | "ADDRESS_LOCATION_REQUIRED" | "ADMIN_RESOLUTION_REQUIRED" | "AMOUNT_MISMATCH" | "APPROVAL_EXPIRED" | "APPROVAL_INVALID" | "APPROVAL_POLICY_CHANGED" | "APPROVAL_REQUIRED" | "BATCH_NOT_ELIGIBLE" | "CANNOT_DISABLE_SELF" | "CANNOT_ERASE_SELF" | "CART_INTENT_CONSUMED" | "CASH_LIMIT_EXCEEDED" | "CATALOG_IN_USE" | "COD_AMOUNT_MISMATCH" | "COD_LIMIT_EXCEEDED" | "COD_MISMATCH" | "COD_NOT_APPLICABLE" | "COD_NOT_COLLECTED" | "COD_NOT_ELIGIBLE" | "CONCURRENT_MODIFICATION" | "CONFLICT" | "CONFLICTING_CREDENTIALS" | "COUPON_EXHAUSTED" | "COUPON_EXPIRED" | "COUPON_LIMIT_REACHED" | "COUPON_NOT_ELIGIBLE" | "CUTOFF_PASSED" | "DELIVERY_CODE_INVALID" | "DELIVERY_CODE_LOCKED" | "DELIVERY_CONTACT_ATTEMPTS_REQUIRED" | "DELIVERY_TASK_STATE_INVALID" | "DELIVERY_WAIT_REQUIRED" | "DISTANCE_ALREADY_REVIEWED" | "DISTANCE_REVIEW_NOT_REQUIRED" | "DOCUMENT_STATE_INVALID" | "DRAFT_EXPIRED" | "DRAFT_INVALID" | "DRAFT_NOT_PENDING" | "DRAFT_PENDING" | "HANDOVER_CODE_INVALID" | "HANDOVER_LOCKED" | "HANDOVER_NOT_READY" | "HANDOVER_NOT_VERIFIED" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_LEASE_LOST" | "ILLEGAL_STATE_TRANSITION" | "INVALID_REFUND_DESTINATION" | "INVENTORY_INSUFFICIENT" | "INVENTORY_RESERVED" | "INVOICE_NOT_RENDERED" | "INVOICE_RENDER_NOT_SUSPENDED" | "ITEM_ALREADY_RESOLVED" | "LAST_SUPER_ADMIN" | "LOCATION_INVALID" | "NOT_TASK_OWNER" | "NO_ELIGIBLE_DELIVERY" | "OFFER_ALREADY_RESPONDED" | "OFFER_EXPIRED" | "OFFER_NO_LONGER_AVAILABLE" | "ONLINE_PAYMENTS_NOT_READY" | "ORDER_ON_HOLD" | "PAYMENT_FUNDING_INVALID" | "PAYMENT_STATE_INVALID" | "PAYMENT_WINDOW_EXPIRED" | "PAYOUT_STALE" | "PAYOUT_STATE_INVALID" | "PICKER_AT_CAPACITY" | "PICK_TASK_INCOMPLETE" | "PICK_TASK_NOT_AVAILABLE" | "PICK_TASK_NOT_COMPLETE" | "PICK_TASK_STATE_INVALID" | "PINCODE_EXISTS" | "PRICE_CHANGED" | "PRODUCT_NOT_PUBLISHABLE" | "PROVISIONING_INPUT_CONFLICT" | "QUOTE_CONSUMED" | "QUOTE_EXPIRED" | "RATING_EXISTS" | "RATING_NOT_ALLOWED" | "RATING_WINDOW_EXPIRED" | "RECEIPT_REQUIRED" | "REFUND_LIMIT_EXCEEDED" | "REFUND_STATE_INVALID" | "REOPEN_WINDOW_EXPIRED" | "REPORT_NOT_READY" | "REQUEST_IN_PROGRESS" | "RESERVATION_STATE_INVALID" | "RESOURCE_CONFLICT" | "RETURN_QUANTITY_EXCEEDED" | "RIDER_AT_CAPACITY" | "RIDER_ENROLLMENT_REQUIRES_REVIEW" | "RIDER_NOT_APPROVED" | "RIDER_OFFLINE" | "RIDER_STALE_LOCATION" | "RIDER_STATE_INVALID" | "RIDER_SUSPENDED" | "ROLE_NOT_ASSIGNED" | "ROLE_REPLACEMENT_REQUIRED" | "RUN_IN_PROGRESS" | "SESSION_CLOSED" | "STORE_CITY_IMMUTABLE" | "SUBSCRIPTIONS_DISABLED" | "SUBSCRIPTION_STATE_INVALID" | "SUBSTITUTION_DISABLED" | "SUBSTITUTION_NOT_PERMITTED" | "SUBSTITUTION_STATE_INVALID" | "TASK_STATE_INVALID" | "THREAD_ARCHIVED" | "TICKET_CLOSED" | "TICKET_STATE_INVALID" | "WALLET_DISABLED" | "WALLET_INSUFFICIENT" | "WALLET_REQUIRED_FOR_SUBSCRIPTIONS" | "WEIGHT_TOLERANCE_EXCEEDED" | "WRONG_ITEM" | "ZONE_STORE_IMMUTABLE";
+            code: "ADDRESS_CHANGE_NOT_ALLOWED" | "ADDRESS_LIMIT_REACHED" | "ADDRESS_LOCATION_REQUIRED" | "ADDRESS_REQUIRED" | "ADMIN_RESOLUTION_REQUIRED" | "AMOUNT_MISMATCH" | "APPROVAL_EXPIRED" | "APPROVAL_INVALID" | "APPROVAL_POLICY_CHANGED" | "APPROVAL_REQUIRED" | "BATCH_NOT_ELIGIBLE" | "CANNOT_DISABLE_SELF" | "CANNOT_ERASE_SELF" | "CART_INTENT_CONSUMED" | "CASH_LIMIT_EXCEEDED" | "CATALOG_IN_USE" | "COD_AMOUNT_MISMATCH" | "COD_LIMIT_EXCEEDED" | "COD_MISMATCH" | "COD_NOT_APPLICABLE" | "COD_NOT_COLLECTED" | "COD_NOT_ELIGIBLE" | "CONCURRENT_MODIFICATION" | "CONFLICT" | "CONFLICTING_CREDENTIALS" | "COUPON_EXHAUSTED" | "COUPON_EXPIRED" | "COUPON_LIMIT_REACHED" | "COUPON_NOT_ELIGIBLE" | "CUTOFF_PASSED" | "DELIVERY_CODE_INVALID" | "DELIVERY_CODE_LOCKED" | "DELIVERY_CONTACT_ATTEMPTS_REQUIRED" | "DELIVERY_TASK_STATE_INVALID" | "DELIVERY_WAIT_REQUIRED" | "DISTANCE_ALREADY_REVIEWED" | "DISTANCE_REVIEW_NOT_REQUIRED" | "DOCUMENT_STATE_INVALID" | "DRAFT_EXPIRED" | "DRAFT_INVALID" | "DRAFT_NOT_PENDING" | "DRAFT_PENDING" | "HANDOVER_CODE_INVALID" | "HANDOVER_LOCKED" | "HANDOVER_NOT_READY" | "HANDOVER_NOT_VERIFIED" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_LEASE_LOST" | "ILLEGAL_STATE_TRANSITION" | "INVALID_REFUND_DESTINATION" | "INVENTORY_INSUFFICIENT" | "INVENTORY_RESERVED" | "INVOICE_NOT_RENDERED" | "INVOICE_RENDER_NOT_SUSPENDED" | "ITEM_ALREADY_RESOLVED" | "ITEM_UNAVAILABLE" | "LAST_SUPER_ADMIN" | "LOCATION_INVALID" | "NOT_TASK_OWNER" | "NO_ELIGIBLE_DELIVERY" | "OFFER_ALREADY_RESPONDED" | "OFFER_EXPIRED" | "OFFER_NO_LONGER_AVAILABLE" | "ONLINE_PAYMENTS_NOT_READY" | "ORDER_ON_HOLD" | "PAYMENT_FUNDING_INVALID" | "PAYMENT_STATE_INVALID" | "PAYMENT_WINDOW_EXPIRED" | "PAYOUT_STALE" | "PAYOUT_STATE_INVALID" | "PICKER_AT_CAPACITY" | "PICK_TASK_INCOMPLETE" | "PICK_TASK_NOT_AVAILABLE" | "PICK_TASK_NOT_COMPLETE" | "PICK_TASK_STATE_INVALID" | "PINCODE_EXISTS" | "PRICE_CHANGED" | "PRODUCT_NOT_PUBLISHABLE" | "PROVISIONING_INPUT_CONFLICT" | "QUOTE_CONSUMED" | "QUOTE_EXPIRED" | "RATING_EXISTS" | "RATING_NOT_ALLOWED" | "RATING_WINDOW_EXPIRED" | "RECEIPT_REQUIRED" | "REFUND_LIMIT_EXCEEDED" | "REFUND_STATE_INVALID" | "REOPEN_WINDOW_EXPIRED" | "REPORT_NOT_READY" | "REQUEST_IN_PROGRESS" | "RESERVATION_STATE_INVALID" | "RESOURCE_CONFLICT" | "RETURN_QUANTITY_EXCEEDED" | "RIDER_AT_CAPACITY" | "RIDER_ENROLLMENT_REQUIRES_REVIEW" | "RIDER_NOT_APPROVED" | "RIDER_OFFLINE" | "RIDER_STALE_LOCATION" | "RIDER_STATE_INVALID" | "RIDER_SUSPENDED" | "ROLE_NOT_ASSIGNED" | "ROLE_REPLACEMENT_REQUIRED" | "RUN_IN_PROGRESS" | "SESSION_CLOSED" | "STORE_CITY_IMMUTABLE" | "SUBSCRIPTIONS_DISABLED" | "SUBSCRIPTION_STATE_INVALID" | "SUBSTITUTION_DISABLED" | "SUBSTITUTION_NOT_PERMITTED" | "SUBSTITUTION_STATE_INVALID" | "TASK_STATE_INVALID" | "THREAD_ARCHIVED" | "TICKET_CLOSED" | "TICKET_STATE_INVALID" | "WALLET_DISABLED" | "WALLET_INSUFFICIENT" | "WALLET_REQUIRED_FOR_SUBSCRIPTIONS" | "WEIGHT_TOLERANCE_EXCEEDED" | "WRONG_ITEM" | "ZONE_STORE_IMMUTABLE";
             detail: string;
             traceId: string;
         };
@@ -7784,7 +7976,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CartView"];
+                };
             };
             /** @description Bad Request */
             400: {
@@ -8048,7 +8242,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CartWriteView"];
+                };
             };
             /** @description Bad Request */
             400: {
@@ -10240,7 +10436,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CheckoutQuoteView"];
+                };
             };
             /** @description Bad Request */
             400: {
@@ -10372,6 +10570,135 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem400"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem401"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem403"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem404"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem409"];
+                };
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem413"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem415"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem429"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem500"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem502"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem503"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem504"];
+                };
+            };
+        };
+    };
+    customerCheckoutPlacementStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlacementStatusView"];
+                };
             };
             /** @description Bad Request */
             400: {

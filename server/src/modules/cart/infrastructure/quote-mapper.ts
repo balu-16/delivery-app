@@ -95,6 +95,7 @@ export function toPreview(
   couponIssue: QuoteIssue | null,
   referralClaimId: string | null = null,
 ): QuotePreview {
+  if (!evaluation.cart.store_id || !evaluation.cart.address_id) throw new Error('ADDRESS_REQUIRED');
   return {
     cartId: evaluation.cart.id,
     cartVersion: Number(evaluation.cart.version),

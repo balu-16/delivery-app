@@ -47,6 +47,9 @@ export class OrderMutationsService {
     input: { addressId: string; addressSnapshot: Record<string, unknown> },
   ): Promise<void> {
     await transactionWithRetry(this.db, async (tx) => {
+      // Config writers take the exclusive lock first so checkouts holding only
+      // shared locks never wait while holding a row lock (no upgrade).
+      await sql`SELECT pg_advisory_xact_lock(701001)`.execute(tx);
       const row = await this.aggregate.lock(tx, orderId);
       if (!row || row.user_id !== userId) throw new Error('ORDER_NOT_FOUND');
       const cutoff =
@@ -88,7 +91,6 @@ export class OrderMutationsService {
         cityZoneVersion?: string;
         deliveryFeePaise?: string;
       };
-      await sql`SELECT pg_advisory_xact_lock(701001)`.execute(tx);
       const required = await sql<{
         enabled: boolean;
       }>`SELECT enabled FROM feature_flags WHERE key='customer_location_required'`.execute(tx);

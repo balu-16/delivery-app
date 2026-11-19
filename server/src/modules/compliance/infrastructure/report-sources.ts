@@ -4,8 +4,7 @@ export const REPORT_SOURCES = {
     v.id AS variant_id,v.product_id,v.sku,v.name,p.published,v.deleted_at IS NULL AND p.deleted_at IS NULL AS active,
     price.selling_paise::text AS selling_paise,price.mrp_paise::text AS mrp_paise
     FROM store_inventory i JOIN catalog_variants v ON v.id=i.variant_id JOIN catalog_products p ON p.id=v.product_id
-    LEFT JOIN LATERAL (SELECT selling_paise,mrp_paise FROM catalog_prices cp WHERE cp.store_id=i.store_id AND cp.variant_id=v.id
-      AND cp.valid_from<=transaction_timestamp() AND (cp.valid_to IS NULL OR cp.valid_to>transaction_timestamp()) ORDER BY valid_from DESC LIMIT 1) price ON true`,
+    LEFT JOIN catalog_global_prices price ON price.variant_id=v.id`,
   stock: `SELECT i.store_id::text||':'||i.variant_id::text AS row_key,i.store_id,NULL::timestamptz AS event_at,
     i.variant_id,i.on_hand::text,i.reserved::text,COALESCE(a.available,0)::text AS available,i.version::text
     FROM store_inventory i LEFT JOIN LATERAL (

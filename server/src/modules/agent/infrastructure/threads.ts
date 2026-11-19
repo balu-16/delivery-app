@@ -152,6 +152,9 @@ export class AgentThreads {
       await sql`UPDATE agent_drafts SET status='superseded',updated_at=clock_timestamp() WHERE user_id=${userId}::uuid AND status='pending'`.execute(
         tx,
       );
+      await sql`UPDATE agent_cart_choices SET status='superseded',updated_at=clock_timestamp() WHERE user_id=${userId}::uuid AND status='pending'`.execute(
+        tx,
+      );
       await sql`UPDATE agent_threads SET status='archived' WHERE user_id=${userId}::uuid AND status='active'`.execute(
         tx,
       );
@@ -162,6 +165,12 @@ export class AgentThreads {
       return next;
     });
     return { id, messages: [], nextCursor: null };
+  }
+
+  async title(userId: string, threadId: string): Promise<string | null> {
+    const found = await sql<{ title: string | null }>`SELECT title FROM agent_threads
+      WHERE id=${threadId}::uuid AND user_id=${userId}::uuid`.execute(this.db);
+    return found.rows[0]?.title ?? null;
   }
 
   async messages(
@@ -202,9 +211,50 @@ export class AgentThreads {
         row.status === 'pending' && row.expired ? 'expired' : row.status,
       ]),
     );
+    const choiceIds = page.flatMap((row) =>
+      (Array.isArray(row.cards) ? row.cards : [])
+        .filter((card) => card.type === 'cart_choice')
+        .map((card) => card.payload?.choiceId)
+        .filter(
+          (id): id is string =>
+            typeof id === 'string' &&
+            /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(id),
+        ),
+    );
+    const choices = new Map(
+      choiceIds.length
+        ? (
+            await sql<{
+              id: string;
+              version: number;
+              status: string;
+              expired: boolean;
+              selection: unknown;
+            }>`SELECT id::text,version,status,expires_at<=clock_timestamp() AS expired,selection FROM agent_cart_choices
+      WHERE user_id=${userId}::uuid AND thread_id=${threadId}::uuid AND id IN (${sql.join(choiceIds.map((id) => sql`${id}::uuid`))})`.execute(
+              this.db,
+            )
+          ).rows.map((row) => [row.id, row])
+        : [],
+    );
     const messages = page.reverse().map((row) => {
       const message = messageView(row);
       message.cards = message.cards.map((card) => {
+        const choiceId = card.payload?.choiceId;
+        if (card.type === 'cart_choice' && typeof choiceId === 'string') {
+          const choice = choices.get(choiceId);
+          const version = card.payload.choiceVersion;
+          const status =
+            !choice ||
+            (version === undefined
+              ? Boolean(choice.selection) && choice.status === 'pending'
+              : choice.version !== version)
+              ? 'superseded'
+              : choice.status === 'pending' && choice.expired
+                ? 'expired'
+                : choice.status;
+          return { ...card, payload: { ...card.payload, status } };
+        }
         const draftId = card.payload?.draftId;
         return typeof draftId === 'string'
           ? { ...card, payload: { ...card.payload, status: drafts.get(draftId) ?? 'superseded' } }
@@ -222,9 +272,10 @@ export class AgentThreads {
     text: string,
     cards: AgentCard[] = [],
     clientMessageId?: string,
+    outer?: TransactionContext,
   ): Promise<string> {
     const id = uuidV7();
-    return this.db.transaction().execute(async (tx) => {
+    const append = async (tx: TransactionContext) => {
       const thread = await this.owned(userId, threadId, tx);
       if (thread.status !== 'active') throw new Error('THREAD_ARCHIVED');
       const inserted = await sql<{
@@ -248,7 +299,8 @@ export class AgentThreads {
         tx,
       );
       return id;
-    });
+    };
+    return outer ? append(outer) : this.db.transaction().execute(append);
   }
 
   async feedback(

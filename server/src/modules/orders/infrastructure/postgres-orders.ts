@@ -111,14 +111,18 @@ export class PostgresOrderAggregate {
         ${input.walletPromoPaise}::bigint,${input.walletCashPaise}::bigint,${input.amountDuePaise}::bigint,
         ${input.deliverySlot ? JSON.stringify(input.deliverySlot) : null}::jsonb,clock_timestamp(),
         ${input.expiresAt}::timestamptz)`.execute(tx);
-    for (const item of input.items)
-      await sql`INSERT INTO order_items(id,order_id,variant_id,name_snapshot,ordered_qty,unit_price_paise,
-        mrp_paise,discount_paise,tax_paise,tax_rate_bps,hsn_code)
-        VALUES (${uuidV7()}::uuid,${input.orderId}::uuid,${item.variantId}::uuid,${item.nameSnapshot},
+    if (!input.items.length) return;
+    // One statement for all lines: same ids, columns and order as before.
+    let next: ReturnType<typeof sql> | undefined;
+    for (const item of input.items) {
+      const row = sql`(${uuidV7()}::uuid,${input.orderId}::uuid,${item.variantId}::uuid,${item.nameSnapshot},
           ${item.orderedQty}::bigint,${item.unitPricePaise}::bigint,${item.mrpPaise}::bigint,
-          ${item.discountPaise}::bigint,${item.taxPaise}::bigint,${item.taxRateBps},${item.hsnCode})`.execute(
-        tx,
-      );
+          ${item.discountPaise}::bigint,${item.taxPaise}::bigint,${item.taxRateBps},${item.hsnCode})`;
+      next = next ? sql`${next},${row}` : row;
+    }
+    await sql`INSERT INTO order_items(id,order_id,variant_id,name_snapshot,ordered_qty,unit_price_paise,
+        mrp_paise,discount_paise,tax_paise,tax_rate_bps,hsn_code)
+        VALUES ${next!}`.execute(tx);
     await this.history(tx, input.orderId, null, 'PENDING_PAYMENT', 'ORDER_PLACED', {
       type: 'CUSTOMER',
       id: input.userId,

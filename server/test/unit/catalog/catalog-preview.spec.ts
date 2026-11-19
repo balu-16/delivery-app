@@ -18,6 +18,7 @@ const item = {
   name: 'Milk',
   description: 'Test',
   category_id: 'category',
+  category_name: 'Dairy',
   variant_id: 'variant',
   variant_name: '500 ml',
   selling_paise: '3500',
@@ -25,21 +26,22 @@ const item = {
   images: [{ id: 'image', key: 'public/milk.png' }],
 };
 
-test('does not expose a catalog when a preview store was not configured', async () => {
+test('returns the shared catalog even when no preview store was configured', async () => {
   const { db, execute } = database([item]);
   const query = new PostgresCatalogQuery(db, {} as AppConfig);
-  await expect(query.preview()).resolves.toEqual({ items: [] });
-  expect(execute).not.toHaveBeenCalled();
+  await expect(query.preview()).resolves.toMatchObject({
+    items: [{ name: 'Milk', categoryName: 'Dairy', sellingPaise: '3500' }],
+  });
+  expect(execute).toHaveBeenCalledTimes(1);
 });
 
-test('returns the configured store price and images without claiming address-specific stock', async () => {
+test('returns the shared price and images without claiming address-specific stock', async () => {
   const { db } = database([item]);
   const query = new PostgresCatalogQuery(
     db,
     {} as AppConfig,
     'https://cdn.example.test',
     undefined,
-    '01800000-0000-7000-8000-000000000011',
   );
   const result = await query.preview();
   expect(result.items).toEqual([
@@ -57,13 +59,7 @@ test('returns the configured store price and images without claiming address-spe
 
 test('uses the public media route when there is no CDN and handles zero MRP', async () => {
   const { db } = database([{ ...item, selling_paise: '0', mrp_paise: '0' }]);
-  const query = new PostgresCatalogQuery(
-    db,
-    {} as AppConfig,
-    undefined,
-    undefined,
-    '01800000-0000-7000-8000-000000000011',
-  );
+  const query = new PostgresCatalogQuery(db, {} as AppConfig, undefined, undefined);
   const result = await query.preview();
   expect(result.items[0]).toMatchObject({ discountPercent: 0, images: ['/media/image'] });
 });

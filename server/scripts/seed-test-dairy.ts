@@ -322,10 +322,9 @@ async function main(): Promise<void> {
             [store.id, variantId],
           );
           if (!assortment.rowCount) await catalog.setAssortment(admin.id, store.id, variantId);
-          const price = await query(
-            'SELECT 1 FROM catalog_prices WHERE store_id=$1 AND variant_id=$2 AND valid_from<=clock_timestamp() AND (valid_to IS NULL OR valid_to>clock_timestamp())',
-            [store.id, variantId],
-          );
+          const price = await query('SELECT 1 FROM catalog_global_prices WHERE variant_id=$1', [
+            variantId,
+          ]);
           if (!price.rowCount) {
             const result = await catalog.setPrice(admin.id, {
               storeId: store.id,

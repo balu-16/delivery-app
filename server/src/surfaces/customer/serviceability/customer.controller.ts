@@ -45,7 +45,13 @@ import type { AddressOperations } from '../../../modules/addresses/contracts/add
 import { MAPS, SERVICEABILITY } from '../../../modules/serviceability/contracts/tokens.js';
 import type { MapsPort } from '../../../modules/serviceability/contracts/maps.js';
 import type { Serviceability } from '../../../modules/serviceability/contracts/serviceability.js';
-import { ADMIN_CONFIG, type AdminConfig } from '../../../modules/app-config/contracts/config.js';
+import { createHash } from 'node:crypto';
+import {
+  ADMIN_CONFIG,
+  type AdminConfig,
+  type ConfigValues,
+} from '../../../modules/app-config/contracts/config.js';
+import { feeEstimateBands } from '../../../modules/pricing/contracts/pricing.js';
 
 class PointQuery {
   @ApiProperty({ type: Number, minimum: -90, maximum: 90 })
@@ -65,8 +71,20 @@ class CoverageQuery {
   @Matches(/^\d{6}$/)
   pincode?: string;
 }
+class FeeEstimateBandView {
+  @ApiProperty({ type: String, nullable: true }) upToSubtotalPaise!: string | null;
+  @ApiProperty() deliveryPaise!: string;
+  @ApiProperty() handlingPaise!: string;
+  @ApiProperty() smallCartPaise!: string;
+  @ApiProperty() surgePaise!: string;
+}
+class FeeEstimateView {
+  @ApiProperty() revision!: string;
+  @ApiProperty({ type: FeeEstimateBandView, isArray: true }) bands!: FeeEstimateBandView[];
+}
 class DeliverySettingsView {
   @ApiProperty() locationRequired!: boolean;
+  @ApiPropertyOptional({ type: FeeEstimateView }) feeEstimate?: FeeEstimateView;
 }
 class TextQuery {
   @ApiProperty({ minLength: 2, maxLength: 200 }) @IsString() @Length(2, 200) input!: string;
@@ -148,6 +166,11 @@ class SuggestionView {
 }
 class PlaceView extends SuggestionView {
   @ApiProperty({ type: PointView }) location!: PointView;
+  @ApiPropertyOptional({ pattern: '^\\d{6}$', example: '560095' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/)
+  pincode?: string;
   @ApiPropertyOptional() degraded?: boolean;
 }
 class ZoneView {
@@ -340,8 +363,65 @@ export class CustomerServiceabilityController {
   @ApiOkResponse({ type: DeliverySettingsView })
   @ApiOperation({ operationId: 'customerDeliverySettings' })
   async deliverySettings() {
+    if (!this.config) return { locationRequired: true };
+    // Validated fee config and both flags arrive together; bands derive from
+    // the same fee rules checkout prices with. The quote stays authoritative.
+    const keys = [
+      'deliveryFeeSlabs',
+      'freeDeliveryThresholdPaise',
+      'handlingFeePaise',
+      'smallCartThresholdPaise',
+      'smallCartFeePaise',
+      'surgeFeePaise',
+    ] as const;
+    type FeeKeys = Pick<
+      ConfigValues,
+      | 'deliveryFeeSlabs'
+      | 'freeDeliveryThresholdPaise'
+      | 'handlingFeePaise'
+      | 'smallCartThresholdPaise'
+      | 'smallCartFeePaise'
+      | 'surgeFeePaise'
+    >;
+    const config = this.config;
+    const [fees, locationRequired, surgeEnabled] = await Promise.all([
+      (config.getMany
+        ? config.getMany(keys)
+        : Promise.all(keys.map(async (key) => [key, await config.get(key)] as const)).then(
+            (entries) => Object.fromEntries(entries) as FeeKeys,
+          )) as Promise<FeeKeys>,
+      config.flag('customer_location_required'),
+      config.flag('surge_enabled'),
+    ]);
+    const bands = feeEstimateBands({
+      deliveryFeeSlabs: fees.deliveryFeeSlabs.map((slab) => ({
+        maxOrderValuePaise:
+          slab.maxOrderValuePaise === null ? null : BigInt(slab.maxOrderValuePaise),
+        feePaise: BigInt(slab.feePaise),
+      })),
+      freeDeliveryThresholdPaise: BigInt(fees.freeDeliveryThresholdPaise),
+      handlingFeePaise: BigInt(fees.handlingFeePaise),
+      smallCartThresholdPaise: BigInt(fees.smallCartThresholdPaise),
+      smallCartFeePaise: BigInt(fees.smallCartFeePaise),
+      surgeFeePaise: BigInt(fees.surgeFeePaise),
+      surgeEnabled,
+      feeTaxRules: [],
+    });
+    const revision = createHash('sha256')
+      .update(JSON.stringify([fees, surgeEnabled]))
+      .digest('hex');
     return {
-      locationRequired: this.config ? await this.config.flag('customer_location_required') : true,
+      locationRequired,
+      feeEstimate: {
+        revision,
+        bands: bands.map((band) => ({
+          upToSubtotalPaise: band.upToSubtotalPaise?.toString() ?? null,
+          deliveryPaise: band.deliveryPaise.toString(),
+          handlingPaise: band.handlingPaise.toString(),
+          smallCartPaise: band.smallCartPaise.toString(),
+          surgePaise: band.surgePaise.toString(),
+        })),
+      },
     };
   }
   @Get('places/autocomplete')

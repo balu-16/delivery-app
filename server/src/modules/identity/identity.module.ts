@@ -92,8 +92,12 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
                 config.get('COGNITO_CUSTOMER_POOL_ID'),
               )
             : undefined;
-        return new IdentityService(handle.db, access, referrals, sync, () =>
-          Logger.error('CUSTOMER_GROUP_ENQUEUE_FAILED', undefined, 'CustomerGroupSync'),
+        return new IdentityService(handle.db, access, referrals, sync, (reason) =>
+          Logger.error(
+            `CUSTOMER_GROUP_ENQUEUE_FAILED reason=${reason}`,
+            undefined,
+            'CustomerGroupSync',
+          ),
         );
       },
     },

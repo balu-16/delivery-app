@@ -4,7 +4,7 @@ import { apiBase } from './api';
 import { getAccessToken } from './auth/session';
 
 /** Receive updates over a socket, with the HTTP refresh in the screen as fallback. */
-export function startRiderRealtime(onConnection: (connected: boolean) => void, onChange: () => void) {
+export function startRiderRealtime(onConnection: (connected: boolean) => void, onChange: (event?: string) => void) {
   let alive = true;
   let lastForcedRefresh = -Infinity;
   let refreshing = false;
@@ -34,7 +34,7 @@ export function startRiderRealtime(onConnection: (connected: boolean) => void, o
     }
   });
   ['snapshot', 'offer.created', 'offer.revoked', 'task.updated', 'task.cancelled']
-    .forEach((event) => socket.on(event, () => { if (alive) onChange(); }));
+    .forEach((event) => socket.on(event, () => { if (alive) onChange(event); }));
 
   const retry = setInterval(() => {
     if (alive && AppState.currentState === 'active' && !socket.connected && !socket.active && !refreshing) socket.connect();

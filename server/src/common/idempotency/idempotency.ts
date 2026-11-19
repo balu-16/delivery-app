@@ -79,6 +79,15 @@ export class IdempotencyStore {
       throw new Error('INVALID_IDEMPOTENCY_INPUT');
     const token = uuidV7();
     const operationId = uuidV7();
+    // Fast path: a fresh key inserts exactly one row. Return directly without
+    // opening the fenced transaction; conflicts fall through to the fenced
+    // path below, which keeps the post-lock database time check.
+    const fast = await sql<{ operation_id: string }>`INSERT INTO idempotency_keys
+      (actor, audience, method, resource, key, request_hash, canonical_request_hash, operation_id, state, owner_token, lease_until)
+      VALUES (${scope.actor}, ${scope.audience}, ${scope.method}, ${scope.resource}, ${scope.key}, ${requestHash}, ${canonicalHash ?? null}, ${operationId}::uuid, 'PROCESSING', ${token}::uuid, clock_timestamp() + ${leaseSeconds} * interval '1 second')
+      ON CONFLICT DO NOTHING RETURNING operation_id`.execute(this.db);
+    const fresh = fast.rows[0];
+    if (fresh) return { kind: 'claimed', owner: { scope, token, operationId: fresh.operation_id } };
     // An executing mutation holds the owner row until commit. Check a live
     // claim without a lock first so a concurrent retry receives 409 instead of
     // waiting behind the business transaction and exhausting its deadline.
@@ -102,10 +111,6 @@ export class IdempotencyStore {
       return { kind: 'in_progress', operationId: running.operation_id };
     }
     return this.db.transaction().execute(async (tx) => {
-      const inserted = await sql<{ operation_id: string }>`INSERT INTO idempotency_keys
-        (actor, audience, method, resource, key, request_hash, canonical_request_hash, operation_id, state, owner_token, lease_until)
-        VALUES (${scope.actor}, ${scope.audience}, ${scope.method}, ${scope.resource}, ${scope.key}, ${requestHash}, ${canonicalHash ?? null}, ${operationId}::uuid, 'PROCESSING', ${token}::uuid, clock_timestamp() + ${leaseSeconds} * interval '1 second')
-        ON CONFLICT DO NOTHING RETURNING operation_id`.execute(tx);
       const result =
         await sql<Row>`SELECT request_hash, canonical_request_hash, operation_id, state, owner_token, lease_until, response_status, response_body
         FROM idempotency_keys WHERE actor=${scope.actor} AND audience=${scope.audience} AND method=${scope.method} AND resource=${scope.resource} AND key=${scope.key} FOR UPDATE`.execute(
@@ -133,8 +138,6 @@ export class IdempotencyStore {
               status: row.response_status,
               body: row.response_body,
             };
-      if (inserted.rows.length > 0)
-        return { kind: 'claimed', owner: { scope, token, operationId: row.operation_id } };
       if (row.lease_until && row.lease_until > now)
         return { kind: 'in_progress', operationId: row.operation_id };
       await sql`UPDATE idempotency_keys SET owner_token=${token}::uuid, lease_until=clock_timestamp() + ${leaseSeconds} * interval '1 second', updated_at=clock_timestamp()

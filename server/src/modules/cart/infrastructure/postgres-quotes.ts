@@ -5,9 +5,11 @@ import { uuidV7 } from '../../../common/ids/ids.js';
 import { transactionWithRetry } from '../../../platform/database/database.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import type { CouponValidation } from '../../coupons/contracts/coupons.js';
+import type { CartView } from '../contracts/cart.js';
 import type { CartPreviews, CartQuotes, QuotePreview, QuoteSnapshot } from '../contracts/quote.js';
 import type { QuoteIssue } from '../contracts/quote.js';
 import { buildQuote } from './quote-core.js';
+import { toCartView } from './cart-views.js';
 import { advisoryLockCart, lockCart } from './cart-store.js';
 
 interface SnapshotRow {
@@ -88,6 +90,16 @@ export class PostgresQuotes implements CartQuotes {
     return tx ? fn(tx) : transactionWithRetry(this.db, fn);
   }
   async refresh(input: Parameters<CartQuotes['refresh']>[0]): Promise<QuoteSnapshot> {
+    return (await this.refreshInternal(input)).quote;
+  }
+  async refreshWithCart(
+    input: Parameters<CartQuotes['refreshWithCart']>[0],
+  ): Promise<{ quote: QuoteSnapshot; cart: CartView }> {
+    return this.refreshInternal(input);
+  }
+  private async refreshInternal(
+    input: Parameters<CartQuotes['refresh']>[0],
+  ): Promise<{ quote: QuoteSnapshot; cart: CartView }> {
     return this.run(input.tx, async (tx) => {
       const { evaluation, preview } = await buildQuote(this.config, this.coupons, tx, input);
       const windowSeconds = await this.config.get('paymentWindowSeconds', tx);
@@ -108,7 +120,7 @@ export class PostgresQuotes implements CartQuotes {
         ${preview.feeTotalPaise}::bigint,${preview.taxTotalPaise}::bigint,${preview.tipPaise}::bigint,${preview.totalPaise}::bigint,
         ${preview.amountDuePaise}::bigint,${preview.priceVersion}::bigint,${evaluation.priceFingerprint},${preview.configVersion}::bigint,
         ${preview.couponFingerprint},${expiresAt},${preview.referralClaimId}::uuid)`.execute(tx);
-      return {
+      const quote: QuoteSnapshot = {
         ...preview,
         quoteId,
         userId: evaluation.cart.user_id,
@@ -116,6 +128,9 @@ export class PostgresQuotes implements CartQuotes {
         expiresAt: expiresAt.toISOString(),
         createdAt: new Date(now.rows[0]!.now).toISOString(),
       };
+      // Same cart row, lines and issues already evaluated above; no second read.
+      const cart = toCartView(evaluation.cart, evaluation.lines, [...evaluation.issues]);
+      return { quote, cart };
     });
   }
   async get(quoteId: string, userId: string, outer?: TransactionContext): Promise<QuoteSnapshot> {
@@ -165,7 +180,7 @@ export class PostgresQuotes implements CartQuotes {
       );
       await sql`SELECT p.id FROM catalog_products p WHERE p.id IN (SELECT product_id FROM catalog_variants
         WHERE id=ANY(${ids}::uuid[])) ORDER BY p.id FOR SHARE`.execute(tx);
-      await sql`SELECT id FROM catalog_prices WHERE store_id=${quote.storeId}::uuid AND variant_id=ANY(${ids}::uuid[])
+      await sql`SELECT id FROM catalog_prices WHERE variant_id=ANY(${ids}::uuid[])
         ORDER BY id FOR SHARE`.execute(tx);
     }
     const { preview, evaluation } = await buildQuote(this.config, this.coupons, tx, {

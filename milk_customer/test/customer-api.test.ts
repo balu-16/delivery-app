@@ -21,6 +21,19 @@ it('sends authenticated cart mutations with the caller’s idempotency key', asy
   }));
 });
 
+it('times out a stalled cart request so its saved idempotency key can be retried', async () => {
+  jest.useFakeTimers();
+  try {
+    fetchMock.mockImplementation((_url, options) => new Promise((_resolve,reject) => {
+      options.signal.addEventListener('abort',() => reject(new Error('request timed out')));
+    }));
+    const request=customerApi.putItem('token','variant-1',{quantity:'1',version:1},'same-key');
+    const result=expect(request).rejects.toThrow('request timed out');
+    await jest.advanceTimersByTimeAsync(12000);
+    await result;
+  } finally {jest.useRealTimers();}
+});
+
 it('exposes safe server problem codes without leaking error details', async () => {
   fetchMock.mockResolvedValue(new Response(JSON.stringify({ code: 'CONCURRENT_MODIFICATION', traceId: 'trace-1', detail: 'private detail' }), { status: 409 }));
   await expect(customerRequest('/v1/customer/cart', { token: 'token' })).rejects.toMatchObject({ status: 409, code: 'CONCURRENT_MODIFICATION', traceId: 'trace-1', message: 'CONCURRENT_MODIFICATION' } as Partial<ApiError>);

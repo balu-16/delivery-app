@@ -42,22 +42,20 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
     private readonly config: AppConfig,
     private readonly cdnBase?: string,
     private readonly redis?: Redis,
-    private readonly previewStoreId = '',
   ) {}
   async preview(): Promise<{ items: CatalogPreviewItem[] }> {
-    // The store is selected by server configuration, never by the caller.
-    if (!this.previewStoreId) return { items: [] };
     const result = await sql<{
       product_id: string;
       name: string;
       description: string;
       category_id: string;
+      category_name: string;
       variant_id: string;
       variant_name: string;
       selling_paise: string;
       mrp_paise: string;
       images: Array<{ id: string; key: string }>;
-    }>`SELECT p.id::text AS product_id,p.name,p.description,p.category_id::text,
+    }>`SELECT p.id::text AS product_id,p.name,p.description,p.category_id::text,c.name AS category_name,
         v.id::text AS variant_id,v.name AS variant_name,price.selling_paise::text,price.mrp_paise::text,
         COALESCE((SELECT json_agg(json_build_object('id',m.id,'key',m.object_key) ORDER BY im.position,m.id)
           FROM catalog_product_images im JOIN catalog_media m ON m.id=im.media_id
@@ -65,18 +63,17 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
       FROM catalog_products p JOIN catalog_categories c ON c.id=p.category_id AND c.deleted_at IS NULL
       LEFT JOIN catalog_brands b ON b.id=p.brand_id
       JOIN catalog_variants v ON v.product_id=p.id AND v.deleted_at IS NULL
-      JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${this.previewStoreId}::uuid
-      JOIN LATERAL (SELECT selling_paise,mrp_paise FROM catalog_prices cp
-        WHERE cp.store_id=i.store_id AND cp.variant_id=i.variant_id
-          AND cp.valid_from<=statement_timestamp() AND (cp.valid_to IS NULL OR cp.valid_to>statement_timestamp()) LIMIT 1) price ON true
-      WHERE p.published AND p.deleted_at IS NULL AND (p.brand_id IS NULL OR b.deleted_at IS NULL)
-      ORDER BY p.normalized_name,p.id,v.id LIMIT 10`.execute(this.db);
+      JOIN catalog_global_prices price ON price.variant_id=v.id
+      WHERE EXISTS (SELECT 1 FROM store_inventory i WHERE i.variant_id=v.id)
+      AND p.published AND p.deleted_at IS NULL AND (p.brand_id IS NULL OR b.deleted_at IS NULL)
+      ORDER BY p.normalized_name,p.id,v.id LIMIT 500`.execute(this.db);
     return {
       items: result.rows.map((row) => ({
         productId: row.product_id,
         name: row.name,
         description: row.description,
         categoryId: row.category_id,
+        categoryName: row.category_name,
         variantId: row.variant_id,
         variantName: row.variant_name,
         sellingPaise: row.selling_paise,
@@ -144,8 +141,7 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
       LEFT JOIN catalog_brands b ON b.id=p.brand_id
       JOIN catalog_variants v ON v.product_id=p.id AND v.deleted_at IS NULL
       JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${store}::uuid
-      JOIN catalog_prices cp ON cp.store_id=i.store_id AND cp.variant_id=i.variant_id
-        AND cp.valid_from<=statement_timestamp() AND (cp.valid_to IS NULL OR cp.valid_to>statement_timestamp())
+      JOIN catalog_global_prices cp ON cp.variant_id=i.variant_id
       WHERE c.deleted_at IS NULL AND p.published AND p.deleted_at IS NULL AND (p.brand_id IS NULL OR b.deleted_at IS NULL)
       ORDER BY c.name,id`.execute(this.db);
     return rows.rows;
@@ -208,8 +204,15 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
           .update(store + ':empty')
           .digest('base64url')}"`,
       };
-    const threshold = await this.config.get('catalogLowStockThreshold');
-    const maxPerOrder = await this.config.get('catalogMaxPerOrder');
+    // One config round trip for both catalog tunables; the ETag is still
+    // computed after the read, so conditional requests still do the work.
+    const { catalogLowStockThreshold: threshold, catalogMaxPerOrder: maxPerOrder } = this.config
+      .getMany
+      ? await this.config.getMany(['catalogLowStockThreshold', 'catalogMaxPerOrder'])
+      : {
+          catalogLowStockThreshold: await this.config.get('catalogLowStockThreshold'),
+          catalogMaxPerOrder: await this.config.get('catalogMaxPerOrder'),
+        };
     let cacheKey: string | undefined,
       cacheSeconds = 0;
     const cacheStarted = performance.now();
@@ -220,8 +223,8 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
         seconds: number | null;
       }>`SELECT revision::text,
         (SELECT extract(epoch FROM (min(boundary)-statement_timestamp()))::float8 FROM (
-          SELECT valid_from AS boundary FROM catalog_prices WHERE store_id=${store}::uuid AND valid_from>statement_timestamp()
-          UNION ALL SELECT valid_to FROM catalog_prices WHERE store_id=${store}::uuid AND valid_to>statement_timestamp()
+          SELECT valid_from AS boundary FROM catalog_prices WHERE valid_from>statement_timestamp()
+          UNION ALL SELECT valid_to FROM catalog_prices WHERE valid_to>statement_timestamp()
           UNION ALL SELECT next_change FROM inventory_saleable_availability WHERE store_id=${store}::uuid AND next_change>statement_timestamp()
         ) future) AS seconds FROM catalog_revision WHERE singleton`.execute(this.db);
       const meta = metadata.rows[0];
@@ -287,7 +290,7 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
       JOIN catalog_variants v ON v.product_id=p.id AND v.deleted_at IS NULL
       JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${store}::uuid
       LEFT JOIN inventory_saleable_availability a ON a.store_id=i.store_id AND a.variant_id=i.variant_id
-      JOIN LATERAL (SELECT selling_paise,mrp_paise FROM catalog_prices cp WHERE cp.store_id=i.store_id AND cp.variant_id=i.variant_id AND cp.valid_from<=statement_timestamp() AND (cp.valid_to IS NULL OR cp.valid_to>statement_timestamp()) LIMIT 1) price ON true
+      JOIN catalog_global_prices price ON price.variant_id=i.variant_id
       WHERE p.published AND p.deleted_at IS NULL AND (p.brand_id IS NULL OR b.deleted_at IS NULL)
       AND (${options.category ?? null}::uuid IS NULL OR p.category_id=${options.category ?? null}::uuid)
       AND (${options.product ?? null}::uuid IS NULL OR p.id=${options.product ?? null}::uuid)

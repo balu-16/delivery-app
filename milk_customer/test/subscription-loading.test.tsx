@@ -26,7 +26,7 @@ test('subscription options stop loading on failure and retry successfully', asyn
   await render(<SubscriptionPanel item={item} addressId="a1" onClose={() => {}} />);
   expect(screen.getByLabelText('Loading delivery options')).toBeTruthy();
   await act(async () => { reject(new Error('offline')); });
-  expect(await screen.findByText('Could not load subscription options.')).toBeTruthy();
+  expect(await screen.findByText('Couldn’t load subscription options.')).toBeTruthy();
   expect(screen.queryByLabelText('Loading delivery options')).toBeNull();
   await fireEvent.press(screen.getByText('Try again'));
   expect(await screen.findByText('Subscriptions are not available at the moment.')).toBeTruthy();

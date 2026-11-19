@@ -5,6 +5,7 @@ import {
   HttpException,
   Inject,
   Injectable,
+  Optional,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import {
 } from './admin-auth.js';
 import type { AdminSessionAuthenticator, AdminSessions } from './admin-auth.js';
 import { AdminSessionForbidden, AdminSessionUnavailable } from './admin-auth.js';
+import { HttpMetrics } from '../../../platform/metrics/http-metrics.js';
 
 /** Read the admin portal session cookie without pulling in a cookie parser. */
 export function readCookie(header: string | undefined, name: string): string | null {
@@ -57,6 +59,7 @@ export class IdentityGuard implements CanActivate {
     @Inject(STORE_SESSION_AUTHENTICATOR)
     private readonly storeSessions: AdminSessionAuthenticator,
     @Inject(STORE_SESSIONS) private readonly storeSessionRecords: AdminSessions,
+    @Optional() private readonly metrics?: HttpMetrics,
   ) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const policy = this.reflector.getAllAndOverride<RoutePolicy>(AUTH_POLICY, [
@@ -118,6 +121,7 @@ export class IdentityGuard implements CanActivate {
       return true;
     }
     if (!match?.[1]) throw new UnauthorizedException({ code: 'INVALID_TOKEN' });
+    const verificationStarted = performance.now();
     try {
       request.identity = await this.verifier.verify(
         match[1],
@@ -126,11 +130,14 @@ export class IdentityGuard implements CanActivate {
       );
     } catch {
       throw new UnauthorizedException({ code: 'INVALID_TOKEN' });
+    } finally {
+      this.metrics?.observeStage('token_verification', performance.now() - verificationStarted);
     }
     if (policy.bootstrap) {
       await this.limit(context, request, policy.audience);
       return true;
     }
+    const authorizationStarted = performance.now();
     try {
       request.principal = await this.identities.authorize(
         request.identity,
@@ -146,6 +153,11 @@ export class IdentityGuard implements CanActivate {
           ? error.message
           : 'FORBIDDEN';
       throw new ForbiddenException({ code });
+    } finally {
+      this.metrics?.observeStage(
+        'principal_authorization',
+        performance.now() - authorizationStarted,
+      );
     }
     if (policy.roles && !request.principal.roles.some((role) => policy.roles!.includes(role)))
       throw new ForbiddenException({ code: 'FORBIDDEN' });
@@ -158,11 +170,17 @@ export class IdentityGuard implements CanActivate {
     audience: string,
   ): Promise<void> {
     const identity = request.identity!;
-    const decision = await this.rateLimiter.checkAuthenticated(
-      `${identity.pool}:${identity.sub}`,
-      audience,
-      request.url ?? '',
-    );
+    const started = performance.now();
+    let decision;
+    try {
+      decision = await this.rateLimiter.checkAuthenticated(
+        `${identity.pool}:${identity.sub}`,
+        audience,
+        request.url ?? '',
+      );
+    } finally {
+      this.metrics?.observeStage('actor_rate_limit', performance.now() - started);
+    }
     if (decision.kind === 'limited') {
       context
         .switchToHttp()

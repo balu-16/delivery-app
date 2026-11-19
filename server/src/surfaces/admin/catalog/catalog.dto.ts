@@ -115,6 +115,8 @@ export class VariantView extends NameView {
   @ApiProperty({ format: 'uuid' }) productId!: string;
   @ApiProperty() sku!: string;
   @ApiProperty({ type: String, nullable: true }) barcode!: string | null;
+  @ApiProperty({ type: String, nullable: true }) sellingPaise!: string | null;
+  @ApiProperty({ type: String, nullable: true }) mrpPaise!: string | null;
 }
 export class NamedPageView {
   @ApiProperty({ type: NameView, isArray: true }) items!: NameView[];

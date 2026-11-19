@@ -80,6 +80,7 @@ class PreviewItemView {
   @ApiProperty() name!: string;
   @ApiProperty() description!: string;
   @ApiProperty({ format: 'uuid' }) categoryId!: string;
+  @ApiProperty() categoryName!: string;
   @ApiProperty({ format: 'uuid' }) variantId!: string;
   @ApiProperty() variantName!: string;
   @ApiProperty() sellingPaise!: string;

@@ -39,6 +39,7 @@ export async function resolveCoupon(
   tx?: TransactionContext,
 ): Promise<{ coupon: CouponPublic | null; issue: QuoteIssue | null }> {
   if (!code) return { coupon: null, issue: null };
+  if (!evaluation.cart.store_id) throw new Error('ADDRESS_REQUIRED');
   try {
     const result = await coupons.validate({
       userId,

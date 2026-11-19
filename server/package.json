@@ -35,6 +35,7 @@
     "test:storage": "pnpm build && node scripts/storage-smoke.mjs",
     "test:container": "node scripts/container-smoke.mjs",
     "smoke:aws": "tsc -p tsconfig.json --outDir artifacts/aws-smoke-build --sourceMap false && node --env-file-if-exists=.env artifacts/aws-smoke-build/scripts/aws-cognito-smoke.js",
+    "maps:ola:smoke": "node --env-file-if-exists=.env --import tsx scripts/maps-ola-smoke.ts",
     "checkout:razorpay": "node scripts/razorpay-checkout-dev.mjs",
     "grant:runtime": "node --env-file-if-exists=.env --import tsx scripts/grant-runtime.ts",
     "verify:p13": "node scripts/verify-p13-evidence.mjs --strict",

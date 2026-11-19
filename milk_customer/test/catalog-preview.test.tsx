@@ -28,8 +28,9 @@ jest.mock('../components/connected/AddressPanel', () => {
   return { AddressPanel: ({visible}: {visible:boolean}) => visible ? React.createElement(Text,null,'Address form opened') : null };
 });
 jest.mock('../components/ui/BottomSheet', () => {
-  const React = require('react'); const { View } = require('react-native');
-  return { BottomSheet: ({visible,children}: {visible:boolean;children:React.ReactNode}) => visible ? React.createElement(View,null,children) : null };
+  const React = require('react'); const { Pressable, View } = require('react-native');
+  return { BottomSheet: ({visible, children, refreshControl}: {visible:boolean;children:React.ReactNode;refreshControl?:React.ReactElement<{onRefresh:()=>void}>}) => visible ? React.createElement(View,null,
+    refreshControl && React.createElement(Pressable,{accessibilityLabel:'Pull to refresh details',onPress:refreshControl.props.onRefresh}), children) : null };
 });
 jest.mock('../components/ui/Button', () => {
   const React = require('react'); const { Pressable, Text } = require('react-native');
@@ -49,28 +50,41 @@ jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(customerApi.catalogPreview).mockResolvedValue({items:[
-    {productId:'product-1',name:'Test milk',description:'Sample',categoryId:'category-1',variantId:'variant-1',variantName:'500 ml',sellingPaise:'3500',mrpPaise:'4000',discountPercent:12,images:['/media/image']},
-    {productId:'product-2',name:'Test curd',description:'Sample',categoryId:'category-1',variantId:'variant-2',variantName:'400 g',sellingPaise:'4500',mrpPaise:'4500',discountPercent:0,images:['/media/image-2']},
+    {productId:'product-1',name:'Milk',description:'Fresh',categoryId:'category-1',categoryName:'Dairy',variantId:'variant-1',variantName:'500 ml',sellingPaise:'3500',mrpPaise:'4000',discountPercent:12,images:['/media/image']},
+    {productId:'product-2',name:'Curd',description:'Fresh',categoryId:'category-1',categoryName:'Dairy',variantId:'variant-2',variantName:'400 g',sellingPaise:'4500',mrpPaise:'4500',discountPercent:0,images:['/media/image-2']},
   ]});
 });
 
-test('shows real preview prices and asks for an address before adding', async () => {
+test('shows actual prices and adds to the cart without asking for an address', async () => {
   await render(<Catalog />);
-  expect(await screen.findByText('Test milk')).toBeTruthy();
+  expect(await screen.findByText('Milk')).toBeTruthy();
   expect(screen.getByText('₹35.00')).toBeTruthy();
   expect(screen.getByText('₹40.00')).toBeTruthy();
   expect(screen.getByText('12% off')).toBeTruthy();
-  await fireEvent.press(screen.getByLabelText('Add Test milk to cart'));
-  expect(screen.getByText('Address form opened')).toBeTruthy();
-  expect(mockUpdateCart).not.toHaveBeenCalled();
-  expect(mockFly).not.toHaveBeenCalled();
+  await fireEvent.press(screen.getByLabelText('Add Milk to cart'));
+  expect(screen.queryByText('Address form opened')).toBeNull();
+  expect(mockUpdateCart).toHaveBeenCalledWith('variant-1',1,expect.objectContaining({sellingPaise:'3500'}));
+  expect(mockFly).toHaveBeenCalled();
 });
 
 test('searches the preview without requiring an address', async () => {
   await render(<Catalog />);
-  await screen.findByText('Test milk');
+  await screen.findByText('Milk');
   await fireEvent.changeText(screen.getByLabelText('Search products'), 'curd');
   await fireEvent.press(screen.getByText('Search'));
-  expect(screen.getByText('Test curd')).toBeTruthy();
-  expect(screen.queryByText('Test milk')).toBeNull();
+  expect(screen.getByText('Curd')).toBeTruthy();
+  expect(screen.queryByText('Milk')).toBeNull();
+});
+
+test('refreshing an open product uses its new price and description', async () => {
+  await render(<Catalog />);
+  await fireEvent.press(await screen.findByLabelText('View Milk'));
+  const preview = await jest.mocked(customerApi.catalogPreview).mock.results[0]!.value;
+  jest.mocked(customerApi.catalogPreview).mockResolvedValueOnce({ items: [
+    { ...preview.items[0]!, description: 'Fresh batch detail', sellingPaise: '3700' },
+  ] });
+  await fireEvent.press(screen.getByLabelText('Pull to refresh details'));
+  expect(await screen.findByText('Fresh batch detail')).toBeTruthy();
+  await fireEvent.press(screen.getByText('Add to cart'));
+  expect(mockUpdateCart).toHaveBeenCalledWith('variant-1', 1, expect.objectContaining({ sellingPaise: '3700' }));
 });

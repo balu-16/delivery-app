@@ -33,6 +33,7 @@ export function useProductPhoto(path: string | null | undefined, name: string) {
   const source = useIllustration ? illustrationFor(name) : remote;
   return {
     source,
+    placeholder: illustrationFor(name) ?? undefined,
     illustrative: useIllustration && !!source,
     onError: () => { if (remote) setFailedUri(remote.uri); },
   };

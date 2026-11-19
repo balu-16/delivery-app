@@ -2,6 +2,21 @@
   "schemaVersion": 1,
   "items": [
     {
+      "id": "GET-v1-customer-checkout-placement-status",
+      "sourceSection": "19-21",
+      "phase": "P6",
+      "status": "implemented",
+      "surface": "customer",
+      "method": "GET",
+      "path": "/v1/customer/checkout/placement-status",
+      "roles": [],
+      "scope": "authenticated customer; own checkout request",
+      "rateLimit": "default",
+      "idempotency": "read-only status by existing request key",
+      "tokenUse": "access",
+      "testFiles": ["test/unit/payments/checkout-recovery.spec.ts"]
+    },
+    {
       "id": "customerAiConsentStatus",
       "sourceSection": "customer-app-agent-prompt.md §7",
       "phase": "P14",

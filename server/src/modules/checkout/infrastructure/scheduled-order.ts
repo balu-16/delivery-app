@@ -88,7 +88,7 @@ export class ScheduledOrderService {
         tax: number;
         selling: string;
         mrp: string;
-      }>`SELECT v.name,p.hsn_code AS hsn,COALESCE(p.gst_rate_bps,0) AS tax, cp.selling_paise::text AS selling,cp.mrp_paise::text AS mrp FROM catalog_variants v JOIN catalog_products p ON p.id=v.product_id JOIN catalog_prices cp ON cp.variant_id=v.id AND cp.store_id=${input.storeId}::uuid AND cp.valid_from<=statement_timestamp() AND (cp.valid_to IS NULL OR cp.valid_to>statement_timestamp()) WHERE v.id=${input.variantId}::uuid AND v.deleted_at IS NULL AND p.deleted_at IS NULL AND p.published FOR SHARE OF v,p,cp`.execute(
+      }>`SELECT v.name,p.hsn_code AS hsn,COALESCE(p.gst_rate_bps,0) AS tax, cp.selling_paise::text AS selling,cp.mrp_paise::text AS mrp FROM catalog_variants v JOIN catalog_products p ON p.id=v.product_id JOIN catalog_global_prices cp ON cp.variant_id=v.id WHERE v.id=${input.variantId}::uuid AND v.deleted_at IS NULL AND p.deleted_at IS NULL AND p.published FOR SHARE OF v,p`.execute(
         tx,
       ),
     );

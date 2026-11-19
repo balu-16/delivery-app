@@ -51,13 +51,26 @@ export async function lockStock(
   lines: ReservationLine[],
   allowMissing = false,
 ): Promise<Set<string>> {
+  const ordered = sortedLines(lines);
+  if (!ordered.length) return new Set();
+  // One locked read for all lines, in the same sorted lock order as before.
+  let pairs: ReturnType<typeof sql> | undefined;
+  for (const line of ordered) {
+    const pair = sql`(${line.storeId}::uuid,${line.variantId}::uuid)`;
+    pairs = pairs ? sql`${pairs},${pair}` : pair;
+  }
+  const found = await sql<{
+    store_id: string;
+    variant_id: string;
+  }>`SELECT store_id::text AS store_id,
+    variant_id::text AS variant_id FROM store_inventory
+    WHERE (store_id,variant_id) IN (VALUES ${pairs!}) ORDER BY store_id,variant_id FOR UPDATE`.execute(
+    tx,
+  );
+  const seen = new Set(found.rows.map((row) => `${row.store_id}:${row.variant_id}`));
   const missing = new Set<string>();
-  for (const line of sortedLines(lines)) {
-    const found =
-      await sql`SELECT store_id FROM store_inventory WHERE store_id=${line.storeId}::uuid AND variant_id=${line.variantId}::uuid FOR UPDATE`.execute(
-        tx,
-      );
-    if (!found.rows.length) {
+  for (const line of ordered) {
+    if (!seen.has(`${line.storeId}:${line.variantId}`)) {
       if (!allowMissing) throw new Error('INVENTORY_INSUFFICIENT');
       missing.add(`${line.storeId}:${line.variantId}`);
     }

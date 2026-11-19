@@ -1,4 +1,8 @@
 export type AgentLocale = 'en' | 'hi' | 'te';
+export interface AgentChoiceReference {
+  choiceId: string;
+  choiceVersion: number;
+}
 export type AgentCardType =
   | 'product_list'
   | 'address_confirm'
@@ -10,6 +14,7 @@ export type AgentCardType =
   | 'cart_attention'
   | 'cancel_confirm'
   | 'refund_confirm'
+  | 'cart_choice'
   | 'subscription_confirm'
   | 'quick_replies'
   | 'info';
@@ -70,6 +75,7 @@ export interface AgentOperations {
       threadId: string;
       clientMessageId: string;
       text: string;
+      choice?: AgentChoiceReference;
       locale: AgentLocale;
       signal: AbortSignal;
     },

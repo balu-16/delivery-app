@@ -14,6 +14,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { Type } from 'class-transformer';
 import {
   ApiBearerAuth,
   ApiExtraModels,
@@ -25,12 +26,15 @@ import {
 } from '@nestjs/swagger';
 import {
   IsIn,
+  IsInt,
   IsObject,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
@@ -79,6 +83,10 @@ class FeedbackDto {
   @MaxLength(500)
   reason?: string;
 }
+class ChoiceReferenceDto {
+  @ApiProperty({ format: 'uuid' }) @IsUUID() choiceId!: string;
+  @ApiProperty({ minimum: 1 }) @IsInt() @Min(1) choiceVersion!: number;
+}
 class MessageDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() clientMessageId!: string;
   @ApiProperty({ minLength: 1, maxLength: 2000 })
@@ -86,6 +94,12 @@ class MessageDto {
   @MinLength(1)
   @MaxLength(2000)
   text!: string;
+  @ApiPropertyOptional({ type: ChoiceReferenceDto })
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ChoiceReferenceDto)
+  choice?: ChoiceReferenceDto;
   @ApiPropertyOptional({ enum: ['en', 'hi', 'te'] })
   @IsOptional()
   @IsIn(['en', 'hi', 'te'])
@@ -104,7 +118,9 @@ class ResumeDto {
 class ActionDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() cardId!: string;
   @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() clientActionId?: string;
-  @ApiProperty({ enum: ['add_to_cart'] }) @IsIn(['add_to_cart']) action!: string;
+  @ApiProperty({ enum: ['add_to_cart', 'cart_choice'] })
+  @IsIn(['add_to_cart', 'cart_choice'])
+  action!: string;
   @ApiProperty({ type: 'object', additionalProperties: true }) @IsObject() payload!: Record<
     string,
     unknown
@@ -189,6 +205,7 @@ export class CustomerAgentController {
           threadId,
           clientMessageId: body.clientMessageId,
           text: body.text,
+          ...(body.choice ? { choice: body.choice } : {}),
           locale: body.locale ?? 'en',
           signal,
         },

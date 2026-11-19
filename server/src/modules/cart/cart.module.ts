@@ -8,6 +8,7 @@ import { COUPONS, type CouponValidation } from '../coupons/contracts/coupons.js'
 import { CART_INTENTS } from './contracts/intent.js';
 import { CART_PREVIEWS, CART_QUOTES } from './contracts/quote.js';
 import { CART_SERVICE } from './contracts/cart.js';
+import { HttpMetrics } from '../../platform/metrics/http-metrics.js';
 import { PostgresCartService } from './infrastructure/postgres-carts.js';
 import { PostgresQuotes, PostgresPreviews } from './infrastructure/postgres-quotes.js';
 import { PostgresCartIntents } from './infrastructure/postgres-intents.js';
@@ -17,9 +18,13 @@ import { CartCleanup } from './infrastructure/cart-cleanup.js';
   providers: [
     {
       provide: CART_SERVICE,
-      inject: [PLATFORM_DATABASE, APP_CONFIG, COUPONS],
-      useFactory: (db: DatabaseHandle, config: AppConfig, coupons: CouponValidation) =>
-        new PostgresCartService(db.db, config, coupons),
+      inject: [PLATFORM_DATABASE, APP_CONFIG, COUPONS, HttpMetrics],
+      useFactory: (
+        db: DatabaseHandle,
+        config: AppConfig,
+        coupons: CouponValidation,
+        metrics: HttpMetrics,
+      ) => new PostgresCartService(db.db, config, coupons, metrics),
     },
     {
       provide: CART_PREVIEWS,

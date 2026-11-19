@@ -2,6 +2,7 @@ import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common'
 import type { IdentityAuthorizer } from '../../identity/contracts/identity.js';
 import {
   AGENT_DISCLOSURE_VERSION,
+  type AgentChoiceReference,
   type AgentConfigView,
   type AgentEvent,
   type AgentLocale,
@@ -86,12 +87,14 @@ export class CustomerAgentService implements AgentOperations {
       threadId: string;
       clientMessageId: string;
       text: string;
+      choice?: AgentChoiceReference;
       locale: AgentLocale;
       signal: AbortSignal;
     },
     emit: (event: AgentEvent) => void,
   ): Promise<void> {
     await this.assertAllowed(input.userId, input.threadId);
+    if (await this.runtime.tryLocalReply(input, emit)) return;
     const job = await this.jobs.submitMessage({ ...input, locale: 'en' });
     await this.jobs.follow(input.userId, input.threadId, job.id, undefined, input.signal, emit);
   }

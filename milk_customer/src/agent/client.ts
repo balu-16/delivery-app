@@ -23,8 +23,8 @@ export const agentClient = {
   consent: async (version: string) => customerRequest<void>('/v1/customer/me/consents', { token: await accessToken(), method: 'POST', body: { type: 'ai_assistant', version } }),
   consentStatus: async () => customerRequest<{ accepted: boolean; version: string }>('/v1/customer/me/consents/ai-assistant', { token: await accessToken() }),
   revokeConsent: async () => customerRequest<void>('/v1/customer/me/consents/ai-assistant', { token: await accessToken(), method: 'DELETE' }),
-  message: (threadId: string, clientMessageId: string, text: string, locale: AgentLocale, signal: AbortSignal, onEvent: (event: AgentEvent) => void) =>
-    stream(`${path(threadId)}/messages`, { clientMessageId, text, locale }, signal, onEvent),
+  message: (threadId: string, clientMessageId: string, text: string, locale: AgentLocale, signal: AbortSignal, onEvent: (event: AgentEvent) => void, choice?: { choiceId: string; choiceVersion: number }) =>
+    stream(`${path(threadId)}/messages`, { clientMessageId, text, locale, ...(choice ? { choice } : {}) }, signal, onEvent),
   resume: (threadId: string, draftId: string, decision: 'approve' | 'reject', locale: AgentLocale, signal: AbortSignal, onEvent: (event: AgentEvent) => void, clientActionId: string) =>
     stream(`${path(threadId)}/resume`, { draftId, decision, locale, clientActionId }, signal, onEvent),
   currentRun: (threadId: string) => request<AgentRun | null>(`/threads/${encodeURIComponent(threadId)}/runs/current`),

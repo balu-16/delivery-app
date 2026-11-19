@@ -10,8 +10,32 @@ type TestTool = {
   ): Promise<string>;
 };
 
-test('parallel product searches emit only one address prompt', async () => {
-  const deps = { addresses: { list: async () => [] }, cart: { get: async () => null } };
+test('product searches work without an address and do not claim store stock', async () => {
+  const deps = {
+    addresses: { list: async () => [] },
+    cart: { get: async () => null },
+    appConfig: { get: async () => 10 },
+    catalog: {
+      preview: async () => ({
+        items: [
+          {
+            productId: 'product',
+            variantId: 'variant',
+            name: 'Butter',
+            variantName: '100 g',
+            sellingPaise: '6000',
+          },
+          {
+            productId: 'product2',
+            variantId: 'variant2',
+            name: 'Curd',
+            variantName: '400 g',
+            sellingPaise: '4500',
+          },
+        ],
+      }),
+    },
+  };
   const tool = createReadTools(
     deps as never,
     { userId: 'user', locale: 'en' },
@@ -26,11 +50,56 @@ test('parallel product searches emit only one address prompt', async () => {
     tool.invoke({ query: 'butter' }, runtime),
     tool.invoke({ query: 'curd' }, runtime),
   ]);
-  expect(outcomes.map((result) => JSON.parse(result).error.code)).toEqual([
-    'ADDRESS_REQUIRED',
-    'ADDRESS_REQUIRED',
+  expect(outcomes.map((result) => JSON.parse(result).data.addressId)).toEqual([null, null]);
+  expect(outcomes.map((result) => JSON.parse(result).data.items[0].availability)).toEqual([
+    'CHECK_AT_CHECKOUT',
+    'CHECK_AT_CHECKOUT',
   ]);
-  expect(events.filter((event) => event.event === 'card')).toHaveLength(1);
+  expect(events.filter((event) => event.event === 'card')).toHaveLength(2);
+});
+
+test('usual-item cards show the current price and can be added without an address', async () => {
+  const deps = {
+    orders: {
+      purchaseSummary: async () => [{ variantId: 'variant', name: 'Milk', lastQuantity: 2 }],
+    },
+    catalog: { preview: async () => ({ items: [{ variantId: 'variant', sellingPaise: '3900' }] }) },
+    appConfig: { get: async () => 10 },
+  };
+  const tool = createReadTools(
+    deps as never,
+    { userId: 'user', locale: 'en' },
+    new AgentToolKit(5),
+  ).find((item) => item.name === 'get_order_history_summary')! as unknown as TestTool;
+  const events: unknown[] = [];
+  const outcome = JSON.parse(
+    await tool.invoke(
+      { limit: 10 },
+      { toolCallId: 'usual', writer: (event) => events.push(event) },
+    ),
+  );
+  expect(outcome.ok).toBe(true);
+  expect(events).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        event: 'card',
+        data: expect.objectContaining({
+          payload: expect.objectContaining({
+            items: [expect.objectContaining({ name: 'Milk', quantity: '2', sellingPaise: '3900' })],
+            options: [
+              expect.objectContaining({
+                action: 'add_to_cart',
+                payload: expect.objectContaining({
+                  variantId: 'variant',
+                  displayedUnitPricePaise: '3900',
+                }),
+              }),
+            ],
+          }),
+        }),
+      }),
+    ]),
+  );
 });
 
 test('address save rejects details the customer did not explicitly supply', async () => {

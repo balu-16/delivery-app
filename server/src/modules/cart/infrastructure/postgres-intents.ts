@@ -17,9 +17,10 @@ export class PostgresCartIntents implements CartIntents {
     cartId: string,
     cartVersion: number,
     quoteId: string,
+    outer?: TransactionContext,
   ): Promise<{ intentId: string; expiresAt: string }> {
     if (!Number.isSafeInteger(cartVersion) || cartVersion < 1) throw new Error('INVALID_INPUT');
-    return transactionWithRetry(this.db, async (tx) => {
+    const issueIn = async (tx: TransactionContext) => {
       await sql`SELECT id FROM carts WHERE id=${cartId}::uuid AND version=${cartVersion}::bigint FOR UPDATE`.execute(
         tx,
       );
@@ -43,7 +44,8 @@ export class PostgresCartIntents implements CartIntents {
         intentId: row.rows[0]!.id,
         expiresAt: new Date(row.rows[0]!.expires_at).toISOString(),
       };
-    });
+    };
+    return outer ? issueIn(outer) : transactionWithRetry(this.db, issueIn);
   }
   async consume(
     intentId: string,
@@ -73,5 +75,21 @@ export class PostgresCartIntents implements CartIntents {
     await sql`UPDATE checkout_intents SET state='CONSUMED',consumed_at=clock_timestamp() WHERE id=${row.id}::uuid`.execute(
       tx,
     );
+  }
+
+  async completePurchase(
+    userId: string,
+    cartId: string,
+    cartVersion: number,
+    tx: TransactionContext,
+  ): Promise<void> {
+    if (!Number.isSafeInteger(cartVersion) || cartVersion < 1) throw new Error('INVALID_INPUT');
+    // The placement already owns the cart lock; keep the version predicate as a
+    // fence against a stale quote or an accidental second application.
+    const updated = await sql`UPDATE carts SET coupon_code=NULL,version=version+1,
+      updated_at=clock_timestamp() WHERE id=${cartId}::uuid AND user_id=${userId}::uuid
+      AND version=${cartVersion}::bigint RETURNING id`.execute(tx);
+    if (!updated.rows.length) throw new Error('CONCURRENT_MODIFICATION');
+    await sql`DELETE FROM cart_items WHERE cart_id=${cartId}::uuid`.execute(tx);
   }
 }

@@ -101,6 +101,8 @@ export interface Variant {
   baseUnit: VariantBaseUnit
   sku: string
   barcode: string | null
+  sellingPaise?: string | null
+  mrpPaise?: string | null
 }
 
 export interface PriceResult {

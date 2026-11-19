@@ -5,6 +5,30 @@ import { HumanMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import { isReplayedConfirmation } from './confirmation-events.js';
+import {
+  cannedReply,
+  matchCannedIntent,
+  priorUserMessageCount,
+  rotatingReplyKey,
+  trackingStatusLine,
+  type CannedIntent,
+} from './canned.js';
+import {
+  choiceNeedsRefresh,
+  choiceOptions,
+  choiceReply,
+  commitChoice,
+  insertChoice,
+  parseChoiceAnswer,
+  pendingChoice,
+  refreshChoice,
+  saveChoiceAnswer,
+  type ChoiceRef,
+  type ChoiceRow,
+} from './choices.js';
+import { addRequestText } from './choice-answer.js';
+import { canonicalProductKey } from './product-resolver.js';
+import { setThreadTitleIfUnset, titleForRequest, verifiedProductInText } from './titles.js';
 import pg from 'pg';
 import { sql } from 'kysely';
 import type { Redis } from 'ioredis';
@@ -19,24 +43,31 @@ import type { OrderOperations } from '../../orders/contracts/orders.js';
 import type { WalletViews } from '../../wallet/contracts/wallet.js';
 import type { Support } from '../../support/contracts/support.js';
 import type { CheckoutOperations } from '../../checkout/contracts/checkout.js';
-import type { AgentCard, AgentEvent, AgentLocale } from '../contracts/agent.js';
+import type {
+  AgentCard,
+  AgentChoiceReference,
+  AgentEvent,
+  AgentLocale,
+} from '../contracts/agent.js';
 import type { CustomerTracking } from '../../dispatch/contracts/tasks.js';
 import type { Serviceability } from '../../serviceability/contracts/serviceability.js';
 import type { CouponValidation } from '../../coupons/contracts/coupons.js';
 import { createAssistantModel } from './llm/llm.factory.js';
 import { createReadTools } from './read-tools.js';
 import { AgentToolKit } from './tool-kit.js';
+import { AgentCandidateStore } from './product-candidates.js';
 import { createWriteTools } from './write-tools.js';
 import { createConfirmTools } from './confirm-tools.js';
+import { createChoiceTools } from './choice-tools.js';
 import { AgentDrafts } from './drafts.js';
 import { AgentOrderPlacement } from './placement.js';
 import { AgentActions } from './actions.js';
 import { messageDeltaText, sanitizeAgentText } from './guards.js';
 import { historyTrimming } from './middleware.js';
 import { createNudgeTools } from './nudge-tools.js';
-import { SYSTEM_PROMPT, PROMPT_VERSION } from './prompts/system.base.v1.js';
+import { SYSTEM_PROMPT, PROMPT_VERSION } from './prompts/system.base.v2.js';
 import type { AgentNudges } from './nudges.js';
-import type { AgentRuns } from './runs.js';
+import type { AgentRuns, LocalInput, LocalReply } from './runs.js';
 import type { AgentThreads } from './threads.js';
 
 type Emit = (event: AgentEvent) => void;
@@ -103,7 +134,7 @@ export class AgentRuntime {
       }),
     );
     this.drafts = new AgentDrafts(deps.db);
-    this.actions = new AgentActions(deps);
+    this.actions = new AgentActions(deps, threads, appConfig);
     this.placement = new AgentOrderPlacement(deps.db, deps.checkout);
   }
   async close(): Promise<void> {
@@ -124,10 +155,30 @@ export class AgentRuntime {
   }) {
     const { model, fallback } = await createAssistantModel(this.config);
     const kit = new AgentToolKit(context.maxCalls);
+    const candidates = new AgentCandidateStore();
+    // The model gets the choice tool only when the turn may need it: an
+    // active choice is waiting, or the message carries shopping intent.
+    const choicePending =
+      (await pendingChoice(this.deps.db, context.userId, context.threadId)) !== null;
+    const shoppingHint = /\b(add|buy|cart|pack|packs|size|quantity)\b/.test(context.userText ?? '');
+    const choiceTools =
+      choicePending || shoppingHint
+        ? createChoiceTools(
+            this.deps,
+            { userId: context.userId, threadId: context.threadId, confirmTtlSeconds: context.ttl },
+            kit,
+          )
+        : [];
     const tools = [
       ...createReadTools(
         { ...this.deps, appConfig: this.appConfig },
-        { userId: context.userId, locale: context.locale },
+        {
+          userId: context.userId,
+          locale: context.locale,
+          userText: context.userText,
+          clientMessageId: context.clientMessageId,
+          candidates,
+        },
         kit,
       ),
       ...createWriteTools(
@@ -148,6 +199,7 @@ export class AgentRuntime {
           maxQuantity: context.maxQuantity,
           userText: context.userText,
           clientMessageId: context.clientMessageId,
+          candidates,
         },
         kit,
       ),
@@ -164,6 +216,7 @@ export class AgentRuntime {
         kit,
       ),
       ...createNudgeTools(this.deps, { userId: context.userId, threadId: context.threadId }, kit),
+      ...choiceTools,
     ];
     const notes = await this.threads.systemNotes(context.userId, context.threadId);
     const graph = createAgent({
@@ -242,6 +295,216 @@ export class AgentRuntime {
       thinkingTokens += usage.thinkingTokens ?? 0;
     }
     return { usage: { inputTokens, outputTokens, thinkingTokens } };
+  }
+
+  /**
+   * Answer without the model when possible: canned greetings, thanks, FAQs
+   * and typed cart-choice answers. Same retry keys and history as model
+   * turns, zero model usage. Returns true when the turn was fully handled.
+   */
+  async tryLocalReply(
+    input: LocalInput & { choice?: AgentChoiceReference },
+    emit: Emit,
+  ): Promise<boolean> {
+    const text = sanitizeAgentText(input.text);
+    if (!text || text.length > 2000 || text !== input.text.trim()) throw new Error('INVALID_INPUT');
+    const message = { ...input, text };
+    const replay = await this.runs.replayLocal(message);
+    if (replay) {
+      this.emitLocal(replay, emit);
+      return true;
+    }
+    const intent = matchCannedIntent(text);
+    if (intent !== 'model') return this.localCannedTurn(message, intent, emit);
+    const choice = await pendingChoice(this.deps.db, input.userId, input.threadId, input.choice);
+    const parsed = choice && parseChoiceAnswer(text, choice.variants);
+    if (!choice || !parsed) return this.localCartRequest(message, emit);
+    const ref = {
+      userId: input.userId,
+      threadId: input.threadId,
+      choiceId: choice.id,
+      choiceVersion: input.choice?.choiceVersion ?? choice.version,
+    };
+    await this.localChoiceTurn(
+      message,
+      ref,
+      choice,
+      {
+        variantId: parsed.variantId ?? choice.selection?.variantId ?? null,
+        quantity: parsed.quantity ?? choice.selection?.quantity ?? null,
+      },
+      emit,
+    );
+    return true;
+  }
+
+  private async localCartRequest(input: LocalInput, emit: Emit): Promise<boolean> {
+    const query = addRequestText(input.text);
+    if (!query || query.length > 100) return false;
+    const { offer } = await choiceOptions(this.deps, { userId: input.userId, query });
+    if (!offer || canonicalProductKey(offer.product) !== canonicalProductKey(query)) return false;
+    const ttlSeconds = await this.appConfig.get('agent_confirm_ttl_seconds');
+    const saved = await this.runs.completeLocal(input, async (tx) => {
+      const choice = await insertChoice(
+        tx,
+        { ...input, ttlSeconds },
+        offer.variants,
+        offer.delivery,
+        offer.question,
+      );
+      await setThreadTitleIfUnset(
+        tx,
+        input.userId,
+        input.threadId,
+        titleForRequest('shopping', offer.product),
+      );
+      return choiceReply(choice);
+    });
+    this.emitLocal(saved, emit);
+    return true;
+  }
+
+  private emitLocal(reply: LocalReply & { runId: string; messageId: string }, emit: Emit): void {
+    emit({ event: 'run.started', data: { runId: reply.runId } });
+    if (reply.text) emit({ event: 'message.delta', data: { text: reply.text } });
+    for (const card of reply.cards) emit({ event: 'card', data: card });
+    emit({ event: 'message.done', data: { messageId: reply.messageId } });
+    emit({ event: 'run.ended', data: {} });
+  }
+
+  private async localCannedTurn(
+    input: LocalInput,
+    intent: CannedIntent,
+    emit: Emit,
+  ): Promise<boolean> {
+    const count = await priorUserMessageCount(this.deps.db, input.userId, input.threadId);
+    const key =
+      intent === 'greeting' || intent === 'thanks' ? rotatingReplyKey(intent, count) : intent;
+    const reply = await cannedReply(this.deps.db, key);
+    let bodyText = reply.body;
+    if (intent === 'faq_tracking') {
+      const page = await this.deps.orders.list(input.userId, 1);
+      const latest = page.items[0];
+      bodyText = `${trackingStatusLine(latest ? { orderNumber: latest.orderNumber, status: latest.status } : null)} ${reply.body}`;
+    }
+    const links = {
+      cart: 'Open cart',
+      addresses: 'Delivery addresses',
+      orders: 'View orders',
+      support: 'Get support',
+    };
+    const label =
+      reply.link && Object.hasOwn(links, reply.link) && links[reply.link as keyof typeof links];
+    const cards: AgentCard[] = label
+      ? [
+          {
+            cardId: randomUUID(),
+            type: 'info',
+            payload: {
+              options: [{ label, action: 'open_screen', payload: { screen: reply.link } }],
+            },
+          },
+        ]
+      : [];
+    const saved = await this.runs.completeLocal(input, async (tx) => {
+      if (intent !== 'greeting' && intent !== 'thanks')
+        await setThreadTitleIfUnset(
+          tx,
+          input.userId,
+          input.threadId,
+          titleForRequest(intent, null),
+        );
+      return { text: bodyText, cards };
+    });
+    this.emitLocal(saved, emit);
+    return true;
+  }
+
+  private async localChoiceTurn(
+    input: LocalInput,
+    ref: ChoiceRef,
+    choice: ChoiceRow,
+    answer: { variantId: string | null; quantity: number | null },
+    emit: Emit,
+  ): Promise<void> {
+    const [maxQuantity, ttl] = await Promise.all([
+      this.appConfig.get('agent_max_qty_per_line'),
+      this.appConfig.get('agent_confirm_ttl_seconds'),
+    ]);
+    try {
+      const saved = await this.runs.completeLocal(input, async (tx) => {
+        const { variantId, quantity } = answer;
+        if (variantId === null || quantity === null)
+          return choiceReply(await saveChoiceAnswer(tx, ref, answer, maxQuantity));
+        const { result, replayed } = await commitChoice(this.deps, tx, {
+          ...ref,
+          variantId,
+          quantity,
+          maxQuantity,
+        });
+        const line = (result as { items?: { variantId: string; name: string }[] })?.items?.find(
+          (item) => item.variantId === variantId,
+        );
+        return {
+          text: replayed
+            ? 'That choice was already saved to your cart.'
+            : line?.name
+              ? `Added ${quantity} × ${line.name} to your cart.`
+              : 'Added that to your cart.',
+          cards: [],
+        };
+      });
+      this.emitLocal(saved, emit);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      if (choiceNeedsRefresh(code)) {
+        try {
+          const saved = await refreshChoice(this.deps, { ...ref, ttlSeconds: ttl }, (tx, fresh) =>
+            this.runs.completeLocal(
+              input,
+              async () => choiceReply(fresh, 'Please review the current options. '),
+              tx,
+            ),
+          );
+          this.emitLocal(saved, emit);
+          return;
+        } catch (failure) {
+          // Another request may already have replaced this exact prompt.
+          if (
+            !(failure instanceof Error) ||
+            !['DRAFT_NOT_PENDING', 'CONCURRENT_MODIFICATION'].includes(failure.message)
+          )
+            throw failure;
+        }
+      } else if (
+        !['INVALID_QUANTITY', 'DRAFT_NOT_PENDING', 'CONCURRENT_MODIFICATION'].includes(code)
+      ) {
+        throw error;
+      }
+      const body: LocalReply =
+        code === 'INVALID_QUANTITY'
+          ? choiceReply(choice, `Check the quantity (up to ${maxQuantity} packs per item). `)
+          : {
+              text: 'That choice has changed. Use the latest options or ask for the item again.',
+              cards: [],
+            };
+      this.emitLocal(await this.runs.completeLocal(input, async () => body), emit);
+    }
+  }
+
+  /** Deterministic title from the first substantive request; greeting opens as New chat. */
+  private async ensureThreadTitle(userId: string, threadId: string, text: string): Promise<void> {
+    if ((await this.threads.title(userId, threadId)) !== null) return;
+    const preview = await this.deps.catalog.preview();
+    const names = [
+      ...new Map(preview.items.map((item) => [item.productId, item.name])).values(),
+    ].map((name) => ({ key: name, display: name }));
+    await setThreadTitleIfUnset(
+      this.deps.db,
+      userId,
+      threadId,
+      titleForRequest('model', verifiedProductInText(text, names)),
+    );
   }
 
   async cancel(userId: string, threadId: string): Promise<void> {
@@ -364,6 +627,7 @@ export class AgentRuntime {
         return;
       }
       runId = result.runId;
+      await this.ensureThreadTitle(input.userId, input.threadId, text);
       emit({ event: 'run.started', data: { runId } });
       const { graph, kit, modelLabel } = await this.createGraph({
         ...input,

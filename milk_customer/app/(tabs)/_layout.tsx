@@ -27,7 +27,7 @@ export default function TabsLayout() {
       tabBar={(props) => <TabBar {...props} brushX={brushX} brushStrength={brushStrength} />}
       screenOptions={{
         sceneStyle: styles.scene,
-        lazy: false,
+        lazy: true,
         swipeEnabled: true,
         animationEnabled: motionEnabled,
       }}

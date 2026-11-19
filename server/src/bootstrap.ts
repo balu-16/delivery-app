@@ -108,6 +108,7 @@ export async function createApplication(
     fastify.addHook('onRequest', async (request, reply) => {
       const route = routeLimit(request.url.split('?')[0] ?? '', env);
       if (!route) return;
+      const started = performance.now();
       try {
         const audience =
           /^\/v1\/(customer|rider|store|admin)(?:\/|$)/.exec(request.url)?.[1] ?? 'other';
@@ -150,6 +151,8 @@ export async function createApplication(
             detail: 'Service Unavailable',
             traceId: request.id,
           });
+      } finally {
+        metrics.observeStage('ip_rate_limit', performance.now() - started);
       }
     });
   }

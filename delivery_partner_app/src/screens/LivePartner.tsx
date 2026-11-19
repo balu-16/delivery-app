@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, BackHandler, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { AppState, BackHandler, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { performAction } from '../actions';
 import { ApiError, riderApi, type Application, type Earning, type HistoryTask, type Notice, type Offer, type RiderStatus, type Task } from '../api';
@@ -13,6 +13,7 @@ import { Button, Card, IconBox, IconButton, PageTitle, Text, type IconName } fro
 import { enablePush, startPush, unregisterPush, usePush } from '../push';
 import { startRiderRealtime } from '../realtime';
 import { useDemo } from '../store';
+import { useRefresh } from '../useRefresh';
 import { colors, fonts } from '../theme';
 import { endShift, reconcileTracking, startShift, stopTracking } from '../tracking';
 import { formatMoney, shortTime } from './liveHelpers';
@@ -20,7 +21,7 @@ import { SupportScreen } from './SupportScreen';
 import { TaskDetail } from './TaskDetail';
 
 type Tab = 'home' | 'tasks' | 'route' | 'earnings' | 'profile';
-type Page = { type: 'task'; id: string } | { type: 'notifications' | 'support' | 'language' } | null;
+type Page = { type: 'task'; id: string; loading?: boolean; failed?: boolean } | { type: 'notifications' | 'support' | 'language' } | null;
 type Dashboard = { todayDeliveries: number; todayEarningsPaise: string };
 type LoadKey = 'status' | 'offers' | 'tasks' | 'history' | 'dashboard' | 'earnings' | 'cash' | 'notifications';
 type LoadState = 'loading' | 'success' | 'error';
@@ -46,38 +47,64 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
   const [error, setError] = useState('');
   const [loads, setLoads] = useState(initialLoads);
   const [busy, setBusy] = useState(false);
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
+  const [supportSignal, setSupportSignal] = useState(0);
+  const isBusy = (id: string) => busy || busyIds.has(id);
   const [connected, setConnected] = useState(false);
   const [tracking, setTracking] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const actionBusy = useRef(false);
+  const busyIdsRef = useRef<ReadonlySet<string>>(new Set());
   const inFlight = useRef<Promise<void> | null>(null);
+  const latestLoad = useRef<Partial<Record<LoadKey, number>>>({});
   const dataRef = useRef(data);
   useEffect(() => { dataRef.current = data; }, [data]);
   const push = usePush();
   const language = useDemo((state) => state.language);
   const setLanguage = useDemo((state) => state.setLanguage);
 
+  const load = useCallback(<T,>(key: LoadKey, promise: Promise<T>, update: (previous: LiveData, value: T) => LiveData): Promise<T> => {
+    const request = (latestLoad.current[key] ?? 0) + 1;
+    latestLoad.current[key] = request;
+    return promise.then(value => {
+      if (latestLoad.current[key] === request) {
+        setData(previous => update(previous, value));
+        setLoads(previous => ({ ...previous, [key]: 'success' }));
+      }
+      return value;
+    }, failure => {
+      if (latestLoad.current[key] === request)
+        setLoads(previous => ({ ...previous, [key]: previous[key] === 'success' ? 'success' : 'error' }));
+      throw failure;
+    });
+  }, []);
+  const refreshOffers = useCallback(() => load('offers', riderApi.offers(), (p, value) => ({ ...p, offers: value.items })), [load]);
+  const refreshTasks = useCallback(() => load('tasks', riderApi.activeTasks(), (p, value) => ({ ...p, tasks: value.items })), [load]);
+  const refreshTaskDetail = useCallback(async (id: string) => {
+    const pending: Page = { type: 'task', id, loading: true };
+    setPage(pending);
+    const finish = (failed: boolean) => setPage(current => current === pending ? { type: 'task', id, failed } : current);
+    try { await refreshTasks(); finish(false); }
+    catch { finish(true); }
+  }, [refreshTasks]);
+  const refreshEarnings = useCallback(() => Promise.allSettled([
+    load('dashboard', riderApi.dashboard(), (p, value) => ({ ...p, dashboard: value })),
+    load('earnings', riderApi.earnings(), (p, value) => ({ ...p, earnings: value.items, earningsCursor: value.nextCursor, earningsLoaded: true })),
+    load('cash', riderApi.cash(), (p, value) => ({ ...p, cash: value })),
+  ]), [load]);
   const refresh = useCallback((): Promise<void> => {
     if (inFlight.current) return inFlight.current;
     const work = (async () => {
       setLoads(previous => Object.fromEntries(Object.entries(previous).map(([key, value]) => [key, value === 'error' ? 'loading' : value])) as Record<LoadKey, LoadState>);
-      const observe = <T,>(key: LoadKey, promise: Promise<T>, update: (previous: LiveData, value: T) => LiveData): Promise<T> => promise.then(value => {
-        setData(previous => update(previous, value));
-        setLoads(previous => ({ ...previous, [key]: 'success' }));
-        return value;
-      }, failure => {
-        setLoads(previous => ({ ...previous, [key]: previous[key] === 'success' ? 'success' : 'error' }));
-        throw failure;
-      });
       const results = await Promise.allSettled([
-        observe('status', riderApi.status(), (p, value) => ({ ...p, status: value })),
-        observe('offers', riderApi.offers(), (p, value) => ({ ...p, offers: value.items })),
-        observe('tasks', riderApi.activeTasks(), (p, value) => ({ ...p, tasks: value.items })),
-        observe('history', riderApi.history(), (p, value) => ({ ...p, history: value.items, historyCursor: value.nextCursor, historyLoaded: true })),
-        observe('dashboard', riderApi.dashboard(), (p, value) => ({ ...p, dashboard: value })),
-        observe('earnings', riderApi.earnings(), (p, value) => ({ ...p, earnings: value.items, earningsCursor: value.nextCursor, earningsLoaded: true })),
-        observe('cash', riderApi.cash(), (p, value) => ({ ...p, cash: value })),
-        observe('notifications', riderApi.notifications(), (p, value) => ({ ...p, notifications: value.items, notificationsLoaded: true })),
+        load('status', riderApi.status(), (p, value) => ({ ...p, status: value })),
+        refreshOffers(),
+        refreshTasks(),
+        load('history', riderApi.history(), (p, value) => ({ ...p, history: value.items, historyCursor: value.nextCursor, historyLoaded: true })),
+        load('dashboard', riderApi.dashboard(), (p, value) => ({ ...p, dashboard: value })),
+        load('earnings', riderApi.earnings(), (p, value) => ({ ...p, earnings: value.items, earningsCursor: value.nextCursor, earningsLoaded: true })),
+        load('cash', riderApi.cash(), (p, value) => ({ ...p, cash: value })),
+        load('notifications', riderApi.notifications(), (p, value) => ({ ...p, notifications: value.items, notificationsLoaded: true })),
       ] as const);
       const [status, offers, tasks] = results;
       const operational = status.status === 'fulfilled' && offers.status === 'fulfilled' && tasks.status === 'fulfilled';
@@ -96,7 +123,20 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
     })();
     inFlight.current = work.finally(() => { inFlight.current = null; });
     return inFlight.current;
-  }, [identity.subject, onAuthorizationChange]);
+  }, [identity.subject, load, onAuthorizationChange, refreshOffers, refreshTasks]);
+  // Pull-to-refresh: revalidate only what the current view shows.
+  const refreshView = useCallback(async () => {
+    if (page?.type === 'support') { setSupportSignal((value) => value + 1); return; }
+    if (page?.type === 'notifications') { await load('notifications', riderApi.notifications(), (p, value) => ({ ...p, notifications: value.items, notificationsLoaded: true })); return; }
+    if (page?.type === 'task') { await refreshTaskDetail(page.id); return; }
+    if (page?.type === 'language') return;
+    if (tab === 'tasks') { await Promise.allSettled([refreshOffers(), refreshTasks(), load('history', riderApi.history(), (p, value) => ({ ...p, history: value.items, historyCursor: value.nextCursor, historyLoaded: true }))]); return; }
+    if (tab === 'route') { await refreshTasks(); return; }
+    if (tab === 'earnings') { await refreshEarnings(); return; }
+    if (tab === 'profile') { await load('status', riderApi.status(), (p, value) => ({ ...p, status: value })); return; }
+    await refresh();
+  }, [page, tab, load, refresh, refreshEarnings, refreshOffers, refreshTaskDetail, refreshTasks]);
+  const pull = useRefresh(() => refreshView());
 
   useEffect(() => {
     void refresh();
@@ -116,9 +156,17 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
   }, [identity.subject, refresh]);
 
   useEffect(() => {
-    try { return startRiderRealtime(setSocketConnected, () => void refresh()); }
+    try {
+      return startRiderRealtime(setSocketConnected, (event) => {
+        // Split refresh by resource: offer events refetch offers, task
+        // events refetch tasks; the periodic poll covers anything missed.
+        if (event === 'offer.created' || event === 'offer.revoked') void refreshOffers().catch(() => undefined);
+        else if (event === 'task.updated' || event === 'task.cancelled') void refreshTasks().catch(() => undefined);
+        else void refresh();
+      });
+    }
     catch { return undefined; }
-  }, [refresh]);
+  }, [refresh, refreshOffers, refreshTasks]);
 
   useEffect(() => {
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -129,10 +177,20 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
     return () => back.remove();
   }, [page, tab]);
 
-  async function doWork(work: () => Promise<unknown>, sync = true) {
-    if (actionBusy.current) return false;
-    actionBusy.current = true; setBusy(true); setError('');
-    try { await work(); if (sync) await refresh(); return true; }
+  // Action locks are scoped: task/offer actions lock only their own card
+  // (busyIdsRef), while account-level actions keep the global lock.
+  function lockScoped(id: string) { busyIdsRef.current = new Set(busyIdsRef.current).add(id); setBusyIds(busyIdsRef.current); }
+  function unlockScoped(id: string) { const next = new Set(busyIdsRef.current); next.delete(id); busyIdsRef.current = next; setBusyIds(next); }
+  async function doWork(work: () => Promise<unknown>, scopeId?: string, after?: () => Promise<void>) {
+    if (scopeId) {
+      if (busyIdsRef.current.has(scopeId)) return false;
+      lockScoped(scopeId);
+    } else {
+      if (actionBusy.current) return false;
+      actionBusy.current = true; setBusy(true);
+    }
+    setError('');
+    try { await work(); if (after) await after(); else await refresh(); return true; }
     catch (failure) {
       if (failure instanceof ApiError && (failure.status === 0 || failure.status >= 500))
         setError(`${failure.message} The request may have gone through; refresh and retry the same action to confirm.`);
@@ -143,17 +201,27 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
         ? `${failure.message} The request may have gone through; refresh and retry the same action to confirm.`
         : failure instanceof Error ? failure.message : 'Could not complete the request.');
       return false;
-    } finally { actionBusy.current = false; setBusy(false); }
+    } finally {
+      if (scopeId) unlockScoped(scopeId);
+      else { actionBusy.current = false; setBusy(false); }
+    }
   }
   const online = data.status?.status.online === true;
   async function toggleOnline(value: boolean) { await doWork(() => value ? startShift(identity.subject) : endShift()); }
   async function taskAction(task: Task, action: string, body: unknown) {
-    return doWork(() => performAction(identity.subject, task.id, action, (key) => riderApi.taskAction(task.id, action, body, key)));
+    return doWork(() => performAction(identity.subject, task.id, action, (key) => riderApi.taskAction(task.id, action, body, key)),
+      `task:${task.id}`, async () => {
+        await refreshTasks().catch(() => setError('Delivery update saved. Pull to refresh its details.'));
+      });
   }
   async function offerAction(offer: Offer, action: 'accept' | 'decline') {
-    const done = await doWork(() => performAction(identity.subject, offer.offerId, action,
-      (key) => action === 'accept' ? riderApi.accept(offer.offerId, key) : riderApi.decline(offer.offerId, key)));
-    if (done && action === 'accept') setPage({ type: 'task', id: offer.taskId });
+    await doWork(() => performAction(identity.subject, offer.offerId, action,
+      (key) => action === 'accept' ? riderApi.accept(offer.offerId, key) : riderApi.decline(offer.offerId, key)),
+      `offer:${offer.offerId}`, async () => {
+        setData(previous => ({ ...previous, offers: previous.offers.filter(item => item.offerId !== offer.offerId) }));
+        if (action === 'accept') void refreshTaskDetail(offer.taskId);
+        void refreshOffers().catch(() => undefined);
+      });
   }
   async function logout() {
     if (actionBusy.current) return;
@@ -181,9 +249,13 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
   const showPage = (next: Page) => setPage(next);
 
   let body;
-  if (page?.type === 'task') body = selectedTask ? <TaskDetail key={selectedTask.id} task={selectedTask} enabled={connected} busy={busy} run={(action, value) => taskAction(selectedTask, action, value)} />
-    : <><PageTitle title="Delivery unavailable" subtitle="This order is no longer assigned to you. Check your history for its latest status." /><Button label="Back to tasks" onPress={() => { setPage(null); setTab('tasks'); }} /></>;
-  else if (page?.type === 'support') body = <SupportScreen key={identity.subject} subject={identity.subject} />;
+  if (page?.type === 'task') body = <>
+    {page.failed && <><Text style={styles.warning}>Couldn’t refresh this delivery.</Text><Button label="Try again" compact secondary onPress={() => void refreshTaskDetail(page.id)} /></>}
+    {selectedTask ? <TaskDetail key={selectedTask.id} task={selectedTask} enabled={connected} busy={isBusy(`task:${selectedTask.id}`)} run={(action, value) => taskAction(selectedTask, action, value)} />
+      : page.loading ? <CardListSkeleton label="Loading delivery details" count={2} />
+      : !page.failed ? <><PageTitle title="Delivery unavailable" subtitle="This order is no longer assigned to you. Check your history for its latest status." /><Button label="Back to tasks" onPress={() => { setPage(null); setTab('tasks'); }} /></> : null}
+  </>;
+  else if (page?.type === 'support') body = <SupportScreen key={identity.subject} subject={identity.subject} refreshSignal={supportSignal} />;
   else if (page?.type === 'notifications') body = <><PageTitle title="Notifications" subtitle="Updates about your deliveries and account." />
     {data.notifications.length ? <Button label="Mark all read" secondary compact onPress={() => void doWork(() => riderApi.readNotifications())} /> : <ResourceEmpty state={loads.notifications} label="notifications" empty="No notifications yet." onRetry={() => void refresh()} />}
     <View style={{ height: 12 }} />{data.notifications.map((notice) => <Card key={notice.id}><Text style={styles.strong}>{notice.title}</Text><Text style={styles.sub}>{notice.body}</Text><Text style={styles.small}>{shortTime(notice.createdAt)}</Text></Card>)}
@@ -203,7 +275,7 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
     <View style={styles.stats}><Card style={styles.stat}><Text style={styles.small}>TODAY&apos;S DELIVERIES</Text><MetricValue state={loads.dashboard} label="today's deliveries" value={data.dashboard?.todayDeliveries ?? '—'} /></Card>
       <Card style={styles.stat}><Text style={styles.small}>TODAY&apos;S EARNINGS</Text><MetricValue state={loads.dashboard} label="today’s earnings" value={formatMoney(data.dashboard?.todayEarningsPaise)} /></Card></View>
     <Section title="New offers" action="See tasks" onPress={() => setTab('tasks')} />
-    {data.offers.length ? data.offers.map((offer) => <OfferCard key={offer.offerId} offer={offer} disabled={!connected || busy} act={offerAction} />) : <ResourceEmpty state={loads.offers} label="offers" empty="No new offers right now." onRetry={() => void refresh()} />}
+    {data.offers.length ? data.offers.map((offer) => <OfferCard key={offer.offerId} offer={offer} disabled={!connected || isBusy(`offer:${offer.offerId}`)} act={offerAction} />) : <ResourceEmpty state={loads.offers} label="offers" empty="No new offers right now." onRetry={() => void refresh()} />}
     <Section title="Active deliveries" action="View all" onPress={() => setTab('tasks')} />
     {data.tasks.length ? data.tasks.map((task) => <TaskCard key={task.id} task={task} onPress={() => showPage({ type: 'task', id: task.id })} />) : <ResourceEmpty state={loads.tasks} label="deliveries" empty="No active deliveries." onRetry={() => void refresh()} />}
     <View style={styles.farmBanner}><Image source={require('../../assets/images/farm-scene-hd.png')} contentFit="cover" style={StyleSheet.absoluteFill} />
@@ -211,10 +283,10 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
       <Text style={styles.farmTitle}>Fresh from{'\n'}our farms</Text><Text style={styles.small}>Every delivery makes a difference</Text></View>
   </>;
   else if (tab === 'tasks') body = <><PageTitle title="Your tasks" subtitle="Offers, active deliveries and your recent history." />
-    <Text style={styles.sectionTitle}>New offers</Text>{data.offers.length ? data.offers.map((offer) => <OfferCard key={offer.offerId} offer={offer} disabled={!connected || busy} act={offerAction} />) : <ResourceEmpty state={loads.offers} label="offers" empty="No new offers." onRetry={() => void refresh()} />}
+    <Text style={styles.sectionTitle}>New offers</Text>{data.offers.length ? data.offers.map((offer) => <OfferCard key={offer.offerId} offer={offer} disabled={!connected || isBusy(`offer:${offer.offerId}`)} act={offerAction} />) : <ResourceEmpty state={loads.offers} label="offers" empty="No new offers." onRetry={() => void refresh()} />}
     <Text style={styles.sectionTitle}>Active deliveries</Text>{data.tasks.length ? data.tasks.map((task) => <TaskCard key={task.id} task={task} onPress={() => showPage({ type: 'task', id: task.id })} />) : <ResourceEmpty state={loads.tasks} label="deliveries" empty="No active deliveries." onRetry={() => void refresh()} />}
     <Text style={styles.sectionTitle}>History</Text>{data.history.length ? data.history.map((item) => <Card key={`${item.id}-${item.attemptNo}`}><View style={styles.row}><View style={{ flex: 1 }}><Text style={styles.strong}>{item.orderNumber}</Text><Text style={styles.sub}>{item.status.replaceAll('_', ' ')} · {shortTime(item.assignedAt)}</Text></View><Text>{formatMoney(item.totalPaise)}</Text></View></Card>) : <ResourceEmpty state={loads.history} label="delivery history" empty="No delivery history yet." onRetry={() => void refresh()} />}
-    {data.historyCursor ? <Button label="Load more history" secondary onPress={() => void doWork(moreHistory, false)} /> : null}
+    {data.historyCursor ? <Button label="Load more history" secondary onPress={() => void doWork(async () => undefined, undefined, async () => { await moreHistory(); })} /> : null}
   </>;
   else if (tab === 'route') body = <><PageTitle title="Deliveries" subtitle="Open an active delivery for pickup and destination directions." />
     {data.tasks.length ? data.tasks.map((task) => <TaskCard key={task.id} task={task} onPress={() => showPage({ type: 'task', id: task.id })} />) : <ResourceEmpty state={loads.tasks} label="deliveries" empty="Your active deliveries will appear here." onRetry={() => void refresh()} />}
@@ -224,7 +296,7 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
       <Card style={styles.stat}><Text style={styles.small}>CASH IN HAND</Text><MetricValue state={loads.cash} label="cash in hand" value={formatMoney(data.cash?.cashInHandPaise)} /></Card></View>
     {data.cash?.limitPaise ? <Text style={styles.sub}>Cash limit: {formatMoney(data.cash.limitPaise)}</Text> : null}
     <Text style={styles.sectionTitle}>Earnings history</Text>{data.earnings.length ? data.earnings.map((earning) => <Card key={earning.taskId}><View style={styles.row}><View style={{ flex: 1 }}><Text style={styles.strong}>Delivery</Text><Text style={styles.sub}>{shortTime(earning.computedAt)}</Text>{earning.distancePending && <Text style={styles.sub}>Distance pay is awaiting review.</Text>}</View><Text style={styles.strong}>{formatMoney(earning.totalPaise)}</Text></View></Card>) : <ResourceEmpty state={loads.earnings} label="earnings" empty="No earnings recorded yet." onRetry={() => void refresh()} />}
-    {data.earningsCursor ? <Button label="Load more earnings" secondary onPress={() => void doWork(moreEarnings, false)} /> : null}
+    {data.earningsCursor ? <Button label="Load more earnings" secondary onPress={() => void doWork(async () => undefined, undefined, async () => { await moreEarnings(); })} /> : null}
     <Card><Text style={styles.sub}>Payout requests and withdrawal details are not available yet.</Text></Card></>;
   else body = <><PageTitle title="Profile" subtitle="Your partner account and preferences." />
     <Card><View style={styles.row}><View style={styles.avatar}><Text style={styles.avatarText}>{identity.name.slice(0, 1).toUpperCase()}</Text></View><View style={{ flex: 1 }}><Text style={styles.strong}>{identity.name}</Text><Text style={styles.sub}>{identity.email}</Text><Text style={styles.small}>Approved partner</Text></View></View></Card>
@@ -244,7 +316,8 @@ export function LivePartner({ identity, application, onSignOut, onAuthorizationC
       <IconButton name="notifications-outline" label="Notifications" onPress={() => showPage({ type: 'notifications' })} /></View>
     <View style={styles.connection}><Text style={styles.connectionText}>{loads.status === 'loading' && !data.status ? 'Checking connection…' : connected ? socketConnected ? 'Live updates connected' : 'Connected · checking for updates' : 'Connection unavailable'}</Text></View>
     {error ? <Pressable onPress={() => void refresh()}><Text accessibilityRole="alert" style={styles.warning}>{error}</Text></Pressable> : null}
-    <ScrollView key={page ? `${page.type}${page.type === 'task' ? page.id : ''}` : tab} keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: page ? insets.bottom + 25 : 20 }]}>{body}</ScrollView>
+    <ScrollView testID="rider-scroll" key={page ? `${page.type}${page.type === 'task' ? page.id : ''}` : tab} keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { flexGrow: 1, paddingBottom: page ? insets.bottom + 25 : 20 }]}
+      refreshControl={<RefreshControl testID="rider-pull-refresh" refreshing={pull.refreshing} onRefresh={() => { void pull.onRefresh(); }} tintColor={colors.greenDark} />}>{body}</ScrollView>
     {!page ? <View style={[styles.nav, { paddingBottom: Math.max(8, insets.bottom) }]}>{tabs.map((item) => <Pressable key={item.key} accessibilityRole="tab" accessibilityState={{ selected: tab === item.key }} onPress={() => setTab(item.key)} style={[styles.navItem, tab === item.key && styles.navActive]}>
       <Ionicons name={tab === item.key ? item.active : item.icon} size={21} color={tab === item.key ? colors.inverse : colors.secondary} /><Text style={[styles.navText, tab === item.key && { color: colors.inverse }]}>{item.label}</Text>
     </Pressable>)}</View> : null}

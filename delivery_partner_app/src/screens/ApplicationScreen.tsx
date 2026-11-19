@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError, riderApi, UploadError, type Application, type OnboardingStore } from '../api';
 import { Brand } from '../components/Brand';
 import { CardListSkeleton } from '../components/Skeleton';
 import { Button, Card, IconBox, PageTitle, Text } from '../components/Ui';
 import { uploadDocument } from '../files';
+import { useRefresh } from '../useRefresh';
 import { colors, fonts } from '../theme';
 
 const names: Record<string, string> = { licence: 'Driving licence', vehicle_rc: 'Vehicle registration', id_proof: 'Identity proof', bank_proof: 'Bank proof' };
@@ -23,6 +24,7 @@ export function ApplicationScreen({ application, reload, signOut }: { applicatio
   const [storesLoading, setStoresLoading] = useState(true);
   const [storeRetry, setStoreRetry] = useState(0);
   const editable = application.status === 'PENDING' || application.status === 'REJECTED';
+  const pull = useRefresh(() => reload());
   useEffect(() => {
     let active = true;
     riderApi.onboardingStores().then((items) => { if (active) { setStores(items); setStoreError(''); } })
@@ -46,7 +48,8 @@ export function ApplicationScreen({ application, reload, signOut }: { applicatio
       setErrorType(null); setError('');
       void signOut().catch((failure: unknown) => setError(failure instanceof ApiError ? failure.message : 'Could not sign out. Please try again.'));
     }} /></View>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 30 }]}>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { flexGrow: 1, paddingBottom: insets.bottom + 30 }]}
+      refreshControl={<RefreshControl testID="application-pull-refresh" refreshing={pull.refreshing} onRefresh={() => { void pull.onRefresh(); }} tintColor={colors.greenDark} />}>
       <PageTitle title={application.status === 'APPROVED' ? 'Application approved' : application.status === 'SUSPENDED' ? 'Account suspended' : 'Your partner application'}
         subtitle={application.status === 'UNDER_REVIEW' ? 'Your documents are being reviewed. You can check back here for updates.'
           : application.status === 'REJECTED' ? 'Please update the documents that need attention and resubmit them.'
@@ -92,7 +95,6 @@ export function ApplicationScreen({ application, reload, signOut }: { applicatio
         </Card>;
       })}
       {error && !errorType ? <Text accessibilityRole="alert" style={styles.danger}>{error}</Text> : null}
-      <Button label="Refresh status" secondary disabled={busy} onPress={() => void perform(reload, null, false)} />
     </ScrollView>
   </View>;
 }

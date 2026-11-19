@@ -7,6 +7,7 @@ import {
   Headers,
   HttpException,
   Inject,
+  Optional,
   Param,
   ParseUUIDPipe,
   Post,
@@ -23,9 +24,19 @@ import {
   ApiPropertyOptional,
 } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import type { Json } from '../../../platform/database/database.js';
 import type { TransactionContext } from '../../../platform/database/database.js';
+import { HttpMetrics } from '../../../platform/metrics/http-metrics.js';
 import { DomainErrorInterceptor } from '../../domain-errors.js';
 import {
   canonical,
@@ -47,10 +58,46 @@ import type {
 const IDEMPOTENCY_STORE = Symbol('CART_HTTP_IDEMPOTENCY');
 export { IDEMPOTENCY_STORE };
 const PAISE = /^(0|[1-9][0-9]{0,11})$/;
+class CartIssueView {
+  @ApiProperty() code!: string;
+  @ApiPropertyOptional({ format: 'uuid' }) variantId?: string;
+  @ApiPropertyOptional() detail?: string;
+}
+class CartLineView {
+  @ApiProperty({ format: 'uuid' }) variantId!: string;
+  @ApiProperty({ format: 'uuid' }) productId!: string;
+  @ApiProperty() productName!: string;
+  @ApiProperty() variantName!: string;
+  @ApiProperty({ type: String, nullable: true }) image!: string | null;
+  @ApiProperty() quantity!: string;
+  @ApiProperty() unitPricePaise!: string;
+  @ApiProperty({ type: String, nullable: true }) currentUnitPricePaise!: string | null;
+  @ApiProperty() mrpPaise!: string;
+  @ApiProperty() lineSubtotalPaise!: string;
+}
+class CartView {
+  @ApiProperty({ format: 'uuid' }) cartId!: string;
+  @ApiProperty({ format: 'uuid' }) userId!: string;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true }) storeId!: string | null;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true }) addressId!: string | null;
+  @ApiProperty() version!: number;
+  @ApiProperty({ type: String, nullable: true }) couponCode!: string | null;
+  @ApiProperty({ type: CartLineView, isArray: true }) lines!: CartLineView[];
+  @ApiProperty({ type: CartIssueView, isArray: true }) issues!: CartIssueView[];
+}
+class CartWriteView {
+  @ApiProperty({ type: CartView }) cart!: CartView;
+  @ApiProperty() clamped!: boolean;
+}
 class PutItemDto {
   @ApiProperty({ pattern: PAISE.source }) @Matches(PAISE) quantity!: string;
   @ApiProperty({ minimum: 1 }) @Type(() => Number) @IsInt() @Min(1) version!: number;
   @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() addressId?: string;
+  @ApiPropertyOptional({ pattern: PAISE.source })
+  @IsOptional()
+  @Matches(PAISE)
+  displayedUnitPricePaise?: string;
+  @ApiPropertyOptional({ type: Boolean }) @IsOptional() @IsBoolean() acceptPriceChange?: boolean;
 }
 class VersionQuery {
   @ApiProperty({ minimum: 1 }) @Type(() => Number) @IsInt() @Min(1) version!: number;
@@ -84,10 +131,14 @@ export class CustomerCartController {
     @Inject(COUPONS) private readonly coupons: CouponValidation,
     @Inject(COUPON_ATTEMPT_LIMITER) private readonly limiter: CouponAttemptLimiter,
     @Inject(IDEMPOTENCY_STORE) private readonly idempotency: IdempotencyStore,
+    @Optional() private readonly metrics?: HttpMetrics,
   ) {}
   @Get('cart')
   @ApiOperation({ operationId: 'customerCartGet' })
-  @ApiOkResponse({ description: 'Stored lines with freshly computed issues and version' })
+  @ApiOkResponse({
+    type: CartView,
+    description: 'Stored lines with freshly computed issues and version',
+  })
   async get(@CurrentPrincipal() p: Principal) {
     const cart = await this.carts.get(p.userId);
     if (!cart) throw new Error('CART_NOT_FOUND');
@@ -95,7 +146,7 @@ export class CustomerCartController {
   }
   @Put('cart/items/:variantId')
   @ApiOperation({ operationId: 'customerCartPutItem' })
-  @ApiOkResponse({ description: 'Cart after the absolute quantity write' })
+  @ApiOkResponse({ type: CartWriteView, description: 'Cart after the absolute quantity write' })
   putItem(
     @CurrentPrincipal() p: Principal,
     @Param('variantId', new ParseUUIDPipe()) variantId: string,
@@ -112,6 +163,8 @@ export class CustomerCartController {
         this.carts.putItem(p.userId, variantId, d.quantity, {
           expectedVersion: d.version,
           addressId: d.addressId,
+          displayedUnitPricePaise: d.displayedUnitPricePaise,
+          acceptPriceChange: d.acceptPriceChange,
           tx,
         }),
     );
@@ -223,19 +276,45 @@ export class CustomerCartController {
   ): Promise<T> {
     if (!key || key.length < 1 || key.length > 150)
       throw new HttpException({ code: 'INVALID_INPUT' }, 400);
-    await guards.beforeClaim?.();
-    const hash = hashRequest(JSON.stringify([method, resource, canonical(input)]));
-    const claim = await this.idempotency.claim(
-      { actor: p.userId, audience: 'customer', method, resource, key },
-      hash,
-    );
-    if (claim.kind === 'replay') return claim.body as T;
-    if (claim.kind === 'in_progress') throw new HttpException({ code: 'REQUEST_IN_PROGRESS' }, 409);
-    if (claim.kind !== 'claimed') throw new HttpException({ code: 'IDEMPOTENCY_KEY_REUSED' }, 409);
-    const { body } = await this.idempotency.execute(claim.owner, async (tx) => ({
-      status: 200,
-      body: (await work(tx)) as unknown as Json,
-    }));
-    return body as T;
+    const writeStarted = performance.now();
+    try {
+      await guards.beforeClaim?.();
+      const hash = hashRequest(JSON.stringify([method, resource, canonical(input)]));
+      const claimStarted = performance.now();
+      const claim = await this.idempotency.claim(
+        { actor: p.userId, audience: 'customer', method, resource, key },
+        hash,
+      );
+      this.metrics?.observeStage('idempotency_claim', performance.now() - claimStarted);
+      if (claim.kind === 'replay') {
+        this.metrics?.observeOutcome('replay');
+        return claim.body as T;
+      }
+      if (claim.kind === 'in_progress') {
+        this.metrics?.observeOutcome('in_progress');
+        throw new HttpException({ code: 'REQUEST_IN_PROGRESS' }, 409);
+      }
+      if (claim.kind === 'response_expired') {
+        this.metrics?.observeOutcome('response_expired');
+        throw new HttpException({ code: 'IDEMPOTENCY_KEY_REUSED' }, 409);
+      }
+      if (claim.kind !== 'claimed') {
+        this.metrics?.observeOutcome('conflict');
+        throw new HttpException({ code: 'IDEMPOTENCY_KEY_REUSED' }, 409);
+      }
+      this.metrics?.observeOutcome('claimed');
+      const txnStarted = performance.now();
+      try {
+        const { body } = await this.idempotency.execute(claim.owner, async (tx) => ({
+          status: 200,
+          body: (await work(tx)) as unknown as Json,
+        }));
+        return body as T;
+      } finally {
+        this.metrics?.observeStage('cart_write_txn', performance.now() - txnStarted);
+      }
+    } finally {
+      this.metrics?.observeStage('cart_write', performance.now() - writeStarted);
+    }
   }
 }

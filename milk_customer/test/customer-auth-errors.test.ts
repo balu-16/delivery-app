@@ -40,7 +40,7 @@ test('tells the user which service is unreachable without exposing the network e
   fetchMock.mockRejectedValue(new Error('secret network diagnostic'));
   await expect(cognitoRequest('InitiateAuth', {})).rejects.toMatchObject({ code: 'COGNITO_UNREACHABLE' });
   expect(authErrorMessage(new AuthError('BACKEND_UNREACHABLE'))).toContain('customer server');
-  expect(authErrorMessage(new ApiError(503, 'SERVICE_UNAVAILABLE', 'trace'))).toContain('temporarily unavailable');
+  expect(authErrorMessage(new ApiError(503, 'SERVICE_UNAVAILABLE', 'trace'))).toBe('Couldn’t finish setting up your account.');
 });
 
 test('unknown provider failures never expose raw messages', async () => {

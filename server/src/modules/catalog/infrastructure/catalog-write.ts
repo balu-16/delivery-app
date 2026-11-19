@@ -40,7 +40,7 @@ export class CatalogWrite {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INVALID_PAGE');
     const after = cursor ?? null;
     const parentFilter =
-      kind === 'variants' && productId ? sql` AND product_id=${productId}::uuid` : sql``;
+      kind === 'variants' && productId ? sql` AND v.product_id=${productId}::uuid` : sql``;
     const result =
       kind === 'categories'
         ? await sql<{
@@ -62,7 +62,11 @@ export class CatalogWrite {
               )
             : await sql<{
                 id: string;
-              }>`SELECT id,product_id AS "productId",name,sku,barcode,base_unit AS "baseUnit" FROM catalog_variants WHERE deleted_at IS NULL AND (${id ?? null}::uuid IS NULL OR id=${id ?? null}::uuid) AND (${after}::uuid IS NULL OR id>${after}::uuid)${parentFilter} ORDER BY id LIMIT ${limit + 1}`.execute(
+              }>`SELECT v.id,v.product_id AS "productId",v.name,v.sku,v.barcode,v.base_unit AS "baseUnit",
+                price.selling_paise::text AS "sellingPaise",price.mrp_paise::text AS "mrpPaise"
+                FROM catalog_variants v LEFT JOIN catalog_global_prices price ON price.variant_id=v.id
+                WHERE v.deleted_at IS NULL AND (${id ?? null}::uuid IS NULL OR v.id=${id ?? null}::uuid)
+                AND (${after}::uuid IS NULL OR v.id>${after}::uuid)${parentFilter} ORDER BY v.id LIMIT ${limit + 1}`.execute(
                 this.db,
               );
     const items = result.rows.slice(0, limit);

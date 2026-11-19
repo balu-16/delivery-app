@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { OrderCodeService } from '../../../src/modules/orders/infrastructure/delivery-codes.js';
 import { LocalPrivateUploads } from '../../../src/adapters/storage/local-private.js';
 import { DeliveryPodMedia } from '../../../src/modules/dispatch/infrastructure/pod-media.js';
@@ -73,9 +74,15 @@ let services: TestServices,
   packing: PostgresPacking,
   consumer: OrderConfirmedConsumer;
 
+if (process.env.AWS_P13_INTEGRATION === 'yes') jest.setTimeout(300000);
+
 const deliveredOrders: string[] = [];
 const failedOrders: { orderId: string; reason: string }[] = [];
 const systemCancels: { orderId: string; reason: string }[] = [];
+// Unique GEO namespace per run: GEO members outlive their freshness hashes,
+// so the shared namespace accumulates stale members that crowd fresh riders
+// out of the COUNT-limited search.
+const geoNamespace = `c${Date.now().toString(36)}${uuidV7().replaceAll('-', '').slice(0, 8)}`;
 
 const orderDelivery: OrderDelivery = {
   markReturnedToStore: async () => undefined,
@@ -169,7 +176,7 @@ async function releaseAndDispatch(orderId: string) {
     settings,
     config,
     broadcasts,
-    new RedisRiderGeo(redis),
+    new RedisRiderGeo(redis, geoNamespace),
     eligibility,
     orderSystemCancel,
     new (
@@ -213,7 +220,10 @@ beforeAll(async () => {
     migrationsTable: 'pgmigrations',
   });
   db = createDatabase(services.databaseUrl, 30);
-  redis = new Redis(services.redisUrl, { lazyConnect: false });
+  redis = new Redis(services.redisUrl, {
+    lazyConnect: false,
+    keyPrefix: `${services.redisPrefix}:`,
+  });
   world = await seedDispatchWorld(db);
   const config = fakeConfig();
   settings = new DispatchSettings(config);
@@ -259,7 +269,7 @@ beforeAll(async () => {
   tracking = new PostgresCustomerTracking(db.db, locations, eta, codes);
   consumer = new OrderConfirmedConsumer(config, codes);
   for (const rider of [world.rider1, world.rider2, world.rider3])
-    await new RedisRiderGeo(redis).updateMember(
+    await new RedisRiderGeo(redis, geoNamespace).updateMember(
       rider,
       { lat: world.storeLat, lng: world.storeLng, ts: new Date().toISOString() },
       600,
@@ -267,7 +277,9 @@ beforeAll(async () => {
 }, 120000);
 
 beforeEach(async () => {
-  await sql`UPDATE rider_status SET online=true,active_tasks=0,idle_since=clock_timestamp() - interval '10 minutes',unreachable_since=NULL`.execute(
+  // Locations must stay fresh: eligibility rejects PG points older than
+  // riderStaleLocationSeconds while a slow AWS run outlasts one seed.
+  await sql`UPDATE rider_status SET online=true,active_tasks=0,idle_since=clock_timestamp() - interval '10 minutes',unreachable_since=NULL,last_location_at=clock_timestamp(),last_heartbeat_at=clock_timestamp()`.execute(
     db.db,
   );
   await sql`UPDATE rider_offers SET status='EXPIRED' WHERE status='SENT'`.execute(db.db);
@@ -361,43 +373,52 @@ test('wrong delivery codes are attempt-limited and lock out durably (DSP-04)', a
   expect(state.rows[0]!.status).toBe('ARRIVED');
 }, 60000);
 
-test('COD collection gates automatic completion; mismatches block delivery (PAY-09)', async () => {
-  const order = await confirmOrder({ cod: true, amountDuePaise: '47000' });
-  await releaseAndDispatch(order.orderId);
-  const { rider, taskId } = await custodyToPickedUp(order.orderId);
-  await tasks.arrived(rider, taskId, uuidV7());
-  await expect(
-    tasks.deliver(rider, taskId, { deliveryCode: deriveCode(SECRET, order.orderId) }, uuidV7()),
-  ).rejects.toThrow('COD_NOT_COLLECTED');
-  // The rider records a short collection: flagged, not delivered.
-  const collected = await tasks.codCollect(rider, taskId, { amountPaise: '40000' }, uuidV7());
-  expect(collected.mismatch).toBe(true);
-  await expect(
-    tasks.deliver(rider, taskId, { deliveryCode: deriveCode(SECRET, order.orderId) }, uuidV7()),
-  ).rejects.toThrow('COD_AMOUNT_MISMATCH');
-  const mismatch = await sql<{
-    expected_paise: string;
-    collected_paise: string;
-  }>`SELECT expected_paise::text AS "expected_paise",collected_paise::text AS "collected_paise" FROM cod_mismatches WHERE order_id=${order.orderId}::uuid`.execute(
-    db.db,
-  );
-  expect(mismatch.rows[0]).toEqual({ expected_paise: '47000', collected_paise: '40000' });
-  const state = await sql<{
-    status: string;
-  }>`SELECT status FROM delivery_tasks WHERE id=${taskId}::uuid`.execute(db.db);
-  expect(state.rows[0]!.status).toBe('ARRIVED');
-  // The rider corrects the collection; cash ledger holds the corrected amount once.
-  const fixed = await tasks.codCollect(rider, taskId, { amountPaise: '47000' }, uuidV7());
-  expect(fixed.mismatch).toBe(false);
-  await tasks.deliver(rider, taskId, { deliveryCode: deriveCode(SECRET, order.orderId) }, uuidV7());
-  const cash = await sql<{
-    balance_after: string;
-  }>`SELECT balance_after FROM rider_cash_ledger WHERE rider_id=${rider}::uuid ORDER BY created_at DESC, id DESC LIMIT 1`.execute(
-    db.db,
-  );
-  expect(cash.rows[0]!.balance_after).toBe('47000');
-  expect(deliveredOrders).toContain(order.orderId);
-}, 60000);
+test(
+  'COD collection gates automatic completion; mismatches block delivery (PAY-09)',
+  async () => {
+    const order = await confirmOrder({ cod: true, amountDuePaise: '47000' });
+    await releaseAndDispatch(order.orderId);
+    const { rider, taskId } = await custodyToPickedUp(order.orderId);
+    await tasks.arrived(rider, taskId, uuidV7());
+    await expect(
+      tasks.deliver(rider, taskId, { deliveryCode: deriveCode(SECRET, order.orderId) }, uuidV7()),
+    ).rejects.toThrow('COD_NOT_COLLECTED');
+    // The rider records a short collection: flagged, not delivered.
+    const collected = await tasks.codCollect(rider, taskId, { amountPaise: '40000' }, uuidV7());
+    expect(collected.mismatch).toBe(true);
+    await expect(
+      tasks.deliver(rider, taskId, { deliveryCode: deriveCode(SECRET, order.orderId) }, uuidV7()),
+    ).rejects.toThrow('COD_AMOUNT_MISMATCH');
+    const mismatch = await sql<{
+      expected_paise: string;
+      collected_paise: string;
+    }>`SELECT expected_paise::text AS "expected_paise",collected_paise::text AS "collected_paise" FROM cod_mismatches WHERE order_id=${order.orderId}::uuid`.execute(
+      db.db,
+    );
+    expect(mismatch.rows[0]).toEqual({ expected_paise: '47000', collected_paise: '40000' });
+    const state = await sql<{
+      status: string;
+    }>`SELECT status FROM delivery_tasks WHERE id=${taskId}::uuid`.execute(db.db);
+    expect(state.rows[0]!.status).toBe('ARRIVED');
+    // The rider corrects the collection; cash ledger holds the corrected amount once.
+    const fixed = await tasks.codCollect(rider, taskId, { amountPaise: '47000' }, uuidV7());
+    expect(fixed.mismatch).toBe(false);
+    await tasks.deliver(
+      rider,
+      taskId,
+      { deliveryCode: deriveCode(SECRET, order.orderId) },
+      uuidV7(),
+    );
+    const cash = await sql<{
+      balance_after: string;
+    }>`SELECT balance_after FROM rider_cash_ledger WHERE rider_id=${rider}::uuid ORDER BY created_at DESC, id DESC LIMIT 1`.execute(
+      db.db,
+    );
+    expect(cash.rows[0]!.balance_after).toBe('47000');
+    expect(deliveredOrders).toContain(order.orderId);
+  },
+  process.env.AWS_P13_INTEGRATION === 'yes' ? 300000 : 60000,
+);
 
 test('rider contact is visible only inside the custody window (GEO-04)', async () => {
   const order = await confirmOrder();

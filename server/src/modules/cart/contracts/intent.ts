@@ -5,11 +5,19 @@ export interface CartIntents {
     cartId: string,
     cartVersion: number,
     quoteId: string,
+    tx?: TransactionContext,
   ): Promise<{ intentId: string; expiresAt: string }>;
   /** Atomically consume in the caller's placement tx; second consume (even different idempotency key) throws CART_INTENT_CONSUMED. */
   consume(
     intentId: string,
     expected: { cartId: string; cartVersion: number; quoteId: string },
+    tx: TransactionContext,
+  ): Promise<void>;
+  /** Clear only the cart version confirmed by the placement, without deleting its history. */
+  completePurchase(
+    userId: string,
+    cartId: string,
+    cartVersion: number,
     tx: TransactionContext,
   ): Promise<void>;
 }

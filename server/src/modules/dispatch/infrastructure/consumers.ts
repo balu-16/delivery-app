@@ -37,16 +37,26 @@ export function parseOrderConfirmed(payload: unknown): OrderConfirmedPayload {
   };
 }
 
+/** True when the persisted order status already satisfies the dispatch gate. */
+export function gatePassed(mode: DispatchTrigger, status: string): boolean {
+  if (mode === 'ON_PACKED') return status === 'PACKED';
+  return status === 'PICKING' || status === 'PACKED';
+}
+
 /**
  * Idempotent ORDER_CONFIRMED consumer: one active delivery task per order
  * (SYS-06, partial unique index) plus the D20 delivery-code issue. The task
  * stays queued (`next_dispatch_at = infinity`) until the configured dispatch
- * trigger releases it.
+ * trigger releases it — unless the persisted order status already passed the
+ * gate (the trigger event fired before this consumer ran), in which case the
+ * task is released immediately instead of waiting for a trigger that already
+ * fired.
  */
 export class OrderConfirmedConsumer {
   constructor(
     private readonly config: AppConfig,
     private readonly codes: DeliveryCodes,
+    private readonly trigger: () => Promise<DispatchTrigger> = async () => 'ON_PICK_START',
   ) {}
   async handle(tx: TransactionContext, event: EventEnvelope): Promise<void> {
     if (event.eventType !== 'ORDER_CONFIRMED') return;
@@ -80,6 +90,20 @@ export class OrderConfirmedConsumer {
     if (!created.rows[0]) return;
     await taskHistory(tx, created.rows[0].id, null, 'UNASSIGNED', null, 'order confirmed');
     await this.codes.issue(payload.orderId, tx);
+    if (gatePassed(await this.trigger(), order.rows[0].status)) {
+      await sql`UPDATE delivery_tasks SET next_dispatch_at=clock_timestamp(),released_at=COALESCE(released_at,clock_timestamp())
+        WHERE id=${created.rows[0].id}::uuid AND status='UNASSIGNED' AND next_dispatch_at='infinity'::timestamptz`.execute(
+        tx,
+      );
+      await taskHistory(
+        tx,
+        created.rows[0].id,
+        'UNASSIGNED',
+        'UNASSIGNED',
+        null,
+        'released at creation: order already past gate',
+      );
+    }
   }
 }
 
@@ -103,7 +127,7 @@ export class PickTriggerConsumer {
     const orderId =
       (event.payload as { orderId?: unknown }).orderId ?? event.correlationId ?? event.aggregateId;
     if (typeof orderId !== 'string' || !UUID.test(orderId)) return;
-    await sql`UPDATE delivery_tasks SET next_dispatch_at=clock_timestamp()
+    await sql`UPDATE delivery_tasks SET next_dispatch_at=clock_timestamp(),released_at=COALESCE(released_at,clock_timestamp())
       WHERE order_id=${orderId}::uuid AND status='UNASSIGNED' AND next_dispatch_at='infinity'::timestamptz`.execute(
       tx,
     );

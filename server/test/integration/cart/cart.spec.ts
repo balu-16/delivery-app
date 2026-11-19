@@ -56,7 +56,12 @@ interface CartBody {
   version: number;
   storeId: string;
   couponCode: string | null;
-  lines: { variantId: string; quantity: string; unitPricePaise: string }[];
+  lines: {
+    variantId: string;
+    quantity: string;
+    unitPricePaise: string;
+    currentUnitPricePaise: string | null;
+  }[];
   issues: { code: string; variantId?: string; detail?: string }[];
   clamped?: boolean;
 }
@@ -145,7 +150,7 @@ async function validate(token: string, addressId: string, payload: Record<string
     payload: { addressId, ...payload },
   });
 }
-it('a cart needs an address on first write; reads before that 404', async () => {
+it('creates a cart without an address and preserves it when checkout binds an address', async () => {
   const customer = await newCustomer();
   const token = customer.token;
   const missing = await getCart(token);
@@ -158,13 +163,12 @@ it('a cart needs an address on first write; reads before that 404', async () => 
   expect(result.statusCode).toBe(404);
   const item = await world.variant();
   const noAddress = await putItem(token, item.id, '1', 1);
-  expect(noAddress.statusCode).toBe(404);
-  const created = await putItem(token, item.id, '1', 1, customer.addressId);
-  expect(created.statusCode).toBe(200);
-  expect(created.json<PutResult>().cart.version).toBeGreaterThanOrEqual(1);
-  expect(created.json<PutResult>().cart.lines).toHaveLength(1);
-  expect(created.json<PutResult>().cart.lines[0]!.unitPricePaise).toBe('10000');
-  expect(created.json<PutResult>().cart.lines[0]).toMatchObject({
+  expect(noAddress.statusCode).toBe(200);
+  const created = noAddress.json<PutResult>().cart;
+  expect(created.storeId).toBeNull();
+  expect(created.lines).toHaveLength(1);
+  expect(created.lines[0]!.unitPricePaise).toBe('10000');
+  expect(created.lines[0]).toMatchObject({
     productId: world.product,
     productName: 'Milk',
     variantName: 'Unit',
@@ -172,7 +176,10 @@ it('a cart needs an address on first write; reads before that 404', async () => 
   });
   // The response version is authoritative for the next write.
   const reread = (await getCart(token))!;
-  expect(reread.version).toBe(created.json<PutResult>().cart.version);
+  expect(reread.version).toBe(created.version);
+  const quote = await validate(token, customer.addressId);
+  expect(quote.statusCode).toBe(200);
+  expect(quote.json<QuoteBody>().lines).toHaveLength(1);
 });
 it('retries with the same key replay the stored response and keyless writes are rejected', async () => {
   const customer = await newCustomer();
@@ -221,7 +228,43 @@ it('stale versions conflict and every accepted mutation bumps the version', asyn
   expect(accepted.statusCode).toBe(200);
   expect(accepted.json<PutResult>().cart.version).toBe(version + 1);
 });
-it('quantities clamp to the per-order maximum and to available stock with issues', async () => {
+it('requires explicit acceptance when an item price changes', async () => {
+  const customer = await newCustomer();
+  const item = await world.variant({ price: 10000n });
+  const created = await putItem(customer.token, item.id, '1', 1);
+  expect(created.statusCode).toBe(200);
+  await world.reprice(world.otherStore, item.id, 12500n);
+  let cart = created.json<PutResult>().cart;
+  const more = await putItem(customer.token, item.id, '2', cart.version);
+  expect(more.statusCode).toBe(200);
+  cart = more.json<PutResult>().cart;
+  expect(cart.lines[0]!.unitPricePaise).toBe('10000');
+  expect(cart.lines[0]!.currentUnitPricePaise).toBe('12500');
+  expect(cart.issues.some((issue) => issue.code === 'PRICE_CHANGED')).toBe(true);
+  const accept = (price: string, key: string) =>
+    server.inject({
+      method: 'PUT',
+      url: `/v1/customer/cart/items/${item.id}`,
+      headers: { ...auth(customer.token), ...keyHeaders(key) },
+      payload: {
+        quantity: '2',
+        version: cart.version,
+        acceptPriceChange: true,
+        displayedUnitPricePaise: price,
+      },
+    });
+  const stale = await accept('11000', uuidV7());
+  expect(stale.statusCode).toBe(409);
+  expect(stale.json().code).toBe('PRICE_CHANGED');
+  const accepted = await accept('12500', uuidV7());
+  expect(accepted.statusCode).toBe(200);
+  expect(accepted.json<PutResult>().cart.lines[0]!.unitPricePaise).toBe('12500');
+  const first = await validate(customer.token, customer.addressId);
+  const second = await validate(customer.token, customer.otherAddressId);
+  expect(first.json<QuoteBody>().lines[0]!.unitPricePaise).toBe('12500');
+  expect(second.json<QuoteBody>().lines[0]!.unitPricePaise).toBe('12500');
+});
+it('clamps to the per-order maximum and reports stock shortages without dropping items', async () => {
   const customer = await newCustomer();
   const token = customer.token;
   const item = await world.variant();
@@ -237,21 +280,28 @@ it('quantities clamp to the per-order maximum and to available stock with issues
   cart = (await getCart(token))!;
   const overStock = await putItem(token, item.id, '5', cart.version);
   expect(overStock.statusCode).toBe(200);
-  expect(overStock.json<PutResult>().cart.lines[0]!.quantity).toBe('3');
+  expect(overStock.json<PutResult>().cart.lines[0]!.quantity).toBe('5');
   expect(
     overStock
       .json<PutResult>()
       .cart.issues.some((i) => i.code === 'QTY_REDUCED' && i.variantId === item.id),
   ).toBe(true);
 });
-it('items without saleable stock are refused explicitly', async () => {
+it('keeps an item in the cart when the chosen store has no stock', async () => {
   const customer = await newCustomer();
   const token = customer.token;
   const item = await world.variant();
   await world.stock(world.store, item.id, 0n);
   const result = await putItem(token, item.id, '1', 1, customer.addressId);
-  expect(result.statusCode).toBe(409);
-  expect(result.json().code).toBe('INVENTORY_INSUFFICIENT');
+  expect(result.statusCode).toBe(200);
+  expect(
+    result.json<PutResult>().cart.issues.some((issue) => issue.code === 'ITEM_UNAVAILABLE'),
+  ).toBe(true);
+  const quote = await validate(token, customer.addressId);
+  expect(quote.statusCode).toBe(200);
+  expect(quote.json<QuoteBody>().issues.some((issue) => issue.code === 'ITEM_UNAVAILABLE')).toBe(
+    true,
+  );
 });
 it('the distinct line cap is enforced with a 400', async () => {
   const customer = await newCustomer();

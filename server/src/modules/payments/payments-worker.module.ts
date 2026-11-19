@@ -5,9 +5,11 @@ import {
   type BeforeApplicationShutdown,
   type OnApplicationBootstrap,
 } from '@nestjs/common';
-import { PLATFORM_CONCERN_QUEUES } from '../../platform/contracts/runtime.js';
+import { PLATFORM_CONCERN_QUEUES, PLATFORM_QUEUE } from '../../platform/contracts/runtime.js';
 import type { ConcernQueues } from '../../platform/queue/concern-queues.js';
+import type { DurableQueue } from '../../platform/queue/queue.js';
 import { PaymentPollerService, RefundRecoveryService } from './infrastructure/payment-recovery.js';
+import { CheckoutVelocityConsumer } from './infrastructure/velocity-consumer.js';
 import { NightlyReconciliationService } from './infrastructure/reconciliation.js';
 import { PaymentsModule, WEBHOOK_JOB } from './payments.module.js';
 import {
@@ -32,12 +34,17 @@ export class PaymentWebhookWorker implements OnApplicationBootstrap, BeforeAppli
   constructor(
     @Inject(PAYMENT_WEBHOOKS) private readonly webhooks: PaymentWebhookIngest & WebhookInboxQuery,
     @Inject(PLATFORM_CONCERN_QUEUES) private readonly queues: ConcernQueues,
+    @Inject(PLATFORM_QUEUE) private readonly durable: DurableQueue,
     private readonly poller: PaymentPollerService,
     private readonly refunds: RefundRecoveryService,
     private readonly reconciliation: NightlyReconciliationService,
     @Inject(PAYMENT_ORDERS) private readonly paymentOrders: PaymentOrderOperations,
+    private readonly velocity: CheckoutVelocityConsumer,
   ) {}
   onApplicationBootstrap(): void {
+    this.durable.registerHandler(CheckoutVelocityConsumer.CONSUMER, (tx, event) =>
+      this.velocity.handle(tx, event),
+    );
     this.queues.register('payments', WEBHOOK_JOB, async (data) => {
       const inboxId = (data as { inboxId?: string }).inboxId;
       if (typeof inboxId !== 'string' || !inboxId) throw new Error('INVALID_WEBHOOK_JOB');
@@ -76,6 +83,6 @@ export class PaymentWebhookWorker implements OnApplicationBootstrap, BeforeAppli
 /** Wired by the composition root only for APP_ROLE all|worker. */
 @Module({
   imports: [PaymentsModule],
-  providers: [PaymentWebhookWorker],
+  providers: [PaymentWebhookWorker, CheckoutVelocityConsumer],
 })
 export class PaymentsWorkerModule {}

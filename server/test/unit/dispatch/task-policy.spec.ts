@@ -7,6 +7,7 @@ import {
   transitionTask,
 } from '../../../src/modules/dispatch/domain/task-policy.js';
 import { radiusForAttempt } from '../../../src/modules/dispatch/domain/settings.js';
+import { gatePassed } from '../../../src/modules/dispatch/infrastructure/consumers.js';
 import type { DeliveryTaskStatus } from '../../../src/modules/dispatch/contracts/tasks.js';
 import { addressSnapshotPoint } from '../../../src/modules/dispatch/domain/geo.js';
 
@@ -89,9 +90,19 @@ describe('delivery task policy (11.3)', () => {
 
   test('radius widening follows the configured steps then holds', () => {
     expect(radiusForAttempt(0, 3000, [1500, 3000, 5000])).toBe(3000);
-    expect(radiusForAttempt(1, 3000, [1500, 3000, 5000])).toBe(1500);
+    expect(radiusForAttempt(1, 3000, [1500, 3000, 5000])).toBe(3000);
     expect(radiusForAttempt(2, 3000, [1500, 3000, 5000])).toBe(3000);
+    expect(radiusForAttempt(3, 3000, [1500, 3000, 5000])).toBe(5000);
     expect(radiusForAttempt(9, 3000, [1500, 3000, 5000])).toBe(5000);
+  });
+
+  test('release gate follows persisted order status', () => {
+    expect(gatePassed('ON_PICK_START', 'CONFIRMED')).toBe(false);
+    expect(gatePassed('ON_PICK_START', 'PICKING')).toBe(true);
+    expect(gatePassed('ON_PICK_START', 'PACKED')).toBe(true);
+    expect(gatePassed('ON_PACKED', 'PICKING')).toBe(false);
+    expect(gatePassed('ON_PACKED', 'PACKED')).toBe(true);
+    expect(gatePassed('ON_PACKED', 'CONFIRMED')).toBe(false);
   });
 
   test('the transition table covers every status (exhaustive)', () => {

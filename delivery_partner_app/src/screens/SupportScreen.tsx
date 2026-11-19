@@ -7,7 +7,7 @@ import { CardListSkeleton } from '../components/Skeleton';
 import { colors, fonts } from '../theme';
 import { shortTime } from './liveHelpers';
 
-export function SupportScreen({ subject }: { subject: string }) {
+export function SupportScreen({ subject, refreshSignal = 0 }: { subject: string; refreshSignal?: number }) {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<{ id: string; body: string; created_at: string }[]>([]);
@@ -22,12 +22,22 @@ export function SupportScreen({ subject }: { subject: string }) {
     const list = await riderApi.tickets(); setTickets(list.items); setCursor(list.nextCursor);
     if (id) setMessages((await riderApi.ticket(id)).messages);
   }
+  const refreshed = useRef(0);
   useEffect(() => {
     let active = true;
     void riderApi.tickets().then((page) => { if (active) { setTickets(page.items); setCursor(page.nextCursor); setTicketsState('success'); } })
       .catch((failure: unknown) => { if (active) { setTicketsState(previous => previous === 'success' ? previous : 'error'); setError(failure instanceof Error ? failure.message : 'Could not load support.'); } });
     return () => { active = false; };
   }, [retry, subject]);
+  // Pull-to-refresh: revalidate the ticket list (and open conversation)
+  // without dropping the visible content.
+  useEffect(() => {
+    if (refreshSignal === 0 || refreshed.current === refreshSignal) return;
+    refreshed.current = refreshSignal;
+    void riderApi.tickets()
+      .then((page) => { setTickets(page.items); setCursor(page.nextCursor); setTicketsState('success'); })
+      .catch((failure: unknown) => { setTicketsState(previous => previous === 'success' ? previous : 'error'); setError(failure instanceof Error ? failure.message : 'Could not load support.'); });
+  }, [refreshSignal]);
   async function send() {
     const text = body.trim(); if (!text || busy || messageLoading || messageError) return;
     setBusy(true); setError('');

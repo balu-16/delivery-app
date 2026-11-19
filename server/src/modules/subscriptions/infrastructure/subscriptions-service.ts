@@ -115,7 +115,7 @@ export class SubscriptionsService {
       }>`SELECT EXISTS(SELECT 1 FROM subscription_plans p JOIN catalog_variants v ON v.id=p.variant_id AND v.deleted_at IS NULL
         JOIN catalog_products product ON product.id=v.product_id AND product.published AND product.deleted_at IS NULL
         JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${storeId}::uuid
-        WHERE p.variant_id=${variantId}::uuid AND p.active AND EXISTS(SELECT 1 FROM catalog_prices price WHERE price.store_id=i.store_id AND price.variant_id=i.variant_id AND price.valid_from<=statement_timestamp() AND (price.valid_to IS NULL OR price.valid_to>statement_timestamp()))) AS eligible`.execute(
+        WHERE p.variant_id=${variantId}::uuid AND p.active AND EXISTS(SELECT 1 FROM catalog_global_prices price WHERE price.variant_id=i.variant_id)) AS eligible`.execute(
         this.db,
       ),
       sql<{

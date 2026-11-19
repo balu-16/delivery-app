@@ -2,10 +2,12 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Headers,
   HttpCode,
   HttpException,
   Inject,
+  Optional,
   Param,
   ParseUUIDPipe,
   Post,
@@ -14,9 +16,17 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiHeader,
+  ApiOkResponse,
+  ApiOperation,
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import type { Json, TransactionContext } from '../../../platform/database/database.js';
+import { HttpMetrics } from '../../../platform/metrics/http-metrics.js';
 import {
   IdempotencyStore,
   hashCanonical,
@@ -55,6 +65,101 @@ class CancelDto {
 class ChangeOrderAddressDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() addressId!: string;
 }
+class QuoteIssueView {
+  @ApiProperty() code!: string;
+  @ApiPropertyOptional({ format: 'uuid' }) variantId?: string;
+  @ApiPropertyOptional() detail?: string;
+}
+class QuoteLineView {
+  @ApiProperty({ format: 'uuid' }) variantId!: string;
+  @ApiProperty({ format: 'uuid' }) storeId!: string;
+  @ApiProperty() quantity!: string;
+  @ApiProperty() unitPricePaise!: string;
+  @ApiProperty() mrpPaise!: string;
+  @ApiProperty() lineSubtotalPaise!: string;
+  @ApiProperty() discountPaise!: string;
+  @ApiProperty() taxRateBps!: number;
+  @ApiProperty() taxPaise!: string;
+  @ApiProperty() lineTotalPaise!: string;
+}
+class QuoteFeeView {
+  @ApiProperty({ enum: ['DELIVERY', 'HANDLING', 'SMALL_CART', 'SURGE', 'TIP'] }) kind!: string;
+  @ApiProperty() amountPaise!: string;
+  @ApiProperty() taxPaise!: string;
+  @ApiProperty({ enum: ['CGST_SGST', 'IGST'], nullable: true }) taxSplit!: string | null;
+}
+class QuoteWalletView {
+  @ApiProperty() promoPaise!: string;
+  @ApiProperty() cashPaise!: string;
+}
+class QuoteSnapshotView {
+  @ApiProperty({ format: 'uuid' }) quoteId!: string;
+  @ApiProperty({ format: 'uuid' }) cartId!: string;
+  @ApiProperty() cartVersion!: number;
+  @ApiProperty({ format: 'uuid' }) userId!: string;
+  @ApiProperty({ format: 'uuid' }) storeId!: string;
+  @ApiProperty({ format: 'uuid' }) addressId!: string;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true }) referralClaimId!: string | null;
+  @ApiProperty({ enum: ['ACTIVE', 'CONSUMED', 'EXPIRED', 'SUPERSEDED'] }) status!: string;
+  @ApiProperty({ type: QuoteLineView, isArray: true }) lines!: QuoteLineView[];
+  @ApiProperty({ type: QuoteFeeView, isArray: true }) fees!: QuoteFeeView[];
+  @ApiProperty({ type: String, nullable: true }) couponCode!: string | null;
+  @ApiProperty() couponDiscountPaise!: string;
+  @ApiProperty() subtotalPaise!: string;
+  @ApiProperty() discountPaise!: string;
+  @ApiProperty() feeTotalPaise!: string;
+  @ApiProperty() taxTotalPaise!: string;
+  @ApiProperty() tipPaise!: string;
+  @ApiProperty() totalPaise!: string;
+  @ApiProperty({ type: QuoteWalletView, nullable: true }) wallet!: QuoteWalletView | null;
+  @ApiProperty() amountDuePaise!: string;
+  @ApiProperty() priceVersion!: string;
+  @ApiProperty() configVersion!: string;
+  @ApiProperty({ type: String, nullable: true }) couponFingerprint!: string | null;
+  @ApiProperty() expiresAt!: string;
+  @ApiProperty() createdAt!: string;
+  @ApiProperty({ type: QuoteIssueView, isArray: true }) issues!: QuoteIssueView[];
+}
+class QuoteCartLineView {
+  @ApiProperty({ format: 'uuid' }) variantId!: string;
+  @ApiProperty({ format: 'uuid' }) productId!: string;
+  @ApiProperty() productName!: string;
+  @ApiProperty() variantName!: string;
+  @ApiProperty({ type: String, nullable: true }) image!: string | null;
+  @ApiProperty() quantity!: string;
+  @ApiProperty() unitPricePaise!: string;
+  @ApiProperty({ type: String, nullable: true }) currentUnitPricePaise!: string | null;
+  @ApiProperty() mrpPaise!: string;
+  @ApiProperty() lineSubtotalPaise!: string;
+}
+class QuoteCartView {
+  @ApiProperty({ format: 'uuid' }) cartId!: string;
+  @ApiProperty({ format: 'uuid' }) userId!: string;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true }) storeId!: string | null;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true }) addressId!: string | null;
+  @ApiProperty() version!: number;
+  @ApiProperty({ type: String, nullable: true }) couponCode!: string | null;
+  @ApiProperty({ type: QuoteCartLineView, isArray: true }) lines!: QuoteCartLineView[];
+  @ApiProperty({ type: QuoteIssueView, isArray: true }) issues!: QuoteIssueView[];
+}
+class CheckoutQuoteView {
+  @ApiProperty({ type: QuoteSnapshotView }) quote!: QuoteSnapshotView;
+  @ApiProperty({ format: 'uuid' }) intentId!: string;
+  @ApiProperty() intentExpiresAt!: string;
+  @ApiProperty() codAvailable!: boolean;
+  @ApiProperty({ type: QuoteCartView }) cart!: QuoteCartView;
+}
+class PlacementStatusOrderView {
+  @ApiProperty({ format: 'uuid' }) orderId!: string;
+  @ApiProperty() orderNumber!: string;
+  @ApiProperty() status!: string;
+  @ApiProperty() paymentStatus!: string;
+}
+class PlacementStatusView {
+  @ApiProperty({ enum: ['ORDER_FOUND', 'PROCESSING', 'UNKNOWN'] })
+  state!: 'ORDER_FOUND' | 'PROCESSING' | 'UNKNOWN';
+  @ApiPropertyOptional({ type: PlacementStatusOrderView }) order?: PlacementStatusOrderView;
+}
 @Controller('v1/customer')
 @ApiBearerAuth()
 @AuthPolicy({ audience: 'customer' })
@@ -90,10 +195,12 @@ export class CustomerCheckoutController {
     @Inject(ORDER_CODES) private readonly codes: OrderCodes,
     @Inject(INVOICING) private readonly invoices: InvoicingOperations,
     @Inject(CUSTOMER_CHECKOUT_IDEMPOTENCY) private readonly idem: IdempotencyStore,
+    @Optional() private readonly metrics?: HttpMetrics,
   ) {}
   @Post('checkout/quote')
   @HttpCode(200)
   @ApiOperation({ operationId: 'customerCheckoutQuote' })
+  @ApiOkResponse({ type: CheckoutQuoteView })
   quote(@CurrentPrincipal() p: Principal, @Body() body: QuoteDto) {
     return this.checkout.quote(p.userId, body);
   }
@@ -113,6 +220,15 @@ export class CustomerCheckoutController {
         this.checkout.place(p.userId, { ...body, idempotencyOperationId: operationId }, owner),
       true,
     );
+  }
+  @Get('checkout/placement-status')
+  @Header('Cache-Control', 'no-store')
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
+  @ApiOkResponse({ type: PlacementStatusView })
+  @ApiOperation({ operationId: 'customerCheckoutPlacementStatus' })
+  placementStatus(@CurrentPrincipal() p: Principal, @Headers('idempotency-key') key?: string) {
+    if (!key || key.length > 150) throw new HttpException({ code: 'INVALID_INPUT' }, 400);
+    return this.checkout.placementStatus(p.userId, key);
   }
   @Get('orders')
   @ApiOperation({ operationId: 'customerOrdersList' })
@@ -159,15 +275,46 @@ export class CustomerCheckoutController {
     external = false,
   ): Promise<T> {
     if (!key || key.length > 150) throw new HttpException({ code: 'INVALID_INPUT' }, 400);
+    const claimStarted = performance.now();
     const claim = await this.idem.claim(
       { actor: p.userId, audience: 'customer', method: 'POST', resource, key },
       hashRequest(JSON.stringify(body)),
       120,
       hashCanonical(body),
     );
-    if (claim.kind === 'replay') return claim.body as T;
-    if (claim.kind === 'in_progress') throw new HttpException({ code: 'REQUEST_IN_PROGRESS' }, 409);
-    if (claim.kind !== 'claimed') throw new HttpException({ code: 'IDEMPOTENCY_KEY_REUSED' }, 409);
+    this.metrics?.observeStage('idempotency_claim', performance.now() - claimStarted);
+    if (claim.kind === 'replay') {
+      this.metrics?.observeOutcome('replay');
+      return claim.body as T;
+    }
+    if (
+      external &&
+      resource === '/v1/customer/checkout/place' &&
+      (claim.kind === 'in_progress' || claim.kind === 'response_expired')
+    ) {
+      // A committed order can exist before the response cache is completed or
+      // after it has expired. Reading it must not initiate another payment.
+      const recovered = await this.checkout.recoverCommitted(p.userId, claim.operationId);
+      if (recovered) {
+        this.metrics?.observeOutcome(
+          claim.kind === 'in_progress' ? 'in_progress' : 'response_expired',
+        );
+        return recovered as T;
+      }
+    }
+    if (claim.kind === 'in_progress') {
+      this.metrics?.observeOutcome('in_progress');
+      throw new HttpException({ code: 'REQUEST_IN_PROGRESS' }, 409);
+    }
+    if (claim.kind === 'response_expired') {
+      this.metrics?.observeOutcome('response_expired');
+      throw new HttpException({ code: 'IDEMPOTENCY_KEY_REUSED' }, 409);
+    }
+    if (claim.kind !== 'claimed') {
+      this.metrics?.observeOutcome('conflict');
+      throw new HttpException({ code: 'IDEMPOTENCY_KEY_REUSED' }, 409);
+    }
+    this.metrics?.observeOutcome('claimed');
     if (!external) {
       const response = await this.idem.execute(claim.owner, async (tx) => ({
         status: 200,

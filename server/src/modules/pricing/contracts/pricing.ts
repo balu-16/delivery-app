@@ -132,6 +132,49 @@ function feeTax(
   };
 }
 
+export interface FeeEstimateBand {
+  /** Inclusive subtotal ceiling in paise; null for the final open-ended band. */
+  upToSubtotalPaise: bigint | null;
+  deliveryPaise: bigint;
+  handlingPaise: bigint;
+  smallCartPaise: bigint;
+  surgePaise: bigint;
+}
+
+/**
+ * Delivery-settings estimate bands derived from the checkout fee rules:
+ * delivery slabs plus the free-delivery and small-cart thresholds become
+ * ordered cut points, and each band is evaluated with the same waiver logic
+ * as computeQuote (free delivery at/above the threshold for positive
+ * subtotals, small-cart fee below its threshold, flat handling, surge only
+ * when enabled). Estimates only; the quote stays authoritative.
+ */
+export function feeEstimateBands(fees: PricingFeeConfig): FeeEstimateBand[] {
+  const threshold = money(fees.freeDeliveryThresholdPaise, 'threshold');
+  const smallThreshold = money(fees.smallCartThresholdPaise, 'smallCartThreshold');
+  const cuts = new Set<bigint>();
+  for (const slab of fees.deliveryFeeSlabs) {
+    if (slab.maxOrderValuePaise !== null) cuts.add(money(slab.maxOrderValuePaise, 'slab'));
+  }
+  cuts.add(threshold);
+  cuts.add(smallThreshold);
+  const ordered = [...cuts].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const ceilings: (bigint | null)[] = [...ordered, null];
+  return ceilings.map((ceiling) => {
+    // Within a band no rule boundary is crossed, so the ceiling value
+    // represents the whole band; the open band samples just past its floor.
+    const sample = ceiling ?? (ordered.length ? ordered[ordered.length - 1]! + 1n : 1n);
+    const waived = sample >= threshold && sample > 0n;
+    return {
+      upToSubtotalPaise: ceiling,
+      deliveryPaise: waived ? 0n : deliveryFee(sample, fees),
+      handlingPaise: money(fees.handlingFeePaise, 'handling'),
+      smallCartPaise: sample < smallThreshold ? money(fees.smallCartFeePaise, 'smallCartFee') : 0n,
+      surgePaise: fees.surgeEnabled ? money(fees.surgeFeePaise, 'surge') : 0n,
+    };
+  });
+}
+
 /** Slab fees key on post-discount merchandise value; the open-ended slab must be last. */
 export function deliveryFee(merchandise: bigint, config: PricingFeeConfig): bigint {
   let previous: bigint | null = null;

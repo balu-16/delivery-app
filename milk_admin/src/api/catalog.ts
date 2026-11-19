@@ -12,7 +12,7 @@ interface ProductRow {
 }
 interface VariantRow {
   id: string; name: string; productId: string; baseUnit: 'PIECE' | 'GRAM' | 'MILLILITRE'
-  sku: string; barcode: string | null
+  sku: string; barcode: string | null; sellingPaise?:string | null; mrpPaise?:string | null
 }
 
 const mapProduct = (r: ProductRow): Product => ({
@@ -22,6 +22,7 @@ const mapProduct = (r: ProductRow): Product => ({
 })
 const mapVariant = (r: VariantRow): Variant => ({
   id: r.id, productId: r.productId, name: r.name, baseUnit: r.baseUnit, sku: r.sku, barcode: r.barcode ?? null,
+  sellingPaise:r.sellingPaise ?? null, mrpPaise:r.mrpPaise ?? null,
 })
 
 async function page<T, R>(p: Promise<BackendPage<T>>, map: (row: T) => R): Promise<CursorPage<R>> {

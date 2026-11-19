@@ -32,14 +32,13 @@ interface PriceRow {
 /** Add-time price snapshot for a cart line; stored so later reads can flag PRICE_CHANGED. */
 export async function currentPrice(
   db: DB,
-  storeId: string,
+  _storeId: string | null,
   variantId: string,
 ): Promise<PriceRow | null> {
   const result =
     await sql<PriceRow>`SELECT p.selling_paise::text AS selling_paise,p.mrp_paise::text AS mrp_paise,prod.gst_rate_bps
-    FROM catalog_prices p JOIN catalog_variants v ON v.id=p.variant_id JOIN catalog_products prod ON prod.id=v.product_id
-    WHERE p.store_id=${storeId}::uuid AND p.variant_id=${variantId}::uuid
-    AND p.valid_from<=statement_timestamp() AND (p.valid_to IS NULL OR p.valid_to>statement_timestamp())
+    FROM catalog_global_prices p JOIN catalog_variants v ON v.id=p.variant_id JOIN catalog_products prod ON prod.id=v.product_id
+    WHERE p.variant_id=${variantId}::uuid
     AND prod.published AND prod.deleted_at IS NULL AND v.deleted_at IS NULL LIMIT 1`.execute(db);
   return result.rows[0] ?? null;
 }

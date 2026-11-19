@@ -355,7 +355,7 @@ class DispatchWorkerLifecycle implements OnApplicationBootstrap, BeforeApplicati
     @Inject(DELIVERY_TASK_CANCELLATION) private readonly cancellation: DeliveryTaskCancellation,
   ) {
     this.maintenance = new DispatchMaintenance(handle.db, settings, engine, broadcasts);
-    this.consumer = new OrderConfirmedConsumer(config, codes);
+    this.consumer = new OrderConfirmedConsumer(config, codes, () => settings.trigger());
     this.trigger = new PickTriggerConsumer(() => settings.trigger());
   }
   onApplicationBootstrap(): void {

@@ -17,6 +17,7 @@ export function toCartView(cart: CartRow, lines: EvaluatedLine[], issues: QuoteI
       image: line.imageId ? `/media/${line.imageId}` : null,
       quantity: line.quantity.toString(),
       unitPricePaise: line.storedUnitPricePaise.toString(),
+      currentUnitPricePaise: line.freshUnitPricePaise?.toString() ?? null,
       mrpPaise: line.mrpPaise.toString(),
       lineSubtotalPaise: (line.storedUnitPricePaise * line.quantity).toString(),
     })),

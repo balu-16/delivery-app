@@ -148,14 +148,36 @@ export function createConfirmTools(
         if (!draft) {
           const cart = await deps.cart.get(context.userId);
           if (!cart || !cart.lines.length) throw new Error('CART_NOT_FOUND');
-          const address = (await deps.addresses.list(context.userId)).find(
-            (item) => item.id === cart.addressId,
-          );
-          if (!address) throw new Error('ADDRESS_NOT_FOUND');
+          const addresses = await deps.addresses.list(context.userId);
+          const address =
+            addresses.find((item) => item.id === cart.addressId) ??
+            addresses.find((item) => item.isDefault);
+          if (!address) {
+            if (kit.showCardOnce('delivery-address-required'))
+              runtime.writer?.({
+                event: 'card',
+                data: {
+                  cardId: uuidV7(),
+                  type: 'info',
+                  payload: {
+                    title: 'Add a delivery address',
+                    description: 'Choose where we should deliver your order.',
+                    options: [
+                      {
+                        label: 'Add address',
+                        action: 'open_screen',
+                        payload: { screen: 'addresses' },
+                      },
+                    ],
+                  },
+                },
+              });
+            throw new Error('ADDRESS_REQUIRED');
+          }
           const [quoted, delivery] = await Promise.all([
             deps.checkout
               .quote(context.userId, {
-                addressId: cart.addressId,
+                addressId: address.id,
                 ...(cart.couponCode ? { couponCode: cart.couponCode } : {}),
               })
               .catch((error: unknown) => {

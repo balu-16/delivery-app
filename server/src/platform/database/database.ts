@@ -1,4 +1,11 @@
-import { Kysely, PostgresDialect, sql, type Generated, type Transaction } from 'kysely';
+import {
+  Kysely,
+  PostgresDialect,
+  sql,
+  type Generated,
+  type PostgresPool,
+  type Transaction,
+} from 'kysely';
 import { Pool, type ClientConfig } from 'pg';
 import { Signer } from '@aws-sdk/rds-signer';
 
@@ -66,6 +73,10 @@ export interface DatabaseHandle {
   close(): Promise<void>;
 }
 
+export interface DatabaseTimingObserver {
+  observeStage(stage: 'db_acquire' | 'db_query', milliseconds: number): void;
+}
+
 export function databaseIamRegion(env: NodeJS.ProcessEnv): string | undefined {
   if (env.DATABASE_AUTH !== 'iam') return undefined;
   if (!env.AWS_REGION) throw new Error('AWS_REGION is required for IAM database authentication');
@@ -113,6 +124,7 @@ export function createDatabase(
   },
   acquireTimeoutMs = 5000,
   iamRegion?: string,
+  timing?: DatabaseTimingObserver,
 ): DatabaseHandle {
   if (
     !connectionString ||
@@ -137,7 +149,27 @@ export function createDatabase(
   // A checked-out client can fail between statements, when pg otherwise emits
   // an unhandled error. Queries still reject and the transaction cannot commit.
   pool.on('connect', (client) => client.on('error', () => onIdleError()));
-  const db = new Kysely<PlatformSchema>({ dialect: new PostgresDialect({ pool }) });
+  const measuredPool: PostgresPool = timing
+    ? {
+        Client: (pool as unknown as { Client?: PostgresPool['Client'] }).Client,
+        options: pool.options,
+        async connect() {
+          const started = performance.now();
+          try {
+            return await pool.connect();
+          } finally {
+            timing.observeStage('db_acquire', performance.now() - started);
+          }
+        },
+        end: () => pool.end(),
+      }
+    : pool;
+  const db = new Kysely<PlatformSchema>({
+    dialect: new PostgresDialect({ pool: measuredPool }),
+    ...(timing
+      ? { log: (event) => timing.observeStage('db_query', event.queryDurationMillis) }
+      : {}),
+  });
   return {
     db,
     stats: () => ({ total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount }),

@@ -99,6 +99,7 @@ export interface CatalogPreviewItem {
   name: string;
   description: string;
   categoryId: string;
+  categoryName: string;
   variantId: string;
   variantName: string;
   sellingPaise: string;
