@@ -166,12 +166,172 @@ export class PostgresCatalogAdmin extends CatalogWrite implements CatalogAdmin {
       [],
     );
   }
-  setAssortment(actor: string, store: string, variant: string): Promise<void> {
-    return this.mutate(actor, 'ASSORTMENT_ADDED', variant, async (tx) => {
-      await sql`INSERT INTO store_inventory(store_id,variant_id) VALUES(${store}::uuid,${variant}::uuid) ON CONFLICT DO NOTHING`.execute(
+  setAssortment(actor: string, store: string, variant: string, active = true): Promise<void> {
+    return this.mutate(actor, 'ASSORTMENT_CHANGED', variant, async (tx) => {
+      // Same store/variant row locks as the reservation path (lockStock order).
+      await sql`SELECT id FROM stores WHERE id=${store}::uuid FOR SHARE`.execute(tx);
+      await sql`SELECT id FROM catalog_variants WHERE id=${variant}::uuid FOR SHARE`.execute(tx);
+      const locked = await sql<{
+        listed: boolean;
+      }>`SELECT listed FROM store_inventory WHERE store_id=${store}::uuid AND variant_id=${variant}::uuid FOR UPDATE`.execute(
+        tx,
+      );
+      if (locked.rows.length) {
+        if (locked.rows[0]!.listed === active) return; // idempotent no-op
+        await sql`UPDATE store_inventory SET listed=${active} WHERE store_id=${store}::uuid AND variant_id=${variant}::uuid`.execute(
+          tx,
+        );
+        await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,${actor}::uuid,'ASSORTMENT_LISTING_CHANGED','catalog',${variant},${JSON.stringify({ storeId: store, variantId: variant, listed: active })}::jsonb)`.execute(
+          tx,
+        );
+        return;
+      }
+      if (!active) return; // withdrawing a missing pair is a no-op
+      const storeCheck = await sql<{
+        id: string;
+      }>`SELECT id FROM stores WHERE id=${store}::uuid`.execute(tx);
+      const variantCheck = await sql<{
+        id: string;
+      }>`SELECT id FROM catalog_variants WHERE id=${variant}::uuid AND deleted_at IS NULL`.execute(
+        tx,
+      );
+      if (!storeCheck.rows.length || !variantCheck.rows.length)
+        throw new Error('RESOURCE_NOT_FOUND');
+      await sql`INSERT INTO store_inventory(store_id,variant_id,listed) VALUES(${store}::uuid,${variant}::uuid,true) ON CONFLICT DO NOTHING`.execute(
+        tx,
+      );
+      await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,${actor}::uuid,'ASSORTMENT_LISTING_CHANGED','catalog',${variant},${JSON.stringify({ storeId: store, variantId: variant, listed: true })}::jsonb)`.execute(
         tx,
       );
     });
+  }
+  async listAssortment(
+    actor: string,
+    variantId: string,
+    limit = 50,
+    cursor?: string,
+  ): Promise<{
+    items: Array<{ storeId: string; storeName: string; listed: boolean }>;
+    nextCursor: string | null;
+  }> {
+    if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INVALID_PAGE');
+    const variant = await sql<{
+      id: string;
+    }>`SELECT id FROM catalog_variants WHERE id=${variantId}::uuid AND deleted_at IS NULL`.execute(
+      this.db,
+    );
+    if (!variant.rows.length) throw new Error('RESOURCE_NOT_FOUND');
+    const result = await sql<{
+      store_id: string;
+      store_name: string;
+      listed: boolean;
+    }>`SELECT s.id::text AS store_id,s.name AS store_name,COALESCE(i.listed,true) AS listed FROM stores s LEFT JOIN store_inventory i ON i.store_id=s.id AND i.variant_id=${variantId}::uuid WHERE (${cursor ?? null}::uuid IS NULL OR s.id>${cursor ?? null}::uuid) ORDER BY s.id LIMIT ${limit + 1}`.execute(
+      this.db,
+    );
+    const items = result.rows.slice(0, limit).map((r) => ({
+      storeId: r.store_id,
+      storeName: r.store_name,
+      listed: r.listed,
+    }));
+    return { items, nextCursor: result.rows.length > limit ? items.at(-1)!.storeId : null };
+  }
+  async listImages(
+    actor: string,
+    productId: string,
+  ): Promise<{
+    items: Array<{ mediaId: string; url: string; position: number }>;
+    revision: string;
+  }> {
+    if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
+    const product = await sql<{
+      image_revision: string;
+    }>`SELECT image_revision::text AS image_revision FROM catalog_products WHERE id=${productId}::uuid AND deleted_at IS NULL`.execute(
+      this.db,
+    );
+    if (!product.rows.length) throw new Error('RESOURCE_NOT_FOUND');
+    const rows = await sql<{
+      media_id: string;
+      position: number;
+    }>`SELECT im.media_id::text AS media_id,im.position FROM catalog_product_images im JOIN catalog_media m ON m.id=im.media_id WHERE im.product_id=${productId}::uuid AND m.state='REGISTERED' AND m.purpose='PRODUCT_IMAGE' ORDER BY im.position,im.media_id`.execute(
+      this.db,
+    );
+    return {
+      items: rows.rows.map((r) => ({
+        mediaId: r.media_id,
+        url: `/media/${r.media_id}`,
+        position: r.position,
+      })),
+      revision: product.rows[0]!.image_revision,
+    };
+  }
+  async replaceImages(
+    actor: string,
+    productId: string,
+    mediaIds: string[],
+    expectedRevision: string,
+  ): Promise<{
+    items: Array<{ mediaId: string; url: string; position: number }>;
+    revision: string;
+  }> {
+    if (!Array.isArray(mediaIds) || mediaIds.length > 20) throw new Error('INVALID_MEDIA');
+    if (new Set(mediaIds).size !== mediaIds.length) throw new Error('INVALID_MEDIA');
+    return this.mutate(actor, 'CATALOG_IMAGES_CHANGED', productId, async (tx) => {
+      const product = await sql<{
+        published: boolean;
+        image_revision: string;
+      }>`SELECT published,image_revision::text AS image_revision FROM catalog_products WHERE id=${productId}::uuid AND deleted_at IS NULL FOR UPDATE`.execute(
+        tx,
+      );
+      if (!product.rows.length) throw new Error('RESOURCE_NOT_FOUND');
+      if (product.rows[0]!.image_revision !== expectedRevision)
+        throw new Error('CONCURRENT_MODIFICATION');
+      if (product.rows[0]!.published && mediaIds.length === 0)
+        throw new Error('PRODUCT_NOT_PUBLISHABLE');
+      if (mediaIds.length) {
+        const registered = await sql<{
+          media_id: string;
+        }>`SELECT im.media_id::text AS media_id FROM catalog_product_images im JOIN catalog_media m ON m.id=im.media_id WHERE im.product_id=${productId}::uuid AND im.media_id=ANY(${mediaIds}::uuid[]) AND m.state='REGISTERED' AND m.purpose='PRODUCT_IMAGE'`.execute(
+          tx,
+        );
+        if (registered.rows.length !== mediaIds.length) throw new Error('MEDIA_NOT_FOUND');
+      }
+      await sql`DELETE FROM catalog_product_images WHERE product_id=${productId}::uuid`.execute(tx);
+      for (let i = 0; i < mediaIds.length; i++) {
+        await sql`INSERT INTO catalog_product_images(product_id,media_id,position) VALUES(${productId}::uuid,${mediaIds[i]!}::uuid,${i})`.execute(
+          tx,
+        );
+      }
+      const bumped = await sql<{
+        image_revision: string;
+      }>`UPDATE catalog_products SET image_revision=image_revision+1 WHERE id=${productId}::uuid RETURNING image_revision::text AS image_revision`.execute(
+        tx,
+      );
+      return this.listImagesInTx(tx, productId, bumped.rows[0]!.image_revision);
+    });
+  }
+  private async listImagesInTx(
+    tx: TransactionContext,
+    productId: string,
+    revision: string,
+  ): Promise<{
+    items: Array<{ mediaId: string; url: string; position: number }>;
+    revision: string;
+  }> {
+    const rows = await sql<{
+      media_id: string;
+      position: number;
+    }>`SELECT im.media_id::text AS media_id,im.position FROM catalog_product_images im JOIN catalog_media m ON m.id=im.media_id WHERE im.product_id=${productId}::uuid AND m.state='REGISTERED' AND m.purpose='PRODUCT_IMAGE' ORDER BY im.position,im.media_id`.execute(
+      tx,
+    );
+    return {
+      items: rows.rows.map((r) => ({
+        mediaId: r.media_id,
+        url: `/media/${r.media_id}`,
+        position: r.position,
+      })),
+      revision,
+    };
   }
   synonym(actor: string, term: string, expansion: string | null): Promise<void> {
     const key = normalizeSearch(term),

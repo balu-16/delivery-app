@@ -8,11 +8,28 @@ import {
   FEATURE_FLAG_KEYS,
   type AdminConfig,
   type AppConfig,
+  type ConfigChange,
+  type ConfigChangeResult,
   type ConfigKey,
   type ConfigValues,
   type DeliveryFeeSlab,
   type FeatureFlagKey,
 } from '../contracts/config.js';
+
+function assertVersion(expected: string | undefined, actual: string): void {
+  if (expected === undefined) return;
+  if (!/^\d+$/.test(expected)) throw new Error('CONCURRENT_MODIFICATION');
+  if (BigInt(expected) !== BigInt(actual)) throw new Error('CONCURRENT_MODIFICATION');
+}
+
+async function assertSuperAdmin(actorId: string, tx: TransactionContext): Promise<void> {
+  const authorized = await sql<{
+    id: string;
+  }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role='SUPER_ADMIN' FOR SHARE OF u,r`.execute(
+    tx,
+  );
+  if (!authorized.rows[0]) throw new Error('FORBIDDEN');
+}
 
 const paise = z.string().regex(/^[0-9]+$/, 'paise must be a nonnegative decimal string');
 const feeSlabs = z
@@ -174,6 +191,14 @@ const definitions = {
   pickingWeightToleranceBps: z.number().int().min(0).max(10000).default(0),
   pickingDisconnectMinutes: z.number().int().min(1).max(1440).default(15),
   pickingShortRateAlertBps: z.number().int().min(1).max(10000).default(2500),
+  referralIssuanceEnabled: z.boolean().default(true),
+  // Positive paise within the wallet ledger's bigint range (amount_paise > 0).
+  referralRewardPaise: paise
+    .refine((v) => BigInt(v) >= 1n && BigInt(v) <= 9223372036854775807n, {
+      message: 'referral reward must be a positive paise amount within wallet range',
+    })
+    .default('1000'),
+  referralCreditExpiryMonths: z.number().int().min(1).max(12).default(1),
 } satisfies { [K in ConfigKey]: z.ZodType<ConfigValues[K], unknown> };
 const configSchema = z
   .object(definitions)
@@ -269,6 +294,14 @@ export class ConfigService implements AppConfig, AdminConfig {
       if (!Object.hasOwn(definitions, key)) throw new Error('INVALID_CONFIG_KEY');
     }
     if (keys.length === 0) return {} as Pick<ConfigValues, K>;
+    // In-transaction readers always take the shared side of the 701001 lock
+    // before reading app_config, so they serialize with exclusive config
+    // writers (update, setFlag, changeAddress, slot admin). Writers take the
+    // exclusive lock first and readers never upgrade, so this cannot create an
+    // upgrade deadlock; a writer that already holds the lock (same tx)
+    // requests shared without self-conflict. Readers without a tx keep the
+    // cached snapshot path and take no lock.
+    if (tx) await sql`SELECT pg_advisory_xact_lock_shared(701001)`.execute(tx);
     const result = await sql<{
       key: K;
       value: Json;
@@ -294,21 +327,23 @@ export class ConfigService implements AppConfig, AdminConfig {
   invalidate(): void {
     this.cache.clear();
   }
-  async update(actorId: string, key: ConfigKey, value: unknown): Promise<void> {
+  async update(
+    actorId: string,
+    key: ConfigKey,
+    value: unknown,
+    expectedVersion?: string,
+  ): Promise<void> {
     if (!Object.hasOwn(definitions, key)) throw new Error('INVALID_CONFIG_KEY');
     const parsed = definitions[key].parse(value);
     await this.db.transaction().execute(async (tx) => {
       await sql`SELECT pg_advisory_xact_lock(701001)`.execute(tx);
-      const authorized = await sql<{
-        id: string;
-      }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role='SUPER_ADMIN' FOR SHARE OF u,r`.execute(
-        tx,
-      );
-      if (!authorized.rows[0]) throw new Error('FORBIDDEN');
+      await assertSuperAdmin(actorId, tx);
       const values = await sql<{
         key: ConfigKey;
         value: Json;
-      }>`SELECT key,value FROM app_config`.execute(tx);
+        version: string;
+      }>`SELECT key,value,version::text AS version FROM app_config`.execute(tx);
+      assertVersion(expectedVersion, values.rows.find((row) => row.key === key)?.version ?? '0');
       const previous = values.rows.find((row) => row.key === key)?.value ?? null;
       const input: Record<string, unknown> = Object.fromEntries(
         values.rows.map((r) => [r.key, r.value]),
@@ -340,19 +375,122 @@ export class ConfigService implements AppConfig, AdminConfig {
     });
     this.invalidate();
   }
-  async snapshot(): Promise<{ config: ConfigValues; flags: Record<FeatureFlagKey, boolean> }> {
+  /**
+   * Atomic multi-key write. Validates every per-key schema plus the combined
+   * result before writing any row; a stale `expectedVersion` (or a duplicate
+   * or unknown key) aborts the whole batch with no partial write.
+   */
+  async updateBatch(
+    actorId: string,
+    changes: readonly ConfigChange[],
+  ): Promise<ConfigChangeResult[]> {
+    if (!changes.length) throw new Error('INVALID_CONFIG_KEY');
+    const keys = changes.map((change) => change.key);
+    if (new Set(keys).size !== keys.length) throw new Error('DUPLICATE_CONFIG_KEY');
+    for (const change of changes) {
+      if (!Object.hasOwn(definitions, change.key)) throw new Error('INVALID_CONFIG_KEY');
+    }
+    const parsed = changes.map((change) => ({
+      key: change.key,
+      value: definitions[change.key].parse(change.value) as unknown,
+      expectedVersion: change.expectedVersion,
+    }));
+    const result = await this.db
+      .transaction()
+      .execute(async (tx): Promise<ConfigChangeResult[]> => {
+        await sql`SELECT pg_advisory_xact_lock(701001)`.execute(tx);
+        await assertSuperAdmin(actorId, tx);
+        const rows = await sql<{
+          key: ConfigKey;
+          value: Json;
+          version: string;
+        }>`SELECT key,value,version::text AS version FROM app_config`.execute(tx);
+        const current = new Map(rows.rows.map((row) => [row.key, row]));
+        for (const change of parsed) {
+          assertVersion(change.expectedVersion, current.get(change.key)?.version ?? '0');
+        }
+        const input: Record<string, unknown> = Object.fromEntries(
+          rows.rows.map((row) => [row.key, row.value]),
+        );
+        for (const change of parsed) input[change.key] = change.value;
+        const next = configSchema.parse(input);
+        if (
+          parsed.some((change) =>
+            ['subscriptionGraceDeadlineTime', 'subscriptionDispatchLeadMinutes'].includes(
+              change.key,
+            ),
+          )
+        ) {
+          const schema = await sql<{
+            present: string | null;
+          }>`SELECT to_regclass('subscription_slots')::text AS present`.execute(tx);
+          if (schema.rows[0]?.present) {
+            const invalid = await sql`SELECT id FROM subscription_slots WHERE active AND
+            (extract(epoch FROM start_time)/60 - ${next.subscriptionDispatchLeadMinutes}) <= extract(epoch FROM ${next.subscriptionGraceDeadlineTime}::time)/60 LIMIT 1`.execute(
+              tx,
+            );
+            if (invalid.rows.length) throw new Error('INVALID_SLOT_TIMING');
+          }
+        }
+        const out: ConfigChangeResult[] = [];
+        for (const change of parsed) {
+          const previous = current.get(change.key)?.value ?? null;
+          const written = await sql<{
+            version: string;
+          }>`INSERT INTO app_config(key,value,updated_by) VALUES (${change.key},${JSON.stringify(change.value)}::jsonb,${actorId}::uuid)
+        ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,version=app_config.version+1,updated_by=EXCLUDED.updated_by,updated_at=clock_timestamp()
+        RETURNING version::text AS version`.execute(tx);
+          const version =
+            written.rows[0]?.version ??
+            String(BigInt(current.get(change.key)?.version ?? '0') + 1n);
+          await sql`INSERT INTO config_history(id,actor_id,key,old_value,new_value) VALUES (${uuidV7()}::uuid,${actorId}::uuid,${change.key},${JSON.stringify(previous)}::jsonb,${JSON.stringify(change.value)}::jsonb)`.execute(
+            tx,
+          );
+          await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES (${uuidV7()}::uuid,${actorId}::uuid,'CONFIG_CHANGED','app_config',${change.key},${JSON.stringify({ before: previous, after: change.value })}::jsonb)`.execute(
+            tx,
+          );
+          out.push({ key: change.key, value: change.value, version });
+        }
+        return out;
+      });
+    this.invalidate();
+    return result;
+  }
+  async snapshot(): Promise<{
+    config: ConfigValues;
+    flags: Record<FeatureFlagKey, boolean>;
+    configRevisions: Record<string, string>;
+    flagRevisions: Record<string, string>;
+  }> {
     const config = await this.getMany(Object.keys(definitions) as ConfigKey[]);
+    const configRows = await sql<{
+      key: ConfigKey;
+      version: string;
+    }>`SELECT key,version::text AS version FROM app_config`.execute(this.db);
+    const configRevisions = Object.fromEntries(
+      (Object.keys(definitions) as ConfigKey[]).map((key) => [
+        key,
+        configRows.rows.find((row) => row.key === key)?.version ?? '0',
+      ]),
+    );
     const rows = await sql<{
       key: FeatureFlagKey;
       enabled: boolean;
-    }>`SELECT key,enabled FROM feature_flags`.execute(this.db);
+      version: string;
+    }>`SELECT key,enabled,version::text AS version FROM feature_flags`.execute(this.db);
     const flags = Object.fromEntries(
       FEATURE_FLAG_KEYS.map((key) => [
         key,
         rows.rows.find((row) => row.key === key)?.enabled ?? false,
       ]),
     ) as Record<FeatureFlagKey, boolean>;
-    return { config, flags };
+    const flagRevisions = Object.fromEntries(
+      FEATURE_FLAG_KEYS.map((key) => [
+        key,
+        rows.rows.find((row) => row.key === key)?.version ?? '0',
+      ]),
+    );
+    return { config, flags, configRevisions, flagRevisions };
   }
   async flag(key: FeatureFlagKey, tx?: TransactionContext): Promise<boolean> {
     if (!(FEATURE_FLAG_KEYS as readonly string[]).includes(key)) throw new Error('INVALID_FLAG');
@@ -361,32 +499,25 @@ export class ConfigService implements AppConfig, AdminConfig {
     }>`SELECT enabled FROM feature_flags WHERE key=${key}`.execute(tx ?? this.db);
     return result.rows[0]?.enabled === true;
   }
-  async setFlag(actorId: string, key: FeatureFlagKey, enabled: boolean): Promise<void> {
+  async setFlag(
+    actorId: string,
+    key: FeatureFlagKey,
+    enabled: boolean,
+    expectedVersion?: string,
+  ): Promise<void> {
     if (!(FEATURE_FLAG_KEYS as readonly string[]).includes(key) || typeof enabled !== 'boolean')
       throw new Error('INVALID_FLAG');
     await this.db.transaction().execute(async (tx) => {
       await sql`SELECT pg_advisory_xact_lock(701001)`.execute(tx);
-      const actor = await sql<{
-        id: string;
-      }>`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE u.id=${actorId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' AND r.role='SUPER_ADMIN' FOR SHARE OF u,r`.execute(
-        tx,
-      );
-      if (!actor.rows[0]) throw new Error('FORBIDDEN');
-      if (key === 'subscriptions_enabled' && enabled) {
-        const wallet = await sql<{
-          enabled: boolean;
-        }>`SELECT enabled FROM feature_flags WHERE key='wallet_enabled'`.execute(tx);
-        if (!wallet.rows[0]?.enabled) throw new Error('WALLET_REQUIRED_FOR_SUBSCRIPTIONS');
-      }
-      if (key === 'wallet_enabled' && !enabled) {
-        const subscriptions = await sql<{
-          enabled: boolean;
-        }>`SELECT enabled FROM feature_flags WHERE key='subscriptions_enabled'`.execute(tx);
-        if (subscriptions.rows[0]?.enabled) throw new Error('WALLET_REQUIRED_FOR_SUBSCRIPTIONS');
-      }
+      await assertSuperAdmin(actorId, tx);
+      // Retired subscriptions can never be re-enabled; the wallet flag no
+      // longer depends on the retired flag (plan3 section 7).
+      if (key === 'subscriptions_enabled' && enabled) throw new Error('SUBSCRIPTIONS_RETIRED');
       const old = await sql<{
         enabled: boolean;
-      }>`SELECT enabled FROM feature_flags WHERE key=${key}`.execute(tx);
+        version: string;
+      }>`SELECT enabled,version::text AS version FROM feature_flags WHERE key=${key}`.execute(tx);
+      assertVersion(expectedVersion, old.rows[0]?.version ?? '0');
       await sql`INSERT INTO feature_flags(key,enabled,updated_by) VALUES (${key},${enabled},${actorId}::uuid) ON CONFLICT(key) DO UPDATE SET enabled=EXCLUDED.enabled,version=feature_flags.version+1,updated_by=EXCLUDED.updated_by,updated_at=clock_timestamp()`.execute(
         tx,
       );

@@ -108,7 +108,7 @@ it('places and confirms a real wallet-funded scheduled order in the caller trans
   });
 });
 
-it('batches calendar estimates, keeps different dates distinct, and preserves unavailable estimates', async () => {
+it('returns the empty retired calendar without batch estimates', async () => {
   const { SubscriptionsService } =
     await import('../../../src/modules/subscriptions/infrastructure/subscriptions-service.js');
   const user = uuidV7(),
@@ -164,19 +164,10 @@ it('batches calendar estimates, keeps different dates distinct, and preserves un
     checkout,
   );
   const calendar = await service.calendar(user, '2040-05', 10);
-  expect(calls).toBe(1);
-  expect(seen).toHaveLength(62);
-  expect(new Set(seen.map((input) => input.slotStart)).size).toBe(31);
-  const first = calendar.items.find((item) => item.subscriptionId === ids[0])!.deliveries;
-  const second = calendar.items.find((item) => item.subscriptionId === ids[1])!.deliveries;
-  const third = calendar.items.find((item) => item.subscriptionId === ids[2])!.deliveries;
-  expect(first.find((delivery) => delivery.date === '2040-05-05')).toMatchObject({
-    status: 'SKIPPED',
-    amountPaise: null,
-  });
-  expect(second.find((delivery) => delivery.date === '2040-05-05')?.amountPaise).toBe('100');
-  expect(third.find((delivery) => delivery.date === '2040-05-05')?.amountPaise).toBe('200');
-  expect(second.find((delivery) => delivery.date === '2040-05-10')?.amountPaise).toBeNull();
+  // Retired: empty compat response, no batch pricing calls.
+  expect(calls).toBe(0);
+  expect(seen).toHaveLength(0);
+  expect(calendar).toEqual({ items: [], nextCursor: null });
 });
 
 it('isolates a bad estimate and preserves real scheduled pricing for later deliveries in the batch', async () => {
@@ -207,7 +198,7 @@ it('isolates a bad estimate and preserves real scheduled pricing for later deliv
   expect(results).toEqual([null, expected, null, expected]);
 });
 
-it('serializes simultaneous generation and records one occurrence, order and debit', async () => {
+it('records one retired occurrence with zero orders and debits', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -251,10 +242,10 @@ it('serializes simultaneous generation and records one occurrence, order and deb
   }>`SELECT o.state,(SELECT count(*)::text FROM orders WHERE metadata->>'subscriptionId'=${subscription}) AS orders,(SELECT count(*)::text FROM wallet_ledger l JOIN orders x ON l.ref_id=x.id::text WHERE x.metadata->>'subscriptionId'=${subscription} AND l.reason='ORDER_PAYMENT') AS debits,(SELECT reserved::text FROM store_inventory WHERE store_id=${world.store}::uuid AND variant_id=${variant.id}::uuid) AS reserved FROM subscription_occurrences o WHERE subscription_id=${subscription}::uuid AND delivery_date=${today}::date`.execute(
     world.db.db,
   );
-  expect(effect.rows).toEqual([{ state: 'ORDERED', orders: '1', debits: '1', reserved: '1' }]);
+  expect(effect.rows).toEqual([{ state: 'SKIPPED', orders: '0', debits: '0', reserved: '0' }]);
 });
 
-it('reuses a low-balance occurrence after top-up without creating duplicate obligations', async () => {
+it('retires a low-balance occurrence without retry or later revival', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -298,7 +289,7 @@ it('reuses a low-balance occurrence after top-up without creating duplicate obli
   }>`SELECT state,order_id::text FROM subscription_occurrences WHERE subscription_id=${subscription}::uuid`.execute(
     world.db.db,
   );
-  expect(retry.rows).toEqual([{ state: 'RETRYABLE', order_id: null }]);
+  expect(retry.rows).toEqual([{ state: 'SKIPPED', order_id: null }]);
   await sql`UPDATE wallet_accounts SET cash_balance_paise=10000 WHERE user_id=${world.customer}::uuid`.execute(
     world.db.db,
   );
@@ -314,10 +305,10 @@ it('reuses a low-balance occurrence after top-up without creating duplicate obli
   }>`SELECT o.state,(SELECT count(*)::text FROM orders WHERE metadata->>'subscriptionId'=${subscription}) AS orders,(SELECT count(*)::text FROM wallet_ledger l JOIN orders x ON l.ref_id=x.id::text WHERE x.metadata->>'subscriptionId'=${subscription} AND l.reason='ORDER_PAYMENT') AS debits FROM subscription_occurrences o WHERE o.subscription_id=${subscription}::uuid`.execute(
     world.db.db,
   );
-  expect(result.rows).toEqual([{ state: 'ORDERED', orders: '1', debits: '1' }]);
+  expect(result.rows).toEqual([{ state: 'SKIPPED', orders: '0', debits: '0' }]);
 });
 
-it('extends inclusive end date once for a holiday and records a terminal outcome on replay', async () => {
+it('retires a holiday occurrence without extending the end date', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -368,15 +359,12 @@ it('extends inclusive end date once for a holiday and records a terminal outcome
   }>`SELECT s.end_date::text,s.next_delivery_date::text AS next_date,o.state,o.reason,(SELECT count(*)::text FROM subscription_occurrences WHERE subscription_id=s.id) AS count FROM subscriptions s JOIN subscription_occurrences o ON o.subscription_id=s.id WHERE s.id=${subscription}::uuid`.execute(
     world.db.db,
   );
-  const expected = (
-    await sql<{ date: string }>`SELECT (${date}::date+1)::text AS date`.execute(world.db.db)
-  ).rows[0]!.date;
   expect(result.rows).toEqual([
     {
-      end_date: expected,
-      next_date: expected,
+      end_date: date,
+      next_date: date,
       state: 'SKIPPED',
-      reason: 'SKIPPED_HOLIDAY',
+      reason: 'SUBSCRIPTIONS_RETIRED',
       count: '1',
     },
   ]);
@@ -408,7 +396,7 @@ it('pauses active subscriptions atomically when their address is removed', async
   expect(result.rows).toEqual([{ status: 'PAUSED', deleted: true, alerts: '1' }]);
 });
 
-it('serializes slot admission against incompatible grace configuration', async () => {
+it('rejects retired slot admission while grace validation still holds', async () => {
   const { SUBSCRIPTION_ADMIN } =
     await import('../../../src/modules/subscriptions/contracts/subscriptions.js');
   const { ADMIN_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -426,7 +414,7 @@ it('serializes slot admission against incompatible grace configuration', async (
   await sql`UPDATE subscription_slots SET active=false WHERE store_id=${world.store}::uuid`.execute(
     world.db.db,
   );
-  const results = await Promise.allSettled([
+  await expect(
     admin.saveSlot(world.admin, {
       storeId: world.store,
       name: uuidV7(),
@@ -434,9 +422,8 @@ it('serializes slot admission against incompatible grace configuration', async (
       endTime: '09:00',
       active: true,
     }),
-    config.update(world.admin, 'subscriptionGraceDeadlineTime', '05:40'),
-  ]);
-  expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+  ).rejects.toThrow('SUBSCRIPTIONS_RETIRED');
+  await config.update(world.admin, 'subscriptionGraceDeadlineTime', '05:40');
   const invalid = await sql<{
     n: string;
   }>`SELECT count(*)::text AS n FROM subscription_slots s WHERE s.active AND (extract(epoch FROM start_time)/60 - COALESCE((SELECT (value #>> '{}')::int FROM app_config WHERE key='subscriptionDispatchLeadMinutes'),30)) <= extract(epoch FROM COALESCE((SELECT value #>> '{}' FROM app_config WHERE key='subscriptionGraceDeadlineTime'),'05:25')::time)/60`.execute(
@@ -445,7 +432,7 @@ it('serializes slot admission against incompatible grace configuration', async (
   expect(invalid.rows[0]?.n).toBe('0');
 });
 
-it('persists and deduplicates projected low balance and price increase alerts', async () => {
+it('creates no forecast alerts after retirement', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -496,19 +483,16 @@ it('persists and deduplicates projected low balance and price increase alerts', 
   }>`SELECT kind,count(*)::text AS n FROM subscription_alerts WHERE subscription_id=${subscription}::uuid GROUP BY kind ORDER BY kind`.execute(
     world.db.db,
   );
-  expect(alerts.rows).toEqual([
-    { kind: 'LOW_BALANCE', n: '1' },
-    { kind: 'PRICE_INCREASE', n: '1' },
-  ]);
+  expect(alerts.rows).toEqual([]);
   const deliveries = await sql<{
     n: string;
   }>`SELECT count(*)::text AS n FROM outbox_events e JOIN outbox_deliveries d ON d.event_id=e.id WHERE e.payload->>'subscriptionId'=${subscription} AND e.event_type IN ('subscription.low_balance','subscription.price_increase') AND d.consumer='notifications'`.execute(
     world.db.db,
   );
-  expect(deliveries.rows[0]?.n).toBe('2');
+  expect(deliveries.rows[0]?.n).toBe('0');
 });
 
-it('uses HTTP idempotency, rejects key reuse, and hides another customer subscription', async () => {
+it('retires HTTP subscription writes and serves empty compat reads', async () => {
   const http = app.getHttpAdapter().getInstance();
   const issue = async (sub: string) => {
     const response = await http.inject({
@@ -552,8 +536,8 @@ it('uses HTTP idempotency, rejects key reuse, and hides another customer subscri
     headers: { authorization: `Bearer ${customer}`, 'idempotency-key': uuidV7() },
     payload: { ...payload, frequencyRule: { type: 'DAILY', unexpected: 'canary' } },
   });
-  expect(invalidFrequency.statusCode).toBe(400);
-  expect(invalidFrequency.json().code).toBe('INVALID_FREQUENCY');
+  expect(invalidFrequency.statusCode).toBe(410);
+  expect(invalidFrequency.json().code).toBe('SUBSCRIPTIONS_RETIRED');
   expect(invalidFrequency.body).not.toContain('canary');
   const created = await http.inject({
     method: 'POST',
@@ -561,66 +545,101 @@ it('uses HTTP idempotency, rejects key reuse, and hides another customer subscri
     headers,
     payload,
   });
-  expect(created.statusCode).toBe(201);
+  expect(created.statusCode).toBe(410);
+  expect(created.json().code).toBe('SUBSCRIPTIONS_RETIRED');
   const replay = await http.inject({
     method: 'POST',
     url: '/v1/customer/subscriptions',
     headers,
     payload,
   });
-  expect(replay.statusCode).toBe(201);
-  expect(replay.json()).toEqual(created.json());
+  expect(replay.statusCode).toBe(410);
+  expect(replay.json().code).toBe('SUBSCRIPTIONS_RETIRED');
   const reused = await http.inject({
     method: 'POST',
     url: '/v1/customer/subscriptions',
     headers,
     payload: { ...payload, quantity: '2' },
   });
-  expect(reused.statusCode).toBe(409);
+  expect(reused.statusCode).toBe(410);
+  const emptyList = await http.inject({
+    method: 'GET',
+    url: '/v1/customer/subscriptions',
+    headers: { authorization: `Bearer ${customer}` },
+  });
+  expect(emptyList.statusCode).toBe(200);
+  expect(emptyList.json()).toEqual({ items: [], nextCursor: null });
+  const options = await http.inject({
+    method: 'GET',
+    url: `/v1/customer/subscriptions/options?addressId=${world.address}&variantId=${variant.id}`,
+    headers: { authorization: `Bearer ${customer}` },
+  });
+  expect(options.statusCode).toBe(200);
+  expect(options.json()).toMatchObject({ enabled: false, eligible: false, slots: [] });
+  const id = uuidV7();
+  await sql`INSERT INTO subscriptions(id,user_id,plan_id,store_id,address_id,start_date,status) VALUES(${id}::uuid,${world.customer}::uuid,${plan}::uuid,${world.store}::uuid,${world.address}::uuid,current_date,'ACTIVE')`.execute(
+    world.db.db,
+  );
+  await sql`INSERT INTO subscription_schedule_versions(id,subscription_id,effective_from,quantity,frequency_rule,slot_id) VALUES(${uuidV7()}::uuid,${id}::uuid,${start}::date,1,'{"type":"DAILY"}'::jsonb,${slot}::uuid)`.execute(
+    world.db.db,
+  );
   const foreign = await http.inject({
     method: 'GET',
-    url: `/v1/customer/subscriptions/${created.json().id}`,
+    url: `/v1/customer/subscriptions/${id}`,
     headers: { authorization: `Bearer ${other}` },
   });
   expect(foreign.statusCode).toBe(404);
-  const id = created.json().id as string;
   const beforeForeignChanges = await http.inject({
     method: 'GET',
     url: `/v1/customer/subscriptions/${id}`,
     headers: { authorization: `Bearer ${customer}` },
   });
-  expect(beforeForeignChanges.statusCode).toBe(200);
+  expect(beforeForeignChanges.statusCode).toBe(404);
   const invalidChange = await http.inject({
     method: 'PATCH',
     url: `/v1/customer/subscriptions/${id}`,
     headers: { authorization: `Bearer ${customer}`, 'idempotency-key': uuidV7() },
     payload: { frequencyRule: { type: 'WEEKDAYS', days: [1, 3], unexpected: 'canary' } },
   });
-  expect(invalidChange.statusCode).toBe(400);
-  expect(invalidChange.json().code).toBe('INVALID_FREQUENCY');
+  expect(invalidChange.statusCode).toBe(410);
+  expect(invalidChange.json().code).toBe('SUBSCRIPTIONS_RETIRED');
   expect(invalidChange.body).not.toContain('canary');
-  const foreignOperations = [
-    { method: 'GET' as const, url: `/v1/customer/subscriptions/${id}/upcoming` },
+  for (const operation of [
+    { method: 'GET' as const, url: `/v1/customer/subscriptions/${id}/upcoming`, expected: 200 },
     {
       method: 'PATCH' as const,
       url: `/v1/customer/subscriptions/${id}`,
       payload: { quantity: '3' },
+      expected: 410,
     },
     {
       method: 'POST' as const,
       url: `/v1/customer/subscriptions/${id}/pause`,
       payload: { from: start, to: start },
+      expected: 410,
     },
-    { method: 'POST' as const, url: `/v1/customer/subscriptions/${id}/resume` },
+    {
+      method: 'POST' as const,
+      url: `/v1/customer/subscriptions/${id}/resume`,
+      expected: 410,
+    },
     {
       method: 'POST' as const,
       url: `/v1/customer/subscriptions/${id}/skip`,
       payload: { date: start },
+      expected: 410,
     },
-    { method: 'DELETE' as const, url: `/v1/customer/subscriptions/${id}/skip/${start}` },
-    { method: 'POST' as const, url: `/v1/customer/subscriptions/${id}/cancel` },
-  ];
-  for (const operation of foreignOperations) {
+    {
+      method: 'DELETE' as const,
+      url: `/v1/customer/subscriptions/${id}/skip/${start}`,
+      expected: 410,
+    },
+    {
+      method: 'POST' as const,
+      url: `/v1/customer/subscriptions/${id}/cancel`,
+      expected: 404,
+    },
+  ]) {
     const denied = await http.inject({
       ...operation,
       headers: { authorization: `Bearer ${other}`, 'idempotency-key': uuidV7() },
@@ -628,7 +647,7 @@ it('uses HTTP idempotency, rejects key reuse, and hides another customer subscri
     expect([operation.method, operation.url, denied.statusCode]).toEqual([
       operation.method,
       operation.url,
-      404,
+      operation.expected,
     ]);
   }
   const afterForeignChanges = await http.inject({
@@ -636,8 +655,11 @@ it('uses HTTP idempotency, rejects key reuse, and hides another customer subscri
     url: `/v1/customer/subscriptions/${id}`,
     headers: { authorization: `Bearer ${customer}` },
   });
-  expect(afterForeignChanges.statusCode).toBe(200);
-  expect(afterForeignChanges.json()).toEqual(beforeForeignChanges.json());
+  expect(afterForeignChanges.statusCode).toBe(404);
+  // traceId is random per response; compare the stable problem shape.
+  const { traceId: _a, ...afterBody } = afterForeignChanges.json() as Record<string, unknown>;
+  const { traceId: _b, ...beforeBody } = beforeForeignChanges.json() as Record<string, unknown>;
+  expect(afterBody).toEqual(beforeBody);
   const actionHeaders = () => ({
     authorization: `Bearer ${customer}`,
     'idempotency-key': uuidV7(),
@@ -648,26 +670,26 @@ it('uses HTTP idempotency, rejects key reuse, and hides another customer subscri
       method: 'PATCH' as const,
       url: `/v1/customer/subscriptions/${id}`,
       payload: { quantity: '3' },
-      expected: 200,
+      expected: 410,
     },
     {
       method: 'POST' as const,
       url: `/v1/customer/subscriptions/${id}/skip`,
       payload: { date: start },
-      expected: 201,
+      expected: 410,
     },
     {
       method: 'DELETE' as const,
       url: `/v1/customer/subscriptions/${id}/skip/${start}`,
-      expected: 200,
+      expected: 410,
     },
     {
       method: 'POST' as const,
       url: `/v1/customer/subscriptions/${id}/pause`,
       payload: { from: start, to: start },
-      expected: 201,
+      expected: 410,
     },
-    { method: 'POST' as const, url: `/v1/customer/subscriptions/${id}/resume`, expected: 201 },
+    { method: 'POST' as const, url: `/v1/customer/subscriptions/${id}/resume`, expected: 410 },
     { method: 'POST' as const, url: `/v1/customer/subscriptions/${id}/cancel`, expected: 201 },
   ];
   for (const { expected, ...action } of actions) {
@@ -680,13 +702,19 @@ it('uses HTTP idempotency, rejects key reuse, and hides another customer subscri
     ]);
     if (action.method !== 'GET') {
       const repeated = await http.inject({ ...action, headers: keyHeaders });
-      expect([
+      // traceId is random per response (410s bypass idempotency capture); compare the stable shape.
+      const stable = (res: { body: unknown; json: () => unknown }) => {
+        if (!res.body) return null;
+        const { traceId: _t, ...rest } = res.json() as Record<string, unknown>;
+        return rest;
+      };
+      expect([action.method, action.url, repeated.statusCode, stable(repeated)]).toEqual([
         action.method,
         action.url,
-        repeated.statusCode,
-        repeated.body ? repeated.json() : null,
-      ]).toEqual([action.method, action.url, expected, first.body ? first.json() : null]);
-      if ('payload' in action && action.payload) {
+        expected,
+        stable(first),
+      ]);
+      if (expected === 200 && 'payload' in action && action.payload) {
         const conflicting = await http.inject({
           ...action,
           headers: keyHeaders,
@@ -741,7 +769,7 @@ it('uses HTTP idempotency, rejects key reuse, and hides another customer subscri
   }
 });
 
-it('serializes a cutoff-locked quantity change against generation using the original quantity', async () => {
+it('retires a quantity change while generation creates no order', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -783,35 +811,33 @@ it('serializes a cutoff-locked quantity change against generation using the orig
     world.db.db,
   );
   const worker = new SubscriptionGeneration(world.db.db, app.get(CHECKOUT), app.get(APP_CONFIG));
-  const actual = await Promise.all([
-    worker['process']({
-      id: subscription,
-      user_id: world.customer,
-      store_id: world.store,
-      delivery_date: date,
-    }),
-    subscriptionService.quantity(world.customer, subscription, '2'),
-  ]);
+  await worker['process']({
+    id: subscription,
+    user_id: world.customer,
+    store_id: world.store,
+    delivery_date: date,
+  });
+  await expect(subscriptionService.quantity(world.customer, subscription, '2')).rejects.toThrow(
+    'SUBSCRIPTIONS_RETIRED',
+  );
   const versions = await sql<{
     effective_from: string;
     quantity: string;
   }>`SELECT effective_from::text,quantity::text FROM subscription_schedule_versions WHERE subscription_id=${subscription}::uuid ORDER BY effective_from`.execute(
     world.db.db,
   );
-  expect(versions.rows).toHaveLength(2);
-  expect(versions.rows[1]!.effective_from).toBe(firstEditableDate(new Date(), '00:00'));
-  expect(actual[1]).toEqual({ effectiveFrom: versions.rows[1]!.effective_from });
+  expect(versions.rows).toHaveLength(1);
+  expect(versions.rows[0]!.quantity).toBe('1');
   const items = await sql<{
     qty: string;
   }>`SELECT i.ordered_qty::text AS qty FROM orders o JOIN order_items i ON i.order_id=o.id WHERE o.metadata->>'subscriptionId'=${subscription}`.execute(
     world.db.db,
   );
-  expect(items.rows).toEqual([{ qty: '1' }]);
+  expect(items.rows).toEqual([]);
+  void firstEditableDate;
 });
 
-it('cancels and fully refunds a subscription when a picked quantity is short', async () => {
-  const { SubscriptionGeneration } =
-    await import('../../../src/modules/subscriptions/infrastructure/generation.js');
+it('cancels and fully refunds a historical subscription order when picked short', async () => {
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
   const { PICK_TASKS } = await import('../../../src/modules/picking/contracts/tasks.js');
   const { OrderConfirmedConsumer } =
@@ -857,13 +883,29 @@ it('cancels and fully refunds a subscription when a picked quantity is short', a
   await sql`INSERT INTO subscription_schedule_versions(id,subscription_id,effective_from,quantity,frequency_rule,slot_id) VALUES(${uuidV7()}::uuid,${subscription}::uuid,${date}::date,2,'{"type":"DAILY"}'::jsonb,${slot}::uuid)`.execute(
     world.db.db,
   );
-  const worker = new SubscriptionGeneration(world.db.db, app.get(CHECKOUT), app.get(APP_CONFIG));
-  await worker['process']({
-    id: subscription,
-    user_id: world.customer,
-    store_id: world.store,
-    delivery_date: date,
-  });
+  // Historical order placed before retirement; picking/refund lifecycle is unchanged.
+  const checkout = app.get<CheckoutOperations>(CHECKOUT);
+  const slotStart = new Date(`${date}T07:00:00+05:30`).toISOString();
+  const slotEnd = new Date(`${date}T09:00:00+05:30`).toISOString();
+  const placed = await world.db.db.transaction().execute((tx) =>
+    checkout.placeScheduled(
+      {
+        userId: world.customer,
+        subscriptionId: subscription,
+        deliveryDate: date,
+        storeId: world.store,
+        addressId: world.address,
+        variantId: variant.id,
+        quantity: '2',
+        slotStart,
+        slotEnd,
+      },
+      tx,
+    ),
+  );
+  await sql`INSERT INTO subscription_occurrences(id,subscription_id,delivery_date,state,order_id) VALUES(${uuidV7()}::uuid,${subscription}::uuid,${date}::date,'ORDERED',${placed.orderId}::uuid)`.execute(
+    world.db.db,
+  );
   const event = (
     await sql<{
       id: string;
@@ -976,7 +1018,7 @@ it('cancels and fully refunds a subscription when a picked quantity is short', a
   }
 });
 
-it('backs off unexpected generation failures and records one durable admin alert', async () => {
+it('retires leftover work without durable admin alerts', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -1028,11 +1070,11 @@ it('backs off unexpected generation failures and records one durable admin alert
     world.db.db,
   );
   expect(result.rows).toEqual([
-    { state: 'PENDING', reason: 'UNEXPECTED_FAILURE', future: true, alerts: '1' },
+    { state: 'SKIPPED', reason: 'SUBSCRIPTIONS_RETIRED', future: null, alerts: '0' },
   ]);
 });
 
-it('applies frequency, slot and address changes only after cutoff and resumes after address deletion', async () => {
+it('retires schedule changes and still pauses on address deletion', async () => {
   const { SUBSCRIPTIONS } =
     await import('../../../src/modules/subscriptions/contracts/subscriptions.js');
   const { ADDRESSES } = await import('../../../src/modules/addresses/contracts/tokens.js');
@@ -1072,12 +1114,14 @@ it('applies frequency, slot and address changes only after cutoff and resumes af
   await sql`INSERT INTO app_config(key,value) VALUES('subscriptionCutoffTime','"00:00"'::jsonb) ON CONFLICT(key) DO UPDATE SET value='"00:00"'::jsonb`.execute(
     world.db.db,
   );
-  const change = (await service.change(world.customer, subscription, {
-    quantity: '2',
-    frequencyRule: { type: 'ALTERNATE_DAYS' },
-    slotId: slot2,
-    addressId: newAddress,
-  })) as { effectiveFrom: string };
+  await expect(
+    service.change(world.customer, subscription, {
+      quantity: '2',
+      frequencyRule: { type: 'ALTERNATE_DAYS' },
+      slotId: slot2,
+      addressId: newAddress,
+    }),
+  ).rejects.toThrow('SUBSCRIPTIONS_RETIRED');
   const versions = await sql<{
     effective_from: string;
     address_id: string;
@@ -1088,22 +1132,18 @@ it('applies frequency, slot and address changes only after cutoff and resumes af
   );
   expect(versions.rows).toEqual([
     { effective_from: date, address_id: world.address, slot_id: slot, quantity: '1' },
-    { effective_from: change.effectiveFrom, address_id: newAddress, slot_id: slot2, quantity: '2' },
   ]);
   await addresses.remove(world.customer, world.address);
   const paused = await sql<{
     status: string;
   }>`SELECT status FROM subscriptions WHERE id=${subscription}::uuid`.execute(world.db.db);
   expect(paused.rows[0]?.status).toBe('PAUSED');
-  expect(await service.resume(world.customer, subscription)).toEqual({
-    effectiveFrom: change.effectiveFrom,
-  });
-  await expect(
-    service.change(world.customer, subscription, { addressId: world.otherAddress }),
-  ).rejects.toThrow('ADDRESS_NOT_SERVICEABLE');
+  await expect(service.resume(world.customer, subscription)).rejects.toThrow(
+    'SUBSCRIPTIONS_RETIRED',
+  );
 });
 
-it('paginates customer, calendar and admin lists and binds cursors to filters', async () => {
+it('serves empty retired lists while still validating pages', async () => {
   const { SUBSCRIPTIONS, SUBSCRIPTION_ADMIN } =
     await import('../../../src/modules/subscriptions/contracts/subscriptions.js');
   const customer =
@@ -1114,39 +1154,29 @@ it('paginates customer, calendar and admin lists and binds cursors to filters', 
     app.get<
       import('../../../src/modules/subscriptions/contracts/subscriptions.js').SubscriptionAdmin
     >(SUBSCRIPTION_ADMIN);
-  const first = (await customer.list(world.customer, 1)) as {
-    items: unknown[];
-    nextCursor: string;
-  };
-  expect(first.items).toHaveLength(1);
-  expect(first.nextCursor).toBeTruthy();
-  const second = (await customer.list(world.customer, 1, first.nextCursor)) as {
-    items: { id: string }[];
-  };
-  expect(second.items).toHaveLength(1);
-  await expect(customer.list(world.otherCustomer, 1, first.nextCursor)).rejects.toThrow(
+  await expect(customer.list(world.customer, 1)).resolves.toEqual({
+    items: [],
+    nextCursor: null,
+  });
+  await expect(customer.list(world.customer, 0)).rejects.toThrow('INVALID_PAGE');
+  await expect(customer.list(world.otherCustomer, 1, 'invalid-cursor')).rejects.toThrow(
     'INVALID_PAGE',
   );
   const month = new Date().toISOString().slice(0, 7);
-  const calendar = (await customer.calendar(world.customer, month, 1)) as {
-    items: unknown[];
-    nextCursor: string;
-  };
-  expect(calendar.items).toHaveLength(1);
-  expect(calendar.nextCursor).toBeTruthy();
-  await expect(
-    customer.calendar(world.customer, '2025-01', 1, calendar.nextCursor),
-  ).rejects.toThrow('INVALID_PAGE');
-  const plans = (await admin.plans(1)) as { items: { id: string }[]; nextCursor: string };
-  expect(plans.nextCursor).toBeTruthy();
-  const plans2 = (await admin.plans(1, plans.nextCursor)) as { items: { id: string }[] };
-  expect(plans2.items[0]!.id).not.toBe(plans.items[0]!.id);
-  const slots = (await admin.slots(world.store, 1)) as { nextCursor: string };
-  expect(slots.nextCursor).toBeTruthy();
-  await expect(admin.slots(world.otherStore, 1, slots.nextCursor)).rejects.toThrow('INVALID_PAGE');
+  await expect(customer.calendar(world.customer, month, 1)).resolves.toEqual({
+    items: [],
+    nextCursor: null,
+  });
+  await expect(customer.calendar(world.customer, '2025-13', 1)).rejects.toThrow('INVALID_DATE');
+  await expect(admin.plans(1)).resolves.toEqual({ items: [], nextCursor: null });
+  await expect(admin.slots(world.store, 1)).resolves.toEqual({
+    items: [],
+    nextCursor: null,
+  });
+  await expect(admin.slots(world.otherStore, 1, 'invalid-cursor')).rejects.toThrow('INVALID_PAGE');
 });
 
-it('pauses disabled accounts and disabled plans without starving healthy subscriptions', async () => {
+it('creates zero orders for disabled accounts and plans after retirement', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -1192,20 +1222,26 @@ it('pauses disabled accounts and disabled plans without starving healthy subscri
   }>`SELECT s.id::text,s.status,o.reason FROM subscriptions s LEFT JOIN subscription_occurrences o ON o.subscription_id=s.id WHERE s.id=ANY(${[blocked, disabledPlan]}::uuid[]) ORDER BY s.id`.execute(
     world.db.db,
   );
-  expect(rows.rows.find((r) => r.id === blocked)).toMatchObject({ status: 'PAUSED' });
+  expect(rows.rows.find((r) => r.id === blocked)).toMatchObject({ status: 'ACTIVE' });
   expect(rows.rows.find((r) => r.id === disabledPlan)).toMatchObject({
-    status: 'PAUSED',
-    reason: 'PLAN_DISABLED',
+    status: 'ACTIVE',
+    reason: 'SUBSCRIPTIONS_RETIRED',
   });
   const alerts = await sql<{
     n: string;
   }>`SELECT count(*)::text AS n FROM outbox_events WHERE aggregate_id=${blocked}::uuid AND event_type='subscription.generation_incomplete'`.execute(
     world.db.db,
   );
-  expect(alerts.rows[0]?.n).toBe('1');
+  expect(alerts.rows[0]?.n).toBe('0');
+  const orders = await sql<{
+    n: string;
+  }>`SELECT count(*)::text AS n FROM orders WHERE metadata->>'subscriptionId' IN (${blocked},${disabledPlan})`.execute(
+    world.db.db,
+  );
+  expect(Number(orders.rows[0]?.n)).toBe(0);
 });
 
-it('reads the database cutoff after a competing subscription lock is released', async () => {
+it('retires a locked quantity change without waiting for cutoff', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -1264,28 +1300,15 @@ it('reads the database cutoff after a competing subscription lock is released', 
     await hold;
   });
   await ready;
-  const remaining = (
-    await sql<{
-      wait_ms: number;
-    }>`SELECT ceil(60000-extract(milliseconds FROM clock_timestamp())+100)::int AS wait_ms`.execute(
-      world.db.db,
-    )
-  ).rows[0]!.wait_ms;
-  if (remaining > 5000) await new Promise((resolve) => setTimeout(resolve, remaining - 5000));
-  const change = service.quantity(world.customer, subscription, '2');
   try {
-    await new Promise((resolve) => setTimeout(resolve, Math.min(remaining, 5000)));
+    // Retired writes reject before acquiring the subscription lock.
+    await expect(service.quantity(world.customer, subscription, '2')).rejects.toThrow(
+      'SUBSCRIPTIONS_RETIRED',
+    );
   } finally {
     release();
     await blocker;
   }
-  const result = (await change) as { effectiveFrom: string };
-  const expected = (
-    await sql<{ date: string }>`SELECT (${current.tomorrow}::date+1)::text AS date`.execute(
-      world.db.db,
-    )
-  ).rows[0]!.date;
-  expect(result.effectiveFrom).toBe(expected);
   const generator = new SubscriptionGeneration(world.db.db, app.get(CHECKOUT), app.get(APP_CONFIG));
   await generator['process']({
     id: subscription,
@@ -1293,15 +1316,22 @@ it('reads the database cutoff after a competing subscription lock is released', 
     store_id: world.store,
     delivery_date: current.tomorrow,
   });
+  const occurrence = await sql<{
+    state: string;
+    reason: string;
+  }>`SELECT state,reason FROM subscription_occurrences WHERE subscription_id=${subscription}::uuid`.execute(
+    world.db.db,
+  );
+  expect(occurrence.rows).toEqual([{ state: 'SKIPPED', reason: 'SUBSCRIPTIONS_RETIRED' }]);
   const item = await sql<{
     qty: string;
   }>`SELECT i.ordered_qty::text AS qty FROM orders o JOIN order_items i ON i.order_id=o.id WHERE o.metadata->>'subscriptionId'=${subscription}`.execute(
     world.db.db,
   );
-  expect(item.rows).toEqual([{ qty: '1' }]);
+  expect(item.rows).toEqual([]);
 }, 120000);
 
-it('fences a lost generation lease and recovers an expired claim', async () => {
+it('retires a leftover job regardless of claim token without ordering', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -1354,21 +1384,21 @@ it('fences a lost generation lease and recovers an expired claim', async () => {
         world.db.db,
       )
     ).rows,
-  ).toHaveLength(0);
+  ).toHaveLength(1);
   await sql`UPDATE subscriptions SET generation_claim_until=clock_timestamp()-interval '1 second' WHERE id=${subscription}::uuid`.execute(
     world.db.db,
   );
-  await worker.scan(100, world.store);
+  expect(await worker.scan(100, world.store)).toBe(0);
   const rows = await sql<{
     state: string;
     n: string;
   }>`SELECT state,(SELECT count(*)::text FROM orders WHERE metadata->>'subscriptionId'=${subscription}) AS n FROM subscription_occurrences WHERE subscription_id=${subscription}::uuid`.execute(
     world.db.db,
   );
-  expect(rows.rows).toEqual([{ state: 'ORDERED', n: '1' }]);
+  expect(rows.rows).toEqual([{ state: 'SKIPPED', n: '0' }]);
 });
 
-it('claims separate store batches without overlap under concurrent workers', async () => {
+it('claims zero store batches after retirement under concurrent workers', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -1403,8 +1433,8 @@ it('claims separate store batches without overlap under concurrent workers', asy
   const w1 = new SubscriptionGeneration(world.db.db, app.get(CHECKOUT), app.get(APP_CONFIG)),
     w2 = new SubscriptionGeneration(world.db.db, app.get(CHECKOUT), app.get(APP_CONFIG));
   const [n1, n2] = await Promise.all([w1.scan(100, world.store), w2.scan(100, world.otherStore)]);
-  expect(n1).toBeGreaterThan(0);
-  expect(n2).toBeGreaterThan(0);
+  expect(n1).toBe(0);
+  expect(n2).toBe(0);
   const result = await sql<{
     subscription_id: string;
     n: string;
@@ -1412,11 +1442,10 @@ it('claims separate store batches without overlap under concurrent workers', asy
   }>`SELECT subscription_id::text,count(*)::text AS n,min(state) AS state FROM subscription_occurrences WHERE subscription_id=ANY(${[one, two]}::uuid[]) AND delivery_date=${date}::date GROUP BY subscription_id ORDER BY subscription_id`.execute(
     world.db.db,
   );
-  expect(result.rows).toHaveLength(2);
-  expect(result.rows.every((r) => r.n === '1' && r.state === 'SKIPPED')).toBe(true);
+  expect(result.rows).toHaveLength(0);
 });
 
-it('advances across a future schedule version after recovering an overdue occurrence', async () => {
+it('does not advance an overdue occurrence after retirement', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -1456,10 +1485,10 @@ it('advances across a future schedule version after recovering an overdue occurr
   }>`SELECT next_delivery_date::text AS next FROM subscriptions WHERE id=${subscription}::uuid`.execute(
     world.db.db,
   );
-  expect(result.rows[0]?.next).toBe(dates.tomorrow);
+  expect(result.rows[0]?.next).toBe(dates.yesterday);
 });
 
-it('skips a locked due row and later reclaims it without duplicate occurrences', async () => {
+it('claims zero due rows after retirement without occurrences', async () => {
   const { SubscriptionGeneration } =
     await import('../../../src/modules/subscriptions/infrastructure/generation.js');
   const { APP_CONFIG } = await import('../../../src/modules/app-config/contracts/config.js');
@@ -1512,29 +1541,22 @@ it('skips a locked due row and later reclaims it without duplicate occurrences',
   await ready;
   const worker = new SubscriptionGeneration(world.db.db, app.get(CHECKOUT), app.get(APP_CONFIG));
   try {
-    expect(await worker.scan(1, world.store)).toBe(1);
-    const first = await sql<{
-      id: string;
-    }>`SELECT subscription_id::text AS id FROM subscription_occurrences WHERE subscription_id=ANY(${ids}::uuid[])`.execute(
-      world.db.db,
-    );
-    expect(first.rows).toEqual([{ id: ids[1] }]);
+    expect(await worker.scan(1, world.store)).toBe(0);
   } finally {
     release();
     await holder;
   }
-  expect(await worker.scan(1, world.store)).toBe(1);
-  await worker.scan(1, world.store);
+  expect(await worker.scan(1, world.store)).toBe(0);
   const results = await sql<{
     id: string;
     n: string;
   }>`SELECT subscription_id::text AS id,count(*)::text AS n FROM subscription_occurrences WHERE subscription_id=ANY(${ids}::uuid[]) GROUP BY subscription_id ORDER BY subscription_id`.execute(
     world.db.db,
   );
-  expect(results.rows).toEqual(ids.map((id) => ({ id, n: '1' })));
+  expect(results.rows).toEqual([]);
 });
 
-it('returns subscription options only for the customer-owned serviceable address', async () => {
+it('returns disabled options after retirement', async () => {
   const variant = await world.variant();
   const slot = uuidV7();
   await sql`INSERT INTO subscription_plans(id,variant_id,active) VALUES(${uuidV7()}::uuid,${variant.id}::uuid,true)`.execute(
@@ -1550,16 +1572,12 @@ it('returns subscription options only for the customer-owned serviceable address
       import('../../../src/modules/subscriptions/contracts/subscriptions.js').SubscriptionOperations
     >(SUBSCRIPTIONS);
   const options = await service.options(world.customer, world.address, variant.id);
-  expect(options.enabled).toBe(true);
-  expect(options.eligible).toBe(true);
+  expect(options.enabled).toBe(false);
+  expect(options.eligible).toBe(false);
+  expect(options.slots).toEqual([]);
   expect(options.firstStartDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  expect(options.slots).toContainEqual({
-    id: slot,
-    name: 'Late slot',
-    startTime: '23:00',
-    endTime: '23:30',
-  });
-  await expect(service.options(world.otherCustomer, world.address, variant.id)).rejects.toThrow(
-    'ADDRESS_NOT_SERVICEABLE',
-  );
+  const otherOptions = await service.options(world.otherCustomer, world.address, variant.id);
+  expect(otherOptions.enabled).toBe(false);
+  expect(otherOptions.slots).toEqual([]);
+  void slot;
 });

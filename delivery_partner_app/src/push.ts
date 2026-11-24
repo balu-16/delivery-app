@@ -96,7 +96,11 @@ export async function unregisterPush(userId: string) {
     throw new Error('Connect to the internet to turn off this device’s delivery alerts before signing out.');
   }
 }
-export function startPush(userId: string, onUpdate: () => void, onOpen: () => void) {
+export function startPush(
+  userId: string,
+  onUpdate: () => void,
+  onOpen: (data?: Record<string, unknown>) => void,
+) {
   const current = ++generation;
   suspended = false;
   if (!supported()) { setStatus('unsupported'); return () => { generation++; }; }
@@ -112,10 +116,10 @@ export function startPush(userId: string, onUpdate: () => void, onOpen: () => vo
             void serial(() => register(userId, token.data as string, current)).catch(() => setStatus('error', 'Could not update delivery alerts.'));
         }),
         module.addNotificationReceivedListener(() => { if (active) onUpdate(); }),
-        module.addNotificationResponseReceivedListener(() => { if (active) onOpen(); }),
+        module.addNotificationResponseReceivedListener((response) => { if (active) onOpen(response.notification.request.content.data ?? {}); }),
       ];
       const response = await module.getLastNotificationResponseAsync();
-      if (active && response) { await module.clearLastNotificationResponseAsync(); onOpen(); }
+      if (active && response) { await module.clearLastNotificationResponseAsync(); onOpen(response.notification.request.content.data ?? {}); }
       if (active) await synchronize(userId, current, false);
     } catch { if (active) setStatus('error', 'Could not prepare delivery alerts.'); }
   })();

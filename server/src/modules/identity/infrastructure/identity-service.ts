@@ -71,11 +71,25 @@ export class IdentityService {
         if (!this.referrals) throw new Error('REFERRAL_UNAVAILABLE');
         if (!found) await this.referrals.claimForNewCustomer(referralCode, actualId, tx);
         else {
-          const replay = await sql`SELECT 1 FROM referral_claims c
-            WHERE c.friend_id=${actualId}::uuid AND c.code=${referralCode.trim().toUpperCase()}`.execute(
-            tx,
-          );
-          if (!replay.rows.length) throw new Error('REFERRAL_SIGNUP_ONLY');
+          const normalized = referralCode.trim().toUpperCase();
+          if (/^INV-[A-F0-9]{32}$/.test(normalized)) {
+            // Tracked replay: resolve through the stored claim link (plan §6(2)).
+            const invite = await sql<{
+              claim_id: string | null;
+              friend_id: string | null;
+            }>`SELECT i.claim_id::text AS claim_id, c.friend_id::text AS friend_id
+              FROM referral_invites i LEFT JOIN referral_claims c ON c.id = i.claim_id
+              WHERE i.code=${normalized}`.execute(tx);
+            const row = invite.rows[0];
+            if (row?.claim_id && row.friend_id === actualId) {
+              // Matching retry for the same verified new customer: succeed without new credit.
+            } else if (row?.claim_id) throw new Error('REFERRAL_INVITE_USED');
+            else throw new Error('REFERRAL_SIGNUP_ONLY');
+          } else {
+            const replay = await sql`SELECT 1 FROM referral_claims c
+              WHERE c.friend_id=${actualId}::uuid AND c.code=${normalized}`.execute(tx);
+            if (!replay.rows.length) throw new Error('REFERRAL_SIGNUP_ONLY');
+          }
         }
       }
     });

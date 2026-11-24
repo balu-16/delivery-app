@@ -183,8 +183,11 @@ export function fakeAdmin(autoSubstitution = true) {
         reinstate_expired_orders: false,
         surge_enabled: false,
       },
+      configRevisions: {},
+      flagRevisions: {},
     }),
     update: async () => undefined,
+    updateBatch: async () => [],
     setFlag: async () => undefined,
   };
 }

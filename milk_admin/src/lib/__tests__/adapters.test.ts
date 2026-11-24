@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { paiseToRupees, rupeesToPaise, signedPaiseToRupees, signedRupeesToPaise } from '@/api/money'
+import { paiseToRupees, rupeesToPaise, rupeesStringToPaise, paiseToRupeesString, signedPaiseToRupees, signedRupeesToPaise } from '@/api/money'
 import { lowerStatus, minutesToTime, polygonToPoints, pointsToPolygon, rangeToFromTo, istDateWindow } from '@/api/mapping'
 import { dashboardMetrics } from '@/api/dashboard'
 import type { DashboardData } from '@/types'
@@ -26,6 +26,25 @@ describe('money adapters', () => {
     expect(signedPaiseToRupees('-15000')).toBe(-150)
     expect(signedRupeesToPaise(-150)).toBe('-15000')
     expect(signedRupeesToPaise(12.34)).toBe('1234')
+  })
+
+  it('parses exact decimal-string rupees to paise without float math (§3B)', () => {
+    expect(rupeesStringToPaise('0')).toBe('0') // zero accepted
+    expect(rupeesStringToPaise('0.01')).toBe('1')
+    expect(rupeesStringToPaise('10.99')).toBe('1099')
+    expect(rupeesStringToPaise('1')).toBe('100')
+    expect(rupeesStringToPaise('420.5')).toBe('42050')
+    expect(rupeesStringToPaise(' 99.50 ')).toBe('9950')
+    expect(rupeesStringToPaise('0.1')).toBe('10')
+    // selling <= MRP is checkable on the exact strings via BigInt
+    expect(BigInt(rupeesStringToPaise('99.50')) <= BigInt(rupeesStringToPaise('100'))).toBe(true)
+    expect(BigInt(rupeesStringToPaise('101')) <= BigInt(rupeesStringToPaise('100'))).toBe(false)
+    expect(() => rupeesStringToPaise('1.005')).toThrow('INVALID_AMOUNT')
+    expect(() => rupeesStringToPaise('-5')).toThrow('INVALID_AMOUNT')
+    expect(() => rupeesStringToPaise('')).toThrow('INVALID_AMOUNT')
+    expect(() => rupeesStringToPaise('abc')).toThrow('INVALID_AMOUNT')
+    expect(paiseToRupeesString('1099')).toBe('10.99')
+    expect(paiseToRupeesString('0')).toBe('0.00')
   })
 })
 

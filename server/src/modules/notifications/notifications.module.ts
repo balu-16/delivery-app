@@ -22,10 +22,13 @@ import {
   type EmailPort,
   type PushPort,
 } from './contracts/notifications.js';
+import { AppContentModule } from '../app-content/app-content.module.js';
+import { TEMPLATE_OVERRIDES } from './contracts/template-overrides.js';
 import { PostgresDeviceTokens } from './infrastructure/postgres-tokens.js';
 import { PostgresNotificationPipeline } from './infrastructure/postgres-pipeline.js';
 import { PostgresNotificationPreferences } from './infrastructure/postgres-preferences.js';
 import { PostgresNotificationViews } from './infrastructure/postgres-views.js';
+import { PostgresTemplateOverrides } from './infrastructure/postgres-template-overrides.js';
 import { PUSH_CAMPAIGNS } from './contracts/campaigns.js';
 import { PostgresPushCampaigns } from './infrastructure/postgres-campaigns.js';
 
@@ -36,7 +39,7 @@ import { PostgresPushCampaigns } from './infrastructure/postgres-campaigns.js';
  * local development uses SMTP to Mailpit and the in-memory fake push.
  */
 @Module({
-  imports: [AppConfigModule],
+  imports: [AppConfigModule, AppContentModule],
   providers: [
     {
       provide: PUSH_CAMPAIGNS,
@@ -96,6 +99,11 @@ import { PostgresPushCampaigns } from './infrastructure/postgres-campaigns.js';
       inject: [PLATFORM_DATABASE],
       useFactory: (handle: DatabaseHandle) => new PostgresNotificationPreferences(handle.db),
     },
+    {
+      provide: TEMPLATE_OVERRIDES,
+      inject: [PLATFORM_DATABASE],
+      useFactory: (handle: DatabaseHandle) => new PostgresTemplateOverrides(handle.db),
+    },
   ],
   exports: [
     PUSH_CAMPAIGNS,
@@ -103,6 +111,8 @@ import { PostgresPushCampaigns } from './infrastructure/postgres-campaigns.js';
     NOTIFICATION_VIEWS,
     DEVICE_TOKENS,
     NOTIFICATION_PREFERENCES,
+    AppContentModule,
+    TEMPLATE_OVERRIDES,
     PUSH_PORT,
     EMAIL_PORT,
     SMS_PORT,

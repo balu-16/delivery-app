@@ -22,6 +22,7 @@ import { S3Storage } from './infrastructure/s3-storage.js';
           ? new LocalStorage(
               config.get('LOCAL_CATALOG_STORAGE_DIR'),
               config.get('LOCAL_JWT_SECRET'),
+              config.get('LOCAL_PRIVATE_STORAGE_DIR'),
             )
           : new S3Storage(
               createS3Client(config),

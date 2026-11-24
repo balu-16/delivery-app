@@ -38,6 +38,7 @@ export class UploadTargetResponseDto {
     string,
     string
   >;
+  @ApiProperty({ format: 'date-time' }) expiresAt!: string;
 }
 export class UrlResponseDto {
   @ApiProperty() url!: string;
@@ -58,6 +59,11 @@ export class RiderApplicationDocumentDto {
   @ApiProperty({ type: String, nullable: true }) reason!: string | null;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
 }
+export class RiderHomeStoreDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() city!: string;
+}
 export class RiderApplicationDto {
   @ApiProperty({ format: 'uuid' }) userId!: string;
   @ApiProperty({ enum: ['PENDING', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'SUSPENDED'] })
@@ -65,8 +71,16 @@ export class RiderApplicationDto {
   @ApiProperty({ type: String, nullable: true }) vehicleType!: string | null;
   @ApiProperty({ type: String, nullable: true }) vehicleNo!: string | null;
   @ApiProperty({ type: String, nullable: true, format: 'uuid' }) homeStoreId!: string | null;
+  @ApiProperty({ type: RiderHomeStoreDto, nullable: true }) homeStore!: RiderHomeStoreDto | null;
   @ApiProperty({ type: [String] }) requiredDocuments!: string[];
   @ApiProperty({ type: [RiderApplicationDocumentDto] }) documents!: RiderApplicationDocumentDto[];
+}
+export class RiderOnboardingDto extends RiderApplicationDto {
+  @ApiProperty({ type: Number }) maxDocumentBytes!: number;
+}
+export class RiderOnboardingUpdatedDto {
+  @ApiProperty({ type: Boolean }) updated!: boolean;
+  @ApiProperty({ type: RiderApplicationDto }) application!: RiderApplicationDto;
 }
 export class RiderOnboardingStoreDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
@@ -143,6 +157,21 @@ export class ConfigValuesResponseDto {
   @ApiProperty() termsVersion!: string;
   @ApiProperty() privacyVersion!: string;
   @ApiProperty() maxPauseLengthDays!: number;
+  @ApiProperty() referralIssuanceEnabled!: boolean;
+  @ApiProperty() referralRewardPaise!: string;
+  @ApiProperty() referralCreditExpiryMonths!: number;
+}
+export class RevisionMapDto {
+  @ApiProperty({ type: 'object', additionalProperties: { type: 'string' } })
+  revisions!: Record<string, string>;
+}
+export class ConfigChangeResultDto {
+  @ApiProperty() key!: string;
+  @ApiProperty({ type: 'object', additionalProperties: true }) value!: unknown;
+  @ApiProperty({ description: 'New revision as a decimal string' }) version!: string;
+}
+export class ConfigBatchResultDto {
+  @ApiProperty({ type: [ConfigChangeResultDto] }) updated!: ConfigChangeResultDto[];
 }
 export class FeatureFlagsResponseDto {
   @ApiProperty() agent_enabled!: boolean;
@@ -158,4 +187,8 @@ export class FeatureFlagsResponseDto {
 export class ConfigSnapshotResponseDto {
   @ApiProperty({ type: ConfigValuesResponseDto }) config!: ConfigValuesResponseDto;
   @ApiProperty({ type: FeatureFlagsResponseDto }) flags!: FeatureFlagsResponseDto;
+  @ApiProperty({ type: 'object', additionalProperties: { type: 'string' } })
+  configRevisions!: Record<string, string>;
+  @ApiProperty({ type: 'object', additionalProperties: { type: 'string' } })
+  flagRevisions!: Record<string, string>;
 }

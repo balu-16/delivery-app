@@ -80,6 +80,15 @@ export const useStoreStock = (storeId: string | null, filters: { search?: string
     ...LIST,
   })
 }
+export const useInventoryApprovalUnits = (storeId: string | null) => {
+  const user = useStoreAuth((s) => s.user)
+  return useQuery({
+    queryKey: ['store', 'approval-threshold', scope(user?.id, storeId)],
+    queryFn: () => storeApi.getInventoryApprovalUnits(storeId!),
+    enabled: !!storeId,
+    ...V,
+  })
+}
 export const useLowStock = (storeId: string | null) => {
   const user = useStoreAuth((s) => s.user)
   return useQuery({

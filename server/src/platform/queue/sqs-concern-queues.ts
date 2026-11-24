@@ -3,6 +3,7 @@ import type { Database, Json } from '../database/database.js';
 import { CONCERNS, type ConcernHandler, type QueueConcern, type Schedule } from './concerns.js';
 import { SqsBatchWorker } from './sqs-batch-worker.js';
 import { SqsConcernStore } from './sqs-concern-store.js';
+import { SqsOperationError } from './sqs-operation-error.js';
 import type { SqsJobPointer, SqsTransport } from './sqs-transport.js';
 
 /** Durable concern jobs and schedules in Aurora, with SQS used only as delivery hints. */
@@ -11,7 +12,7 @@ export class SqsConcernQueues {
   private readonly handlers = new Map<string, ConcernHandler>();
   private readonly workers = new Map<QueueConcern, Promise<void>>();
   private readonly abort = new AbortController();
-  private readonly timer?: ReturnType<typeof setInterval>;
+  private timer?: ReturnType<typeof setInterval>;
   private readonly onError: (error: Error) => void;
   private relay?: Promise<void>;
   private readonly batchSize: number;
@@ -34,10 +35,12 @@ export class SqsConcernQueues {
     this.store = new SqsConcernStore(options.db);
     this.batchSize = Math.min(10, options.concurrency ?? 4);
     this.onError = options.onError ?? (() => undefined);
-    if (options.consume !== false) {
-      this.timer = setInterval(() => this.kickRelay(), 1000);
-      this.timer.unref();
-    }
+  }
+
+  startRelay(): void {
+    if (this.options.consume === false || this.timer || this.abort.signal.aborted) return;
+    this.timer = setInterval(() => this.kickRelay(), 1000);
+    this.timer.unref();
   }
 
   register(concern: QueueConcern, name: string, handler: ConcernHandler): void {
@@ -57,7 +60,7 @@ export class SqsConcernQueues {
     operationId: string,
   ): Promise<void> {
     await this.store.enqueue(concern, name, data, operationId);
-    if (this.options.consume !== false) this.kickRelay();
+    this.kickRelay();
   }
 
   async upsertScheduler(
@@ -70,10 +73,26 @@ export class SqsConcernQueues {
     await this.store.upsertScheduler(concern, schedulerId, name, data, schedule);
   }
 
+  async disableScheduler(concern: QueueConcern, schedulerId: string): Promise<void> {
+    await this.store.disableScheduler(concern, schedulerId);
+  }
+
   private kickRelay(): void {
-    if (this.relay || this.abort.signal.aborted) return;
+    if (!this.timer || this.relay || this.abort.signal.aborted) return;
     this.relay = this.relayOnce()
-      .catch(() => this.onError(new Error('SQS_CONCERN_RELAY_FAILED')))
+      .catch((cause) =>
+        this.onError(
+          cause instanceof SqsOperationError
+            ? cause
+            : new SqsOperationError(
+                'SQS_CONCERN_RELAY_FAILED',
+                'postgres',
+                'relay',
+                undefined,
+                cause,
+              ),
+        ),
+      )
       .finally(() => {
         this.relay = undefined;
       });
@@ -84,12 +103,20 @@ export class SqsConcernQueues {
     const claimed = await this.store.claimDue();
     for (let i = 0; i < claimed.length; i++) {
       const job = claimed[i]!;
+      let sent = false;
       try {
         await this.options.transport.send(job.concern, job.pointer);
+        sent = true;
         await this.store.sent(job);
-      } catch {
+      } catch (cause) {
         for (const pending of claimed.slice(i)) await this.store.sendFailed(pending);
-        throw new Error('SQS_CONCERN_RELAY_FAILED');
+        throw new SqsOperationError(
+          'SQS_CONCERN_RELAY_FAILED',
+          sent ? 'postgres' : 'sqs',
+          sent ? 'record-send' : 'send',
+          job.concern,
+          cause,
+        );
       }
     }
   }
@@ -104,9 +131,11 @@ export class SqsConcernQueues {
     while (!this.abort.signal.aborted) {
       try {
         await worker.runOnce(concern, this.abort.signal);
-      } catch {
+      } catch (cause) {
         if (!this.abort.signal.aborted) {
-          this.onError(new Error('SQS_CONCERN_POLL_FAILED'));
+          this.onError(
+            new SqsOperationError('SQS_CONCERN_POLL_FAILED', 'sqs', 'receive', concern, cause),
+          );
           await delay(1000);
         }
       }

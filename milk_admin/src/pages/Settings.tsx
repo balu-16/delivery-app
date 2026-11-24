@@ -24,19 +24,24 @@ type MainTab = 'config' | 'flags' | 'pincodes' | 'history' | 'notifications' | '
 
 const FLAG_LABELS: Array<{ key: string; label: string; hint: string }> = [
   { key: 'cod_enabled', label: 'Cash on delivery', hint: 'COD payment option across storefront flows' },
+  { key: 'online_payments_enabled', label: 'Online payments', hint: 'Cards and UPI at checkout, when the payment provider is configured.' },
   { key: 'wallet_enabled', label: 'Wallet payments', hint: 'Allow customers to use their existing wallet balance. Top-ups are unavailable.' },
   { key: 'customer_location_required', label: 'Require customer location for orders', hint: 'When off, delivery eligibility uses the address PIN code. When on, the customer must confirm a location before ordering.' },
   { key: 'surge_enabled', label: 'Surge pricing', hint: 'Apply the configured surge fee to checkout and delivery estimates.' },
   { key: 'agent_enabled', label: 'Customer assistant', hint: 'Allow the assistant when its server, worker and model are configured.' },
+  { key: 'auto_substitution', label: 'Automatic substitution', hint: 'Stores may replace an unavailable item with the closest match.' },
+  { key: 'reinstate_expired_orders', label: 'Reinstate expired orders', hint: 'Allow unpaid or expired orders to be re-queued for checkout.' },
 ]
 
-function FlagSetting({setting, flags}: {setting: (typeof FLAG_LABELS)[number]; flags:Record<string,boolean>}) {
+function FlagSetting({setting, flags, revisions}: {setting: (typeof FLAG_LABELS)[number]; flags:Record<string,boolean>; revisions?: Record<string,string>}) {
   const client = useQueryClient()
   const known = setting.key in flags
-  const mutation = useMutation({mutationFn:(value:boolean)=>updateFeatureFlag(setting.key,value),onSuccess:async()=>{await client.invalidateQueries({queryKey:['config']})}})
+  const mutation = useMutation({mutationFn:(value:boolean)=>updateFeatureFlag(setting.key,value,revisions?.[setting.key]),onSuccess:async()=>{await client.invalidateQueries({queryKey:['config']})}})
+  const conflicted = mutation.error instanceof Error && (mutation.error as {code?: string}).code === 'CONCURRENT_MODIFICATION'
   return <div className="flex items-center justify-between gap-4 p-5"><div><Label className="mb-0">{setting.label}</Label><p className="text-xs text-muted-foreground">{setting.hint}</p>
     {!known && <p className="mt-1 flex items-center gap-1 text-[10.5px] font-semibold text-muted-foreground"><Info className="h-3 w-3" /> Status unavailable; refresh before changing it</p>}
-    {mutation.isError && <p role="alert" className="mt-1 text-xs text-destructive">Could not change this setting. Check your connection and try again.</p>}
+    {mutation.isError && !conflicted && <p role="alert" className="mt-1 text-xs text-destructive">Could not change this setting. Check your connection and try again.</p>}
+    {conflicted && <div role="alert" className="mt-1 flex items-center gap-2 text-xs font-semibold text-destructive">Another admin changed this setting.<Button size="sm" variant="outline" onClick={()=>void client.invalidateQueries({queryKey:['config']})}>Refresh</Button></div>}
     {mutation.isSuccess && <p role="status" className="mt-1 text-xs text-brand-700">Saved</p>}</div>
     <Switch checked={known && flags[setting.key] === true} disabled={!known || mutation.isPending} onCheckedChange={value=>mutation.mutate(value)} /></div>
 }
@@ -52,7 +57,7 @@ const PREF_LABELS: Record<string, string> = {
 }
 
 // Concern names must match the backend queue registry (platform/queue/concerns.ts).
-const OPS_CONCERNS = ['outbox', 'notifications', 'dispatch', 'payments', 'subscriptions', 'imports', 'maintenance'] as const
+const OPS_CONCERNS = ['outbox', 'notifications', 'dispatch', 'payments', 'imports', 'maintenance'] as const
 
 export function Settings() {
   const container = useStagger()
@@ -62,6 +67,8 @@ export function Settings() {
   const config = configQ.data
   const flags = config?.flags ?? {}
   const configValues = config?.config ?? {}
+  const configRevisions = config?.configRevisions ?? {}
+  const flagRevisions = config?.flagRevisions ?? {}
 
   const systemActions = useSystemActions()
   const offerActions = useOfferActions()
@@ -112,7 +119,7 @@ export function Settings() {
               <Card className="p-8"><EmptyState icon={Flag} title="Config unavailable" body="The server config could not be loaded." /></Card>
             ) : (
               <Card className="divide-y divide-border/60">
-                {FLAG_LABELS.map((f) => <FlagSetting key={f.key} setting={f} flags={flags} />)}
+                {FLAG_LABELS.map((f) => <FlagSetting key={f.key} setting={f} flags={flags} revisions={flagRevisions} />)}
               </Card>
             )}
             {serverError && <p className="text-xs font-semibold text-destructive">{serverError}</p>}
@@ -125,7 +132,7 @@ export function Settings() {
         {/* ── CONFIG ── */}
         {tab === 'config' && (
           <motion.section variants={container.item} className="space-y-3">
-            {configQ.isLoading ? <p role="status">Loading settings…</p> : configQ.isError && !config ? <Card className="p-5"><p>Could not load settings.</p><Button size="sm" onClick={() => void configQ.refetch()}>Try again</Button></Card> : <OperationalSettings config={configValues} />}
+            {configQ.isLoading ? <p role="status">Loading settings…</p> : configQ.isError && !config ? <Card className="p-5"><p>Could not load settings.</p><Button size="sm" onClick={() => void configQ.refetch()}>Try again</Button></Card> : <OperationalSettings config={configValues} configRevisions={configRevisions} />}
           </motion.section>
         )}
 

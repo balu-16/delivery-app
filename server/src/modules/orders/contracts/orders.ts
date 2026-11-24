@@ -200,7 +200,12 @@ export interface OrderOperations {
   reinstate(orderId: string, actor: Actor): Promise<OrderView>;
   expireDue(limit: number): Promise<number>;
   timeline(orderId: string, opts?: { userId?: string }): Promise<readonly TimelineEntry[]>;
-  list(userId: string, limit: number, cursor?: string): Promise<OrderListPage>;
+  list(
+    userId: string,
+    limit: number,
+    cursor?: string,
+    group?: 'active' | 'delivered' | 'cancelled',
+  ): Promise<OrderListPage>;
   /**
    * Owner-scoped usual-order candidates from delivered orders only.
    * `limit` is how many recent delivered orders to read (1–20, default 10).

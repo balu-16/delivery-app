@@ -94,3 +94,15 @@ export function getRiderApplication(userId: string): Promise<RiderApplicationDet
     })),
   }))
 }
+
+/** Short-lived preview link — keep in memory only, never log or persist it. */
+export function getRiderDocumentReadUrl(documentId: string): Promise<{ url: string }> {
+  return get<{ url: string }>(`/v1/admin/rider-documents/${documentId}/read-url`)
+}
+
+export function reviewRiderDocument(
+  documentId: string,
+  input: { approved: boolean; reason: string },
+): Promise<{ reviewed: true }> {
+  return post<{ reviewed: true }>(`/v1/admin/rider-documents/${documentId}/review`, input)
+}

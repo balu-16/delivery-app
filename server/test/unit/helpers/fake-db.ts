@@ -8,7 +8,9 @@ import {
 import type { Database, TransactionContext } from '../../../src/platform/database/database.js';
 
 /** Routes compiled SQL to canned rows; records every query for call-count assertions. */
-export function fakeDatabase(route: (query: CompiledQuery) => { rows: unknown[] }) {
+export function fakeDatabase(
+  route: (query: CompiledQuery) => { rows: unknown[]; numAffectedRows?: bigint | number },
+) {
   const queries: CompiledQuery[] = [];
   const compiler = new PostgresQueryCompiler();
   const execute = jest.fn(async (query: CompiledQuery) => {

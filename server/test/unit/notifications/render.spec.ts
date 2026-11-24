@@ -1,7 +1,11 @@
 import {
+  extractPlaceholders,
+  permittedPlaceholders,
   renderTemplate,
   resolveLocale,
+  sampleDataFor,
   selectTemplate,
+  validatePlaceholders,
   type TemplateRow,
 } from '../../../src/modules/notifications/domain/render.js';
 
@@ -44,6 +48,47 @@ describe('template rendering', () => {
   });
   it('ignores malformed placeholder syntax', () => {
     expect(renderTemplate('a {{ b }} {{1c}} {{}}', {})).toBe('a {{ b }} {{1c}} {{}}');
+  });
+});
+
+describe('placeholder validation against the matrix (customize2 §3E)', () => {
+  it('exposes permitted placeholders per template key', () => {
+    expect([...permittedPlaceholders('order.confirmed')].sort()).toEqual([
+      'orderId',
+      'orderNumber',
+    ]);
+    expect([...permittedPlaceholders('agent.reorder_nudge')].sort()).toEqual([
+      'productName',
+      'variantId',
+    ]);
+    expect([...permittedPlaceholders('agent.nope')]).toEqual([]);
+  });
+  it('extracts placeholder keys from subject and body', () => {
+    expect(extractPlaceholders('Order {{orderNumber}} {{orderNumber}} {{amount}}')).toEqual([
+      'orderNumber',
+      'amount',
+    ]);
+    expect(extractPlaceholders('No placeholders here')).toEqual([]);
+  });
+  it('accepts permitted placeholders and rejects unknown ones', () => {
+    expect(
+      validatePlaceholders('order.confirmed', 'Order {{orderNumber}}', 'Confirmed {{orderId}}'),
+    ).toEqual({ unknown: [] });
+    expect(
+      validatePlaceholders('order.confirmed', 'Hi {{name}}', 'Order {{orderNumber}} {{hack}}'),
+    ).toEqual({
+      unknown: ['hack', 'name'],
+    });
+  });
+  it('provides sample data covering every permitted key for preview', () => {
+    const sample = sampleDataFor('agent.reorder_nudge');
+    expect(sample['productName']).toBe('Whole Milk (500 ml)');
+    expect(renderTemplate('Restock {{productName}}?', sample)).toContain('Whole Milk');
+    expect(sampleDataFor('order.confirmed')['orderNumber']).toBe('ORD-1234');
+  });
+  it('falls back across channels only to INBOX as a last resort', () => {
+    expect(selectTemplate(rows, 'order.confirmed', 'EMAIL', 'hi')?.channel).toBe('EMAIL');
+    expect(selectTemplate(rows, 'order.confirmed', 'PUSH', 'te')?.locale).toBe('en');
   });
 });
 

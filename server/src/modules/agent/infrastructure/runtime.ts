@@ -441,6 +441,7 @@ export class AgentRuntime {
           variantId,
           quantity,
           maxQuantity,
+          answeredInMessage: true,
         });
         const line = (result as { items?: { variantId: string; name: string }[] })?.items?.find(
           (item) => item.variantId === variantId,

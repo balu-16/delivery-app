@@ -67,10 +67,9 @@ records in People, they do not sign into the portal). There is no separate super
    min order, validity, usage limits, eligible stores & products), push campaigns
    (audiences or selected users, preview, status list), My notifications (the admin's own
    bell feed).
-10. **Subscriptions** (`/subscriptions`) — configuration only: subscribable products,
-    delivery slots, subscription holidays, generation runs with inspect/retry,
-    subscription settings. Shows a "Subscriptions are currently disabled" banner when
-    the feature flag is off.
+10. **Subscriptions** — retired: recurring subscriptions were removed from the
+    portal and the backend rejects new subscription writes. Historical records
+    remain readable through existing order and report surfaces.
 11. **Support & reviews** (`/support`) — tickets with respond/status/saved responses/
     internal notes/authorized attachments viewer, refund request from eligible
     order-related tickets (creates it in Payments), rating moderation queue.
@@ -81,8 +80,9 @@ records in People, they do not sign into the portal). There is no separate super
 13. **Approvals & compliance** (`/approvals`) — queue (pending/completed/rejected/expired)
     with `canApprove`-gated approve/reject + reason when not allowed, fraud findings,
     payment-reconciliation findings, data-erasure requests and legal holds.
-14. **Settings & system** (`/settings`) — feature toggles (COD, wallets, subscriptions —
-    effective instantly across the app), business rules (fees, order limits, rider
+14. **Settings & system** (`/settings`) — feature toggles (COD, wallets —
+    effective instantly across the app; the retained subscriptions flag rejects
+    re-enablement), business rules (fees, order limits, rider
     requirements, dispatch settings), failed background jobs with recovery actions,
     operational notifications and invoice-render failures.
 
@@ -136,7 +136,7 @@ src/
                         Payments/Payouts/Support/Approvals/People scenes) · avatars · productIcons · Logo
   layouts/              AppLayout · Sidebar (14 items) · Topbar (bell + Admin menu) · CommandPalette
   pages/                Dashboard · Stores · Products · Inventory · Orders(+Detail) · People ·
-                        Payments · Payouts · Offers · Subscriptions · Support · Reports ·
+                        Payments · Payouts · Offers · Support · Reports ·
                         Approvals · Settings · Login · NotFound
   services/             exports.ts (xlsx/csv) · supabaseClient.ts
   store/                db.ts (journal persistence) · auth.ts

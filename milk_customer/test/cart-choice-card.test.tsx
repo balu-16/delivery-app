@@ -21,33 +21,42 @@ const twoSizes = {
   ],
 };
 
-test('picking a size asks how many packs and submits exactly once', async () => {
+test('picking a size shows one question and highlights only the quantity being submitted', async () => {
   let release!: () => void;
   const pending = new Promise<void>((resolve) => { release = resolve; });
   const onAction = jest.fn().mockImplementationOnce(() => pending);
-  await render(<AssistantCard card={choiceCard(twoSizes)} busy={false} onDecision={jest.fn()} onAction={onAction} onReview={jest.fn()} />);
+  const props = { busy: false, onDecision: jest.fn(), onAction, onReview: jest.fn() };
+  const { rerender } = await render(<AssistantCard card={choiceCard(twoSizes)} {...props} />);
   expect(screen.getByText('Which curd size would you like?')).toBeTruthy();
   expect(screen.queryByText('How many packs?')).toBeNull();
   await fireEvent.press(screen.getByLabelText('Choose 500 g'));
   expect(screen.getByText('How many packs?')).toBeTruthy();
-  const quantity = screen.getByLabelText('2 pack');
+  expect(screen.queryByText(twoSizes.question)).toBeNull();
+  const one = screen.getByLabelText('1 pack');
+  const two = screen.getByLabelText('2 packs');
   await act(async () => {
-    fireEvent.press(quantity);
-    fireEvent.press(quantity);
+    await fireEvent.press(one);
+    await fireEvent.press(two);
   });
   expect(onAction).toHaveBeenCalledTimes(1);
-  expect(onAction).toHaveBeenCalledWith(cardId, 'cart_choice', { choiceId, variantId: V1, quantity: 2 });
+  expect(onAction).toHaveBeenCalledWith(cardId, 'cart_choice', { choiceId, variantId: V1, quantity: 1 });
+  expect(screen.getByRole('button', { name: '1 pack', selected: true, disabled: true })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '2 packs', selected: false, disabled: true })).toBeTruthy();
+  expect(screen.queryByText('Added 1 pack to your cart.')).toBeNull();
   await act(async () => { release(); });
-  expect(await screen.findByText('Added to your cart.')).toBeTruthy();
+  await rerender(<AssistantCard card={choiceCard({ ...twoSizes, status: 'committed', selection: { variantId: V1, quantity: 1 } })} {...props} />);
+  expect(screen.getAllByText('Added 1 pack to your cart.')).toHaveLength(1);
+  expect(screen.queryByText('How many packs?')).toBeNull();
+  expect(screen.queryByLabelText('2 packs')).toBeNull();
 });
 
-test('quantity is asked even when only one size exists', async () => {
+test('a single curd size is selected and shows the server question once', async () => {
   const onAction = jest.fn().mockResolvedValue(undefined);
-  await render(<AssistantCard card={choiceCard({ ...twoSizes, variants: twoSizes.variants.slice(0, 1) })} busy={false} onDecision={jest.fn()} onAction={onAction} onReview={jest.fn()} />);
+  const question = 'How many packs of Curd (500 g)?';
+  await render(<AssistantCard card={choiceCard({ ...twoSizes, question, message: question, variants: twoSizes.variants.slice(0, 1) })} busy={false} onDecision={jest.fn()} onAction={onAction} onReview={jest.fn()} />);
   expect(screen.getByLabelText('Choose 500 g')).toBeTruthy();
+  expect(screen.getAllByText(question)).toHaveLength(1);
   expect(screen.queryByText('How many packs?')).toBeNull();
-  await fireEvent.press(screen.getByLabelText('Choose 500 g'));
-  expect(screen.getByText('How many packs?')).toBeTruthy();
   await fireEvent.press(screen.getByLabelText('1 pack'));
   expect(onAction).toHaveBeenCalledWith(cardId, 'cart_choice', { choiceId, variantId: V1, quantity: 1 });
 });

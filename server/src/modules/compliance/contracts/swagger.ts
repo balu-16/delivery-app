@@ -67,6 +67,19 @@ export class ApprovalView {
   @ApiProperty() status!: string;
   @ApiProperty({ format: 'date-time' }) expires_at!: string;
   @ApiProperty({ format: 'date-time' }) created_at!: string;
+  @ApiProperty({
+    description:
+      'Server-calculated: true only while PENDING, unexpired, maker != actor and actor is SUPER_ADMIN. Execution rechecks policy.',
+  })
+  canApprove!: boolean;
+  @ApiProperty({ description: 'Server-calculated mirror of canApprove for the reject flow.' })
+  canReject!: boolean;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Reason a decision is unavailable; null when the actor may decide.',
+  })
+  cannotApproveReason!: string | null;
 }
 export class ApprovalPageView {
   @ApiProperty({ type: [ApprovalView] }) items!: ApprovalView[];

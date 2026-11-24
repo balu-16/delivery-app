@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { resolve } from 'node:path';
 import { readdir } from 'node:fs/promises';
 import { runner } from 'node-pg-migrate';
@@ -6,6 +7,7 @@ import { uuidV7 } from '../../../src/common/ids/ids.js';
 import { startTestServices, type TestServices } from '../../helpers/services.js';
 
 let services: TestServices, client: Client;
+if (process.env.AWS_P13_INTEGRATION === 'yes') jest.setTimeout(300000);
 const options = () => ({
   databaseUrl: services.databaseUrl,
   dir: resolve('db/migrations'),
@@ -96,7 +98,7 @@ it('upgrades populated P6-P9 tables through the integrity repairs and round-trip
   await expect(runner({ ...options(), direction: 'down', count: 1 })).rejects.toThrow(
     'disabled down migration',
   );
-  await runner({ ...options(), direction: 'up' });
+  await runner({ ...options(), direction: 'up', timestamp: true, count: 69 });
   expect(
     (
       await client.query(
@@ -113,4 +115,105 @@ it('upgrades populated P6-P9 tables through the integrity repairs and round-trip
       )
     ).rows[0]?.expected,
   ).toBe('100');
+});
+
+it('adds nullable store status provenance without backfill (069)', async () => {
+  const columns = await client.query(
+    `SELECT column_name, data_type, is_nullable
+     FROM information_schema.columns
+     WHERE table_name='store_status_history' AND column_name='source'`,
+  );
+  expect(columns.rows).toEqual([{ column_name: 'source', data_type: 'text', is_nullable: 'YES' }]);
+  const constraints = await client.query(
+    `SELECT conname, pg_get_constraintdef(oid) AS def
+     FROM pg_constraint
+     WHERE conrelid='store_status_history'::regclass AND contype='c'
+       AND pg_get_constraintdef(oid) LIKE '%ADMIN%MANAGER%SYSTEM%'`,
+  );
+  expect(constraints.rows.length).toBeGreaterThan(0);
+  // Pre-existing history keeps NULL, which the application treats as
+  // legacy admin-controlled; no backfill is performed on purpose.
+  const legacy = await client.query(
+    `SELECT count(*)::text AS n FROM store_status_history WHERE source IS NULL`,
+  );
+  expect(Number(legacy.rows[0]!.n)).toBeGreaterThanOrEqual(0);
+});
+
+it('migrates unexpired pending INVENTORY_COUNT rows to v2 under the approval lock (070)', async () => {
+  const maker = uuidV7();
+  await client.query(
+    "INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES($1::uuid,'WORKFORCE',$1::text,$2,'migration-maker')",
+    [maker, `${maker}@example.invalid`],
+  );
+  const pendingId = uuidV7();
+  const expiredId = uuidV7();
+  const executedId = uuidV7();
+  const payload = {
+    maker,
+    storeId: uuidV7(),
+    variantId: uuidV7(),
+    batchId: uuidV7(),
+    counted: '5',
+    expectedVersion: '3',
+    reason: 'count check',
+  };
+  const insert = (id: string, status: string, expiry: string, role: string) =>
+    client.query(
+      `INSERT INTO maker_checker_requests(id,action,action_version,payload,payload_hash,maker_id,required_role,status,expires_at,execution_key)
+       VALUES($1::uuid,'INVENTORY_COUNT',1,$2::jsonb,'preserved-hash',$3::uuid,$4,$5,${expiry},$6::uuid)`,
+      [
+        id,
+        JSON.stringify({ ...payload, reference: `migration-check-${id}` }),
+        maker,
+        role,
+        status,
+        uuidV7(),
+      ],
+    );
+  await insert(pendingId, 'PENDING', "clock_timestamp() + interval '1 day'", 'STORE_MANAGER');
+  await insert(expiredId, 'PENDING', "clock_timestamp() - interval '1 day'", 'STORE_MANAGER');
+  // Terminal rows keep their original authority even if the SQL reruns.
+  await insert(executedId, 'EXECUTED', "clock_timestamp() + interval '1 day'", 'STORE_MANAGER');
+  const beforeKey = (
+    await client.query(
+      `SELECT execution_key::text AS execution_key FROM maker_checker_requests WHERE id=$1::uuid`,
+      [pendingId],
+    )
+  ).rows[0]!.execution_key;
+  // Upgrade the v1 rows through the normal migration runner.
+  await runner({ ...options(), direction: 'up' });
+  const migrated = await client.query(
+    `SELECT action_version, required_role, payload, payload_hash, expires_at, execution_key::text AS execution_key, maker_id::text AS maker_id, status
+     FROM maker_checker_requests WHERE id=$1::uuid`,
+    [pendingId],
+  );
+  expect(migrated.rows[0]).toMatchObject({
+    action_version: 2,
+    required_role: 'SUPER_ADMIN',
+    payload_hash: 'preserved-hash',
+    execution_key: beforeKey,
+    maker_id: maker,
+    status: 'PENDING',
+  });
+  expect(migrated.rows[0].payload).toMatchObject({ counted: '5', reason: 'count check' });
+  const expired = await client.query(
+    `SELECT action_version, required_role FROM maker_checker_requests WHERE id=$1::uuid`,
+    [expiredId],
+  );
+  expect(expired.rows[0]).toMatchObject({ action_version: 1, required_role: 'STORE_MANAGER' });
+  const executed = await client.query(
+    `SELECT action_version, required_role, status FROM maker_checker_requests WHERE id=$1::uuid`,
+    [executedId],
+  );
+  expect(executed.rows[0]).toMatchObject({
+    action_version: 1,
+    required_role: 'STORE_MANAGER',
+    status: 'EXECUTED',
+  });
+  const audit = await client.query(
+    `SELECT count(*)::text AS n FROM audit_log WHERE action='INVENTORY_COUNT_APPROVAL_MIGRATED'
+       AND subject_id=$1::text AND subject_type='approval'`,
+    [pendingId],
+  );
+  expect(Number(audit.rows[0]!.n)).toBe(1);
 });

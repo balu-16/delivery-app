@@ -7,7 +7,7 @@ jest.mock('../src/auth/session', () => ({ accessToken: jest.fn(async () => 'toke
 jest.mock('../src/notifications/push', () => ({ unregisterPushBeforeSignOut: jest.fn() }));
 jest.mock('../src/api/customer', () => ({
   customerApi: { catalog: jest.fn(), wallet: jest.fn() },
-  customerDetailsApi: { orders: jest.fn(), subscriptions: jest.fn(), ledger: jest.fn(), notifications: jest.fn() },
+  customerDetailsApi: { orders: jest.fn(), ledger: jest.fn(), notifications: jest.fn() },
 }));
 
 function deferred<T>() {
@@ -22,8 +22,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   const address = (id:string):CustomerAddress => ({id, line1:'Street',pincode:'520001',contactName:'Customer',contactPhone:'+919876543210',point:{lat:16.5,lng:80.6},isDefault:id==='first',version:'1'});
   useCustomer.setState({ selectedAddress:'first', addresses:[address('first'),address('second')], products:[], cursor:null, error:null,
-    catalogLoad:{addressId:null,state:'idle'}, activityLoad:{orders:'idle',subscriptions:'idle'},
-    accountLoad:{wallet:'idle',ledger:'idle',notifications:'idle'}, orders:[], subscriptions:[], notifications:[], wallet:null, ledger:[] });
+    catalogLoad:{addressId:null,state:'idle'}, activityLoad:{orders:'idle'},
+    accountLoad:{wallet:'idle',ledger:'idle',notifications:'idle'}, orders:[], notifications:[], wallet:null, ledger:[] });
 });
 
 test('catalog loading resolves to empty or error, and a retry can succeed', async () => {
@@ -55,15 +55,11 @@ test('a late catalog response cannot replace the selected address', async () => 
 });
 
 test('orders and subscriptions settle independently when one request fails', async () => {
-  const subscriptions = deferred<Awaited<ReturnType<typeof customerDetailsApi.subscriptions>>>();
   jest.mocked(customerDetailsApi.orders).mockResolvedValue({items:[],nextCursor:null});
-  jest.mocked(customerDetailsApi.subscriptions).mockReturnValue(subscriptions.promise);
-  const work = useCustomer.getState().loadActivity();
-  expect(useCustomer.getState().activityLoad).toEqual({orders:'loading',subscriptions:'loading'});
-  await flush();
-  expect(useCustomer.getState().activityLoad).toEqual({orders:'success',subscriptions:'loading'});
-  subscriptions.reject(new Error('offline')); await work;
-  expect(useCustomer.getState().activityLoad).toEqual({orders:'success',subscriptions:'error'});
+  const work = useCustomer.getState().loadActivity({ group: 'all' });
+  expect(useCustomer.getState().activityLoad).toEqual({orders:'loading'});
+  await work;
+  expect(useCustomer.getState().activityLoad).toEqual({orders:'success'});
 });
 
 test('a failed background refresh keeps previously loaded notifications', async () => {
@@ -73,4 +69,15 @@ test('a failed background refresh keeps previously loaded notifications', async 
   useCustomer.setState({accountLoad:{wallet:'idle',ledger:'idle',notifications:'success'}});
   await useCustomer.getState().loadAccount();
   expect(useCustomer.getState().accountLoad).toEqual({wallet:'error',ledger:'success',notifications:'success'});
+});
+
+test('a silent account refresh records per-section errors without the banner', async () => {
+  jest.mocked(customerApi.wallet).mockRejectedValue(new Error('offline'));
+  jest.mocked(customerDetailsApi.ledger).mockResolvedValue({items:[],nextCursor:null});
+  jest.mocked(customerDetailsApi.notifications).mockRejectedValue(new Error('offline'));
+  await useCustomer.getState().loadAccount({silent:true});
+  expect(useCustomer.getState().accountLoad).toEqual({wallet:'error',ledger:'success',notifications:'error'});
+  expect(useCustomer.getState().error).toBeNull();
+  await useCustomer.getState().loadAccount();
+  expect(useCustomer.getState().error).toBeTruthy();
 });

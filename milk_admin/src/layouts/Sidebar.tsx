@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   LayoutDashboard, Store, Package, Boxes, ShoppingCart, Users, Wallet, Bike, Tags,
-  CalendarClock, Headset, FileOutput, ClipboardCheck, Settings2, ChevronLeft, ChevronRight, X,
+  Headset, FileOutput, ClipboardCheck, Settings2, ChevronLeft, ChevronRight, X, Images,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Logo } from '@/illustrations/Logo'
@@ -28,7 +28,7 @@ export const NAV_ITEMS = [
   { to: '/payments', label: 'Payments, refunds & wallets', icon: Wallet },
   { to: '/payouts', label: 'Rider payouts & COD', icon: Bike },
   { to: '/offers', label: 'Offers & notifications', icon: Tags },
-  { to: '/subscriptions', label: 'Subscriptions', icon: CalendarClock },
+  { to: '/app-content', label: 'App content', icon: Images },
   { to: '/support', label: 'Support & reviews', icon: Headset },
   { to: '/reports', label: 'Reports & exports', icon: FileOutput },
   { to: '/approvals', label: 'Approvals & compliance', icon: ClipboardCheck },

@@ -37,9 +37,11 @@ it('upgrades an empty then populated previous schema and refuses to roll back a 
   const history = await client.query('SELECT count(*)::int AS count FROM pgmigrations');
   expect(history.rows[0]?.count).toBeGreaterThan(0);
   if (history.rows[0].count > 1) {
-    await expect(runner({ ...options, direction: 'down', count: 1 })).rejects.toThrow(
-      'User has disabled down migration on file: 046_admin_portal_read_indexes',
-    );
+    // Target 046 explicitly: newer migrations above it may roll back fine,
+    // which must not mask the forward-only refusal under test.
+    await expect(
+      runner({ ...options, direction: 'down', file: '046_admin_portal_read_indexes' }),
+    ).rejects.toThrow('User has disabled down migration on file: 046_admin_portal_read_indexes');
     expect(
       (
         await client.query(

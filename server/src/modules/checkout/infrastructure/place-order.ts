@@ -68,6 +68,22 @@ export class PlaceOrderSaga {
     const id = rows.rows[0]?.id;
     return id ? await this.deps.orders.byId(id, { tx }) : null;
   }
+  /**
+   * Finds the same-user order placed for an intent under ANY idempotency key.
+   * The intent index keeps this to one row; consumed intents always resolve
+   * here so a cross-key retry recovers instead of recording a rejection.
+   */
+  async findByIntent(
+    userId: string,
+    intentId: string,
+    tx?: TransactionContext,
+  ): Promise<OrderView | null> {
+    const rows = await sql<{ id: string }>`SELECT id::text AS id FROM orders
+      WHERE user_id=${userId}::uuid AND metadata->>'intentId' = ${intentId}
+      ORDER BY placed_at LIMIT 1`.execute(tx ?? this.deps.db);
+    const id = rows.rows[0]?.id;
+    return id ? await this.deps.orders.byId(id, { tx }) : null;
+  }
   async place(
     userId: string,
     input: CheckoutPlaceRequest,
@@ -239,6 +255,7 @@ export class PlaceOrderSaga {
         })),
         targetDeliveryAt: now.toISOString(),
         ttlSeconds: windowSeconds,
+        requireListed: true,
       },
       tx,
     );

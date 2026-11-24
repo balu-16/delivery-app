@@ -1,5 +1,5 @@
-import { cartChoiceExpiresAt, cartChoiceId, cartChoiceQuestion, cartChoiceSubmitted, cartChoiceVariants, pendingCartChoiceKey, readPendingCartChoice } from '../src/agent/cart-choice';
-import type { AgentCard } from '../src/agent/types';
+import { cartChoiceAnsweredInMessage, cartChoiceExpiresAt, cartChoiceId, cartChoiceMessageText, cartChoiceQuestion, cartChoiceSubmitted, cartChoiceVariants, pendingCartChoiceKey, readPendingCartChoice } from '../src/agent/cart-choice';
+import type { AgentCard, AgentMessage } from '../src/agent/types';
 
 const V1 = '11111111-1111-4111-8111-111111111111';
 const V2 = '22222222-2222-4222-8222-222222222222';
@@ -42,6 +42,19 @@ test('expiry, choice id, question, and submitted status', () => {
   expect(cartChoiceQuestion(card({ question: 'How many packs?' }))).toBe('How many packs?');
   expect(cartChoiceSubmitted(card({ status: 'committed' }))).toBe(true);
   expect(cartChoiceSubmitted(card({ status: 'pending' }))).toBe(false);
+});
+
+test('the card owns the quantity question in live and reopened messages', () => {
+  const question = 'How many packs of Curd (400 g)?';
+  const message: AgentMessage = { id: C1, role: 'assistant', text: question, cards: [card({ question, message: question })], createdAt: '' };
+  expect(cartChoiceMessageText(message)).toBe('');
+  expect(cartChoiceMessageText({ ...message, text: `Please review the current options. ${question}` }))
+    .toBe('Please review the current options.');
+  expect(cartChoiceMessageText({ ...message, text: 'Your cart was updated.' })).toBe('Your cart was updated.');
+  const committed = card({ question, status: 'committed', selection: { variantId: V1, quantity: 1 } });
+  expect(cartChoiceMessageText({ ...message, cards: [committed] })).toBe('');
+  expect(cartChoiceAnsweredInMessage(committed)).toBe(false);
+  expect(cartChoiceAnsweredInMessage(card({ ...committed.payload, selection: { variantId: V1, quantity: 1, answeredInMessage: true } }))).toBe(true);
 });
 
 test('round-trips a pending choice and rejects corrupt records', () => {

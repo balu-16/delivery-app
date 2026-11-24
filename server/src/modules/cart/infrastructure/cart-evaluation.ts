@@ -112,10 +112,13 @@ const lineQuery = (cartId: string, storeId: string | null) =>
     ORDER BY im.position,m.id LIMIT 1) AS image_id,
   p.category_id::text AS category_id,p.gst_rate_bps,p.published,p.deleted_at AS product_deleted,
   v.deleted_at AS variant_deleted,price.id::text AS price_id,price.selling_paise::text AS fresh_price,price.mrp_paise::text AS fresh_mrp,
-  CASE WHEN ${storeId}::uuid IS NULL THEN ci.quantity::text ELSE COALESCE(a.available,0)::text END AS available
+  CASE WHEN ${storeId}::uuid IS NULL THEN ci.quantity::text
+    WHEN si.listed IS NOT TRUE THEN '0'
+    ELSE COALESCE(a.available,0)::text END AS available
   FROM cart_items ci
   JOIN catalog_variants v ON v.id=ci.variant_id
   JOIN catalog_products p ON p.id=v.product_id
+  LEFT JOIN store_inventory si ON si.store_id=${storeId}::uuid AND si.variant_id=ci.variant_id
   LEFT JOIN inventory_saleable_availability a ON a.store_id=${storeId}::uuid AND a.variant_id=ci.variant_id
   LEFT JOIN catalog_global_prices price ON price.variant_id=ci.variant_id
   WHERE ci.cart_id=${cartId}::uuid ORDER BY ci.variant_id`;

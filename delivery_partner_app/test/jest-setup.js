@@ -1,3 +1,8 @@
+/* global jest */
+
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
+
 // Render the loading UI without a native animation runtime in Jest.
 jest.mock('react-native-reanimated', () => {
   const React = require('react');
@@ -9,5 +14,19 @@ jest.mock('react-native-reanimated', () => {
     useReducedMotion: () => true,
     withRepeat: value => value, withTiming: value => value,
     cancelAnimation: () => {}, Easing: { quad: value => value, inOut: value => value },
+  };
+});
+
+jest.mock('expo-router', () => {
+  const router = {
+    push: jest.fn(),
+    replace: jest.fn(),
+    back: jest.fn(),
+    canGoBack: jest.fn(() => false),
+  };
+  return {
+    useRouter: () => router,
+    useLocalSearchParams: () => ({}),
+    router,
   };
 });

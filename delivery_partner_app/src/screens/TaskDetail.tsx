@@ -21,7 +21,7 @@ function openMap(lat: number | null, lng: number | null) {
   void Linking.openURL(url);
 }
 
-export function TaskDetail({ task, enabled, busy, run }: { task: Task; enabled: boolean; busy: boolean; run: Run }) {
+export function TaskDetail({ task, account, enabled, busy, run }: { task: Task; account: string; enabled: boolean; busy: boolean; run: Run }) {
   const [code, setCode] = useState('');
   const [cash, setCash] = useState('');
   const [proof, setProof] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export function TaskDetail({ task, enabled, busy, run }: { task: Task; enabled: 
   const codPaise = parseRupees(cash);
   async function chooseProof() {
     setUploading(true); setProofError('');
-    try { const mediaId = await uploadProof(task.id); if (mediaId) setProof(mediaId); }
+    try { const mediaId = await uploadProof(task.id, account); if (mediaId) setProof(mediaId); }
     catch (failure) { setProofError(failure instanceof ApiError || failure instanceof UploadError ? failure.message : 'Could not upload proof. Please try again.'); }
     finally { setUploading(false); }
   }

@@ -88,7 +88,7 @@ export async function policyText(topic: PolicyTopic, config: AppConfig): Promise
         'Cash on delivery follows the eligibility rules at checkout. Online payment is coming soon.'
       );
     case 'subscriptions':
-      return 'Subscription deliveries are not available right now. If that changes, the app and this chat will show it.';
+      return 'DairyDirect offers one-time orders.';
     case 'contact':
       return (
         'You can ask me here to report an order issue or to bring in a human agent, and I will create a support request for you. ' +

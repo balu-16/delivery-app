@@ -69,8 +69,10 @@ const settings: Partial<Record<ConfigKey, unknown>> = {
   catalogAllowedGstBps: [0, 500, 1200, 1800, 2800],
 };
 /** Full P5 fixture world: two stores, three customers, an admin and priced stock. */
-export async function createP5World(): Promise<P5World> {
-  const services = await startTestServices();
+export async function createP5World(
+  options: Parameters<typeof startTestServices>[0] = {},
+): Promise<P5World> {
+  const services = await startTestServices(options);
   let opened: DatabaseHandle | undefined;
   try {
     await runner({

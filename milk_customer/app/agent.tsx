@@ -27,7 +27,11 @@ import { ApiError } from '@/src/api/client';
 import { agentRunErrorMessage, requestMessage } from '@/src/api/messages';
 import { distinctAddressCards, pendingLocationAddressId } from '@/src/agent/distinct-address-cards';
 import { requireLocationServices } from '@/src/utils/location-policy';
-import { cartChoiceOpen, cartChoiceReference, pendingCartChoiceKey, readPendingCartChoice, type CartChoiceReference, type PendingCartChoice } from '@/src/agent/cart-choice';
+import {
+  cartChoiceAnsweredInMessage, cartChoiceMessageText, cartChoiceOpen, cartChoiceReference,
+  pendingCartChoiceKey, readPendingCartChoice,
+  type CartChoiceReference, type CartChoiceSelection, type PendingCartChoice,
+} from '@/src/agent/cart-choice';
 import { welcomeFor } from '@/src/agent/welcome';
 import { images } from '@/constants/assets';
 
@@ -61,7 +65,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
   const [choiceStorage, setChoiceStorage] = useState<{ threadId: string; recover: boolean } | null>(null);
   const choiceStorageReady = !!thread && choiceStorage?.threadId === thread.id;
   const recoverChoice = choiceStorageReady && choiceStorage?.recover === true;
-  const [submittedChoices, setSubmittedChoices] = useState<Record<string, true>>({});
+  const [submittedChoices, setSubmittedChoices] = useState<Record<string, CartChoiceSelection>>({});
   const [loadingHistory, setLoadingHistory] = useState(false), [feedback, setFeedback] = useState<Record<string, 'up' | 'down'>>({});
   const [addressOpen, setAddressOpen] = useState(false);
   const [pendingContinuation, setPendingContinuation] = useState<AddressContinuation | null>(null);
@@ -411,8 +415,12 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       }
       else if (payload.screen === 'cart') router.push('/cart' as Href);
       else if (payload.screen === 'products') router.push('/products' as Href);
-      else if (payload.screen === 'orders') router.push('/my-dairy' as Href);
-      else if (payload.screen === 'support') router.push({ pathname: '/profile', params: { open: 'support' } });
+      else if (payload.screen === 'orders') {
+        const oid = typeof payload.orderId === 'string' && /^[\\da-f]{8}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{12}$/i.test(payload.orderId) ? payload.orderId : null;
+        if (oid) router.push({ pathname: '/orders/[orderId]', params: { orderId: oid } } as Href);
+        else router.push('/my-dairy' as Href);
+      }
+      else if (payload.screen === 'support') router.push({ pathname: '/support', params: typeof payload.orderId === 'string' ? { orderId: payload.orderId as string } : {} } as Href);
       return;
     }
     if (streaming || busy || cardActionInFlight.current) {
@@ -448,12 +456,12 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       try {
         await AsyncStorage.setItem(pendingCartChoiceKey(thread.id), JSON.stringify(current));
         await agentClient.action(thread.id, cardId, action, decision, current.actionId);
+        setSubmittedChoices((value) => ({ ...value, [cardId]: { variantId, quantity } }));
+        void refresh().catch(() => undefined);
+        void useCustomer.getState().refreshCart();
         await AsyncStorage.removeItem(pendingCartChoiceKey(thread.id));
         pendingChoice.current = null;
         setChoiceStorage((value) => value && value.threadId === thread.id ? { ...value, recover: false } : value);
-        setSubmittedChoices((value) => ({ ...value, [cardId]: true }));
-        void refresh().catch(() => undefined);
-        void useCustomer.getState().refreshCart();
       } catch (failure) {
         if (failure instanceof ApiError && failure.status >= 400 && failure.status < 500 && failure.status !== 408 && failure.status !== 429 && failure.code !== 'RUN_IN_PROGRESS') {
           try { await AsyncStorage.removeItem(pendingCartChoiceKey(thread.id)); pendingChoice.current = null; setChoiceStorage((value) => value && value.threadId === thread.id ? { ...value, recover: false } : value); }
@@ -512,14 +520,34 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       return { ...current, messages };
     });
   };
-  const renderMessage = ({ item }: { item: AgentMessage }) => !item.text && !item.cards.length ? null : <View style={[styles.message, item.role === 'user' ? styles.userMessage : styles.assistantMessage]}>
-    {!!item.text && <Text selectable style={styles.body}>{item.text}</Text>}
-    {distinctAddressCards(item.cards).map(card => <AssistantCard key={card.cardId} card={card} locale={locale} busy={busy || streaming || thread?.status === 'archived'} onDecision={(id, decision) => void run('resume', { id, decision })} onAction={cardAction} onReview={setDecisionCard} />)}
-    {item.role === 'assistant' && !busy && !!(item.text || item.cards.length) && <View style={styles.feedback}>
-      <Pressable accessibilityRole="button" accessibilityLabel={t.feedbackUp} accessibilityState={{ selected: feedback[item.id] === 'up' }} onPress={() => void rate(item.id, 'up')} hitSlop={8}><Ionicons name={feedback[item.id] === 'up' ? 'thumbs-up' : 'thumbs-up-outline'} size={18} color="#526c39" /></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={t.feedbackDown} accessibilityState={{ selected: feedback[item.id] === 'down' }} onPress={() => void rate(item.id, 'down')} hitSlop={8}><Ionicons name={feedback[item.id] === 'down' ? 'thumbs-down' : 'thumbs-down-outline'} size={18} color="#526c39" /></Pressable>
-    </View>}
-  </View>;
+  const renderMessage = ({ item }: { item: AgentMessage }) => {
+    const body = cartChoiceMessageText(item);
+    const cards = distinctAddressCards(item.cards).filter(card => !cartChoiceAnsweredInMessage(card));
+    if (!body && !cards.length) return null;
+    return <View style={[styles.message, item.role === 'user' ? styles.userMessage : styles.assistantMessage]}>
+      {!!body && <Text selectable style={styles.body}>{body}</Text>}
+      {cards.map(card => {
+        const selection = submittedChoices[card.cardId];
+        const displayed = selection
+          ? { ...card, payload: { ...card.payload, status: 'committed', selection } }
+          : card;
+        const restoringChoice = card.type === 'cart_choice' && (!cardStorageReady || !choiceStorageReady || recoverChoice);
+        return <AssistantCard
+          key={card.cardId}
+          card={displayed}
+          locale={locale}
+          busy={busy || streaming || thread?.status === 'archived' || restoringChoice}
+          onDecision={(id, decision) => void run('resume', { id, decision })}
+          onAction={cardAction}
+          onReview={setDecisionCard}
+        />;
+      })}
+      {item.role === 'assistant' && !busy && <View style={styles.feedback}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t.feedbackUp} accessibilityState={{ selected: feedback[item.id] === 'up' }} onPress={() => void rate(item.id, 'up')} hitSlop={8}><Ionicons name={feedback[item.id] === 'up' ? 'thumbs-up' : 'thumbs-up-outline'} size={18} color="#526c39" /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={t.feedbackDown} accessibilityState={{ selected: feedback[item.id] === 'down' }} onPress={() => void rate(item.id, 'down')} hitSlop={8}><Ionicons name={feedback[item.id] === 'down' ? 'thumbs-down' : 'thumbs-down-outline'} size={18} color="#526c39" /></Pressable>
+      </View>}
+    </View>;
+  };
   const activeChoice = thread?.messages.flatMap(message => message.cards).reverse()
     .find(card => !submittedChoices[card.cardId] && cartChoiceOpen(card));
   const choicePending = !!activeChoice;
@@ -544,7 +572,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
       onCart={() => { const card = decisionCard; setDecisionCard(null); if (card) setTimeout(() => void cardAction(card.cardId, 'open_screen', { screen: 'cart' }), 150); }}
       onProducts={() => { const card = decisionCard; setDecisionCard(null); if (card) setTimeout(() => void cardAction(card.cardId, 'open_screen', { screen: 'products' }), 150); }}
       onSupport={() => { setDecisionCard(null); setTimeout(() => setSupportOpen(true), 150); }} />
-    <BottomSheet visible={historyOpen} onClose={() => setHistoryOpen(false)} title="Chat history">
+    <BottomSheet visible={historyOpen} onClose={() => setHistoryOpen(false)} title="Chat history" subtitle="Recent chats">
       <View style={{ gap: 8 }}>
         {chatHistory.map(chat => <Pressable key={chat.id} accessibilityRole="button" style={styles.historyItem} onPress={() => { setHistoryOpen(false); setTimeout(() => router.setParams({ threadId: chat.id, nudgeName: undefined }), 150); }}>
           <Text style={styles.historyTitle}>{chat.title || 'New chat'}</Text>
@@ -554,6 +582,7 @@ function AssistantConversation({ userId, locale, initialThreadId, profileName, n
         {!historyBusy && !historyError && !chatHistory.length && <Text style={styles.body}>No chats yet.</Text>}
         {(historyCursor || historyError) && <Pressable accessibilityRole="button" disabled={historyBusy} style={styles.chip} onPress={() => void loadChatHistory(historyError ? undefined : historyCursor ?? undefined)}><Text style={styles.link}>{historyError ? 'Try again' : 'Load more chats'}</Text></Pressable>}
         {historyBusy && <Text style={styles.status}>Loading chats…</Text>}
+        <Pressable accessibilityRole="button" style={styles.chip} onPress={() => { setHistoryOpen(false); setTimeout(() => router.push('/chat-history'), 150); }}><Text style={styles.link}>All chats</Text></Pressable>
       </View>
     </BottomSheet>
   </View>;

@@ -44,10 +44,12 @@ export async function currentPrice(
 }
 /** Saleable units of a variant at a store; the cart never reserves, it only clamps. */
 export async function availableAt(db: DB, storeId: string, variantId: string): Promise<bigint> {
-  const result = await sql<{ available: string }>`SELECT COALESCE(available,0)::text AS available
-    FROM inventory_saleable_availability WHERE store_id=${storeId}::uuid AND variant_id=${variantId}::uuid`.execute(
-    db,
-  );
+  const result = await sql<{
+    available: string;
+  }>`SELECT CASE WHEN si.listed IS NOT TRUE THEN 0 ELSE COALESCE(a.available,0) END::text AS available
+    FROM inventory_saleable_availability a
+    LEFT JOIN store_inventory si ON si.store_id=a.store_id AND si.variant_id=a.variant_id
+    WHERE a.store_id=${storeId}::uuid AND a.variant_id=${variantId}::uuid`.execute(db);
   return BigInt(result.rows[0]?.available ?? 0);
 }
 /**

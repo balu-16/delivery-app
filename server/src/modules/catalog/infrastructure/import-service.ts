@@ -94,7 +94,7 @@ export class ImportService implements CatalogImports {
   async get(owner: string, id: string) {
     if (!(await this.identity.hasRole(owner, ['SUPER_ADMIN']))) throw new Error('FORBIDDEN');
     const rows =
-      await sql`SELECT id,status,dry_run AS "dryRun",rows_total AS "rowsTotal",checkpoint,errors,approval_id AS "approvalId",created_at AS "createdAt",updated_at AS "updatedAt" FROM catalog_import_jobs WHERE id=${id}::uuid`.execute(
+      await sql`SELECT id,status,dry_run AS "dryRun",rows_total AS "rowsTotal",checkpoint,errors,approval_id AS "approvalId",rejection_reason AS "rejectionReason",created_at AS "createdAt",updated_at AS "updatedAt" FROM catalog_import_jobs WHERE id=${id}::uuid`.execute(
         this.db,
       );
     if (!rows.rows[0]) throw new Error('RESOURCE_NOT_FOUND');

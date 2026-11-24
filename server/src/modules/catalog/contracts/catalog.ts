@@ -58,7 +58,32 @@ export interface CatalogAdmin {
     id: string,
   ): Promise<void>;
   publish(actor: string, id: string, published: boolean): Promise<void>;
-  setAssortment(actor: string, store: string, variant: string): Promise<void>;
+  setAssortment(actor: string, store: string, variant: string, active?: boolean): Promise<void>;
+  listAssortment(
+    actor: string,
+    variantId: string,
+    limit?: number,
+    cursor?: string,
+  ): Promise<{
+    items: Array<{ storeId: string; storeName: string; listed: boolean }>;
+    nextCursor: string | null;
+  }>;
+  listImages(
+    actor: string,
+    productId: string,
+  ): Promise<{
+    items: Array<{ mediaId: string; url: string; position: number }>;
+    revision: string;
+  }>;
+  replaceImages(
+    actor: string,
+    productId: string,
+    mediaIds: string[],
+    expectedRevision: string,
+  ): Promise<{
+    items: Array<{ mediaId: string; url: string; position: number }>;
+    revision: string;
+  }>;
   setPrice(actor: string, data: PriceDraft): Promise<{ approvalId?: string }>;
   approve(actor: string, requestId: string): Promise<void>;
   synonym(actor: string, term: string, expansion: string | null): Promise<void>;

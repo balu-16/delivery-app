@@ -26,7 +26,7 @@ export const MEDIA_STORAGE = Symbol('MEDIA_STORAGE');
 export interface CatalogMedia {
   target(
     owner: string,
-    purpose: 'PRODUCT_IMAGE' | 'CATALOG_IMPORT',
+    purpose: 'PRODUCT_IMAGE' | 'CATALOG_IMPORT' | 'CONTENT_IMAGE',
     type: string,
     size: number,
   ): Promise<{ mediaId: string; url: string; fields: Record<string, string> }>;

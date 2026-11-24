@@ -25,6 +25,9 @@ export interface DeliveryContext {
   deepLink: string | null;
   payload: Record<string, unknown>;
   retryAfterSeconds?: number;
+  /** Frozen at creation (074); retries resend this, never a live re-render. */
+  storedTitle?: string | null;
+  storedBody?: string | null;
 }
 
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -188,19 +191,29 @@ export class ChannelSender {
       'PUSH',
       context.locale as NotificationLocale,
     );
+    // §3E stored-text: retries prefer the frozen text; legacy rows (both
+    // null) fall back to the live render.
+    const storedText =
+      typeof context.storedTitle === 'string' && typeof context.storedBody === 'string'
+        ? { title: context.storedTitle, body: context.storedBody }
+        : null;
     const payload = {
       title:
         campaignId && typeof context.payload['title'] === 'string'
           ? context.payload['title']
-          : template
-            ? renderTemplate(template.subject, context.data)
-            : 'Notification',
+          : storedText
+            ? storedText.title
+            : template
+              ? renderTemplate(template.subject, context.data)
+              : 'Notification',
       body:
         campaignId && typeof context.payload['body'] === 'string'
           ? context.payload['body']
-          : template
-            ? renderTemplate(template.body, context.data)
-            : '',
+          : storedText
+            ? storedText.body
+            : template
+              ? renderTemplate(template.body, context.data)
+              : '',
       deepLink: context.deepLink,
       ...(campaignId && typeof context.payload['imageUrl'] === 'string'
         ? { imageUrl: context.payload['imageUrl'] }
@@ -303,12 +316,16 @@ export class ChannelSender {
       'EMAIL',
       context.locale as NotificationLocale,
     );
-    if (!template) return this.skip(context, 'TEMPLATE_MISSING');
+    const storedText =
+      typeof context.storedTitle === 'string' && typeof context.storedBody === 'string'
+        ? { title: context.storedTitle, body: context.storedBody }
+        : null;
+    if (!template && !storedText) return this.skip(context, 'TEMPLATE_MISSING');
     const result = await this.email.send({
       to: address,
       messageId: context.notificationId,
-      subject: renderTemplate(template.subject, context.data),
-      body: renderTemplate(template.body, context.data),
+      subject: storedText ? storedText.title : renderTemplate(template!.subject, context.data),
+      body: storedText ? storedText.body : renderTemplate(template!.body, context.data),
     });
     return this.complete(context, result.messageId);
   }

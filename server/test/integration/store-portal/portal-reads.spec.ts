@@ -34,6 +34,7 @@ let app: Awaited<ReturnType<typeof createApplication>>;
 let storeId: string;
 let otherStoreId: string;
 let managerCookie: string;
+let managerCsrf: string;
 
 function cookiesOf(response: { headers: Record<string, unknown> }): string[] {
   const raw = response.headers['set-cookie'];
@@ -52,6 +53,18 @@ async function loginManager(email: string, secret: string): Promise<void> {
   const cookie = cookiesOf(issued).find((c) => c.startsWith('store_session='));
   if (!cookie) throw new Error('store_session cookie missing');
   managerCookie = cookie.split(';')[0]!;
+  managerCsrf = (issued.json() as { csrfToken: string }).csrfToken;
+}
+
+async function postStatus(status: string, reason?: string) {
+  const server = app.getHttpAdapter().getInstance();
+  const response = await server.inject({
+    method: 'POST',
+    url: '/v1/store/status',
+    headers: { cookie: managerCookie, 'x-store-csrf': managerCsrf },
+    payload: { storeId, status, ...(reason === undefined ? {} : { reason }) },
+  });
+  return response;
 }
 
 async function get(url: string, status = 200) {
@@ -306,7 +319,7 @@ maybeRun('marks an owned notification unread and rejects cross-store facts', asy
   const marked = await server.inject({
     method: 'POST',
     url: `/v1/store/notifications/${unread!.id}/unread`,
-    headers: { cookie: managerCookie },
+    headers: { cookie: managerCookie, 'x-store-csrf': managerCsrf },
     payload: {},
   });
   expect(marked.statusCode).toBe(200);
@@ -316,4 +329,114 @@ maybeRun('marks an owned notification unread and rejects cross-store facts', asy
   expect(after.items.find((n) => n.id === unread!.id)?.readAt).toBeNull();
   // Cross-store denial: facts of an unassigned store are not observable.
   await get(`/v1/store/status?storeId=${otherStoreId}`, 404);
+});
+
+async function statusView() {
+  return (await get(`/v1/store/status?storeId=${storeId}`)) as {
+    store: {
+      status: string;
+      canPause?: boolean;
+      canResume?: boolean;
+      restrictionReason?: string;
+    };
+  };
+}
+
+async function forcePause(source: 'ADMIN' | 'SYSTEM' | null, reason = 'forced pause') {
+  const manager = await sql<{ id: string }>`SELECT id::text AS id FROM users
+    WHERE cognito_sub='portal-reads-manager'`.execute(db.db);
+  const { version } = (
+    await sql<{ version: string }>`SELECT (MAX(version)+1)::text AS version
+      FROM store_status_history WHERE store_id=${storeId}::uuid`.execute(db.db)
+  ).rows[0]!;
+  const previous = (
+    await sql<{ status: string }>`SELECT status FROM stores WHERE id=${storeId}::uuid`.execute(
+      db.db,
+    )
+  ).rows[0]!.status;
+  await sql`UPDATE stores SET status='PAUSED',pause_reason=${reason},version=version+1
+    WHERE id=${storeId}::uuid`.execute(db.db);
+  await sql`INSERT INTO store_status_history(store_id,version,previous_status,status,reason,actor_id,source)
+    VALUES(${storeId}::uuid,${version}::bigint,${previous},'PAUSED',${reason},${manager.rows[0]!.id}::uuid,${source})`.execute(
+    db.db,
+  );
+}
+
+maybeRun('exposes pause capabilities and the inventory approval threshold', async () => {
+  const view = await statusView();
+  expect(view.store.status).toBe('ONLINE');
+  expect(view.store.canPause).toBe(true);
+  expect(view.store.canResume).toBe(false);
+  expect(view.store.restrictionReason).toBe('STORE_NOT_PAUSED');
+  const batches = (await get(`/v1/store/inventory/batches?storeId=${storeId}`)) as {
+    inventoryAdjustmentApprovalUnits: number;
+  };
+  expect(Number.isSafeInteger(batches.inventoryAdjustmentApprovalUnits)).toBe(true);
+  expect(batches.inventoryAdjustmentApprovalUnits).toBeGreaterThan(0);
+});
+
+maybeRun('manager pause is resumable by the manager and records MANAGER provenance', async () => {
+  expect((await postStatus('PAUSED', 'staff shortage')).statusCode).toBe(200);
+  const paused = await statusView();
+  expect(paused.store.status).toBe('PAUSED');
+  expect(paused.store.canResume).toBe(true);
+  expect(paused.store.restrictionReason).toBe('STORE_NOT_ONLINE');
+  expect((await postStatus('ONLINE')).statusCode).toBe(200);
+  const resumed = await statusView();
+  expect(resumed.store.status).toBe('ONLINE');
+  const latest = (
+    await sql<{ source: string | null }>`SELECT source FROM store_status_history
+      WHERE store_id=${storeId}::uuid ORDER BY version DESC LIMIT 1`.execute(db.db)
+  ).rows[0]!;
+  expect(latest.source).toBe('MANAGER');
+});
+
+maybeRun('manager cannot resume admin, system or legacy pauses', async () => {
+  for (const source of ['ADMIN', 'SYSTEM'] as const) {
+    await forcePause(source);
+    const view = await statusView();
+    expect(view.store.canResume).toBe(false);
+    expect(view.store.restrictionReason).toBe('PAUSE_MANAGED_BY_ADMIN');
+    const denied = await postStatus('ONLINE');
+    expect(denied.statusCode).toBe(403);
+    expect((denied.json() as { code: string }).code).toBe('STORE_RESUME_NOT_MANAGER_OWNED');
+    const still = await statusView();
+    expect(still.store.status).toBe('PAUSED');
+  }
+  // Legacy row with unknown source (NULL) is admin-controlled.
+  await forcePause(null);
+  const legacy = await statusView();
+  expect(legacy.store.canResume).toBe(false);
+  const legacyDenied = await postStatus('ONLINE');
+  expect(legacyDenied.statusCode).toBe(403);
+  expect((legacyDenied.json() as { code: string }).code).toBe('STORE_RESUME_NOT_MANAGER_OWNED');
+});
+
+maybeRun(
+  'simultaneous resumes leave exactly one winner and delivery reads survive a pause',
+  async () => {
+    expect((await postStatus('PAUSED', 'simultaneous resume check')).statusCode).toBe(200);
+    const [first, second] = await Promise.all([postStatus('ONLINE'), postStatus('ONLINE')]);
+    const codes = [first.statusCode, second.statusCode].sort();
+    expect(codes).toEqual([200, 403]);
+    // Active orders keep a fulfillment path while the store is paused again:
+    // the pick-task queue remains readable.
+    expect((await postStatus('PAUSED', 'keep fulfilling active orders')).statusCode).toBe(200);
+    const queue = (await get(`/v1/store/pick-tasks?storeId=${storeId}&scope=ALL`)) as {
+      items: unknown[];
+    };
+    expect(Array.isArray(queue.items)).toBe(true);
+    const paused = await statusView();
+    expect(paused.store.status).toBe('PAUSED');
+    expect(paused.store.canResume).toBe(true);
+    expect((await postStatus('ONLINE')).statusCode).toBe(200);
+  },
+);
+
+maybeRun('manager pause requires an ONLINE store', async () => {
+  expect((await postStatus('PAUSED', 'pause first')).statusCode).toBe(200);
+  const denied = await postStatus('PAUSED', 'pause twice');
+  expect(denied.statusCode).toBe(403);
+  expect((denied.json() as { code: string }).code).toBe('STORE_PAUSE_NOT_ALLOWED');
+  expect((await postStatus('ONLINE')).statusCode).toBe(200);
 });

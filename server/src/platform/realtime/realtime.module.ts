@@ -14,6 +14,7 @@ import { createLogger } from '../../common/logging/logger.js';
 import { REALTIME_GATEWAY } from '../contracts/runtime.js';
 import { createRealtimeGateway, RealtimeGateway } from './realtime.js';
 import { createIamRedisCluster } from '../redis/iam-cluster.js';
+import { dependencyErrorCode } from '../health/dependency-error.js';
 import type { NamespaceSpec, RealtimeNamespace } from './realtime.js';
 
 /**
@@ -59,8 +60,12 @@ class RealtimeLifecycle implements OnApplicationBootstrap, BeforeApplicationShut
       };
       const publisher = createIamRedisCluster(config);
       const subscriber = createIamRedisCluster(config);
-      publisher.on('error', () => this.logger.error('Realtime cache publisher failed'));
-      subscriber.on('error', () => this.logger.error('Realtime cache subscriber failed'));
+      publisher.on('error', (error) =>
+        this.reportCacheError('socket-publisher', 'connection', error),
+      );
+      subscriber.on('error', (error) =>
+        this.reportCacheError('socket-subscriber', 'connection', error),
+      );
       try {
         const connections = await Promise.allSettled([publisher.connect(), subscriber.connect()]);
         if (connections.some((result) => result.status === 'rejected'))
@@ -73,9 +78,10 @@ class RealtimeLifecycle implements OnApplicationBootstrap, BeforeApplicationShut
           subscriptions.add(pending);
           void pending.then(
             () => subscriptions.delete(pending),
-            () => {
+            (error: unknown) => {
               subscriptions.delete(pending);
               subscriptionFailed = true;
+              this.reportCacheError('socket-subscriber', 'subscribe', error);
             },
           );
           return pending;
@@ -113,7 +119,7 @@ class RealtimeLifecycle implements OnApplicationBootstrap, BeforeApplicationShut
       maxConnectionsPerUser: this.env.SOCKET_MAX_CONNECTIONS_PER_USER,
       maxConnectionsPerNamespace: this.env.SOCKET_MAX_CONNECTIONS_PER_NAMESPACE,
       corsOrigins: this.env.CORS_ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()),
-      onError: (error) => this.logger.error({ err: error.message }, 'Realtime error'),
+      onError: (error) => this.reportCacheError('socket-adapter', 'realtime', error),
     });
     for (const register of this.pending.splice(0)) register();
     if (!this.gateway) {
@@ -127,6 +133,12 @@ class RealtimeLifecycle implements OnApplicationBootstrap, BeforeApplicationShut
       this.gateway = null;
       throw new Error('REALTIME_SUBSCRIPTION_FAILED');
     }
+  }
+  private reportCacheError(connection: string, operation: string, error: unknown): void {
+    this.logger.error(
+      { dependency: 'redis', connection, operation, code: dependencyErrorCode(error) },
+      'Realtime error',
+    );
   }
   async beforeApplicationShutdown(): Promise<void> {
     await this.gateway?.close();

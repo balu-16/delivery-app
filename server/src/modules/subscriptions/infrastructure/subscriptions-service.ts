@@ -10,6 +10,7 @@ import { lockActiveCustomer } from '../../identity/contracts/account-lock.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import type { OrderOperations } from '../../orders/contracts/orders.js';
 import { decodePage, pageResult } from '../domain/page.js';
+import { subscriptionsRetired } from '../retirement.js';
 import type { SubscriptionChanges } from '../contracts/subscriptions.js';
 import type { CheckoutOperations, ScheduledOrderInput } from '../../checkout/contracts/checkout.js';
 import {
@@ -92,6 +93,17 @@ export class SubscriptionsService {
     return firstEditableDate(now, await this.config.get('subscriptionCutoffTime', tx));
   }
   async options(userId: string, addressId: string, variantId: string) {
+    // Compat phase: old purchase options render disabled in existing shape.
+    // Full serviceability/plan/slot lookup resumes only if the guard is lifted.
+    if (subscriptionsRetired()) {
+      const cutoff = await this.config.get('subscriptionCutoffTime');
+      return {
+        enabled: false,
+        eligible: false,
+        firstStartDate: firstEditableDate(new Date(), cutoff),
+        slots: [],
+      };
+    }
     const selected = await sql<{
       store_id: string;
     }>`SELECT z.store_id::text FROM addresses a JOIN LATERAL (
@@ -152,6 +164,7 @@ export class SubscriptionsService {
     };
   }
   async create(userId: string, input: CreateSubscription, outer?: TransactionContext) {
+    if (subscriptionsRetired()) throw new Error('SUBSCRIPTIONS_RETIRED');
     validateFrequency(input.frequencyRule);
     addDays(input.startDate, 0);
     if (input.endDate) addDays(input.endDate, 0);
@@ -206,6 +219,14 @@ export class SubscriptionsService {
     });
   }
   async list(userId: string, limit?: number, cursor?: string) {
+    // Compat phase: old My Dairy list returns empty; confirmed orders stay
+    // reachable through regular order history.
+    if (subscriptionsRetired()) {
+      const scope = `customer:${userId}`,
+        page = decodePage(cursor, scope, limit);
+      if (page.after && !/^[0-9a-f-]{36}$/i.test(page.after)) throw new Error('INVALID_PAGE');
+      return { items: [], nextCursor: null };
+    }
     const scope = `customer:${userId}`,
       page = decodePage(cursor, scope, limit);
     if (page.after && !/^[0-9a-f-]{36}$/i.test(page.after)) throw new Error('INVALID_PAGE');
@@ -217,6 +238,7 @@ export class SubscriptionsService {
     return pageResult(rows.rows, page.limit, scope, (r) => r.id);
   }
   async get(userId: string, id: string) {
+    if (subscriptionsRetired()) throw new Error('RESOURCE_NOT_FOUND');
     const result =
       await sql`SELECT s.*,p.variant_id,s.start_date::text AS start_date,s.end_date::text AS end_date,s.next_delivery_date::text AS next_delivery_date FROM subscriptions s JOIN subscription_plans p ON p.id=s.plan_id WHERE s.user_id=${userId}::uuid AND s.id=${id}::uuid`.execute(
         this.db,
@@ -225,6 +247,7 @@ export class SubscriptionsService {
     return result.rows[0];
   }
   async upcoming(userId: string, id: string, from: string, to: string, limit = 100) {
+    if (subscriptionsRetired()) return [];
     addDays(from, 0);
     addDays(to, 0);
     if (
@@ -340,6 +363,13 @@ export class SubscriptionsService {
   }
 
   async calendar(userId: string, month: string, limit?: number, cursor?: string) {
+    if (subscriptionsRetired()) {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('INVALID_DATE');
+      const scope = `calendar:${userId}:${month}`,
+        page = decodePage(cursor, scope, limit);
+      if (page.after && !/^[0-9a-f-]{36}$/i.test(page.after)) throw new Error('INVALID_PAGE');
+      return { items: [], nextCursor: null };
+    }
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('INVALID_DATE');
     const from = `${month}-01`,
       to = addDays(
@@ -382,6 +412,7 @@ export class SubscriptionsService {
     return this.change(userId, id, { quantity }, outer);
   }
   async change(userId: string, id: string, input: SubscriptionChanges, outer?: TransactionContext) {
+    if (subscriptionsRetired()) throw new Error('SUBSCRIPTIONS_RETIRED');
     if (
       !Object.keys(input).length ||
       (input.quantity !== undefined && !/^[1-9]\d{0,18}$/.test(input.quantity))
@@ -416,6 +447,7 @@ export class SubscriptionsService {
     });
   }
   async skip(userId: string, id: string, date: string, remove = false, outer?: TransactionContext) {
+    if (subscriptionsRetired()) throw new Error('SUBSCRIPTIONS_RETIRED');
     addDays(date, 0);
     return this.run(outer, async (tx) => {
       const s = await this.lock(tx, userId, id);
@@ -457,6 +489,7 @@ export class SubscriptionsService {
     }
   }
   async pause(userId: string, id: string, from: string, to: string, outer?: TransactionContext) {
+    if (subscriptionsRetired()) throw new Error('SUBSCRIPTIONS_RETIRED');
     addDays(from, 0);
     addDays(to, 0);
     if (from > to) throw new Error('INVALID_INPUT');
@@ -475,6 +508,7 @@ export class SubscriptionsService {
     });
   }
   async resume(userId: string, id: string, outer?: TransactionContext) {
+    if (subscriptionsRetired()) throw new Error('SUBSCRIPTIONS_RETIRED');
     return this.run(outer, async (tx) => {
       const s = await this.lock(tx, userId, id);
       if (s.status !== 'PAUSED' && s.status !== 'ACTIVE')
@@ -512,6 +546,9 @@ export class SubscriptionsService {
     });
   }
   async cancel(userId: string, id: string, outer?: TransactionContext) {
+    // Cancel stays available through retirement: it ends future recurrence
+    // without scheduling deliveries and is the audited disposition path for
+    // historical agreements, compensating already-generated orders.
     return this.run(outer, async (tx) => {
       const s = await this.lock(tx, userId, id);
       if (s.status === 'CANCELLED') return { status: 'CANCELLED' };
@@ -519,6 +556,9 @@ export class SubscriptionsService {
       const effective = await this.editable(tx);
       await this.compensate(tx, s, effective, '9999-12-31');
       await sql`UPDATE subscriptions SET status='CANCELLED',next_delivery_date=NULL,updated_at=clock_timestamp() WHERE id=${id}::uuid`.execute(
+        tx,
+      );
+      await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id) VALUES(${uuidV7()}::uuid,${userId}::uuid,'SUBSCRIPTION_CANCELLED','subscription',${id})`.execute(
         tx,
       );
       return { status: 'CANCELLED', effectiveFrom: effective };

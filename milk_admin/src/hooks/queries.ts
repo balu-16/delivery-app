@@ -11,7 +11,8 @@ import * as apiPeople from '@/api/people'
 import * as apiPayments from '@/api/payments'
 import * as apiPayouts from '@/api/payouts'
 import * as apiOffers from '@/api/offers'
-import * as apiSubs from '@/api/subscriptions'
+import * as apiAppContent from '@/api/app-content'
+import * as apiNotificationTemplates from '@/api/notification-templates'
 import * as apiSupport from '@/api/support'
 import * as apiReports from '@/api/reports'
 import type { ReportKind } from '@/types'
@@ -40,9 +41,22 @@ export const useDashboard = (range: RangeKey, storeId: string | 'all') => {
 }
 
 // ── §2 Stores & service areas ────────────────────────────────────────────────
+/** Fetch all pages (cursor-follow up to 5 rounds) so selectors reach later pages. */
+async function fetchAllPages<T>(fetchPage: (cursor?: string) => Promise<{ items: T[]; nextCursor: string | null }>): Promise<T[]> {
+  const items: T[] = []
+  let cursor: string | undefined
+  for (let round = 0; round < 5; round++) {
+    const page = await fetchPage(cursor)
+    items.push(...page.items)
+    if (!page.nextCursor) break
+    cursor = page.nextCursor
+  }
+  return items
+}
+
 export const useStores = () => {
   const scope = useScope()
-  return useQuery({ queryKey: ['stores', scope], queryFn: () => apiStores.listStores(100).then((p) => p.items), ...V })
+  return useQuery({ queryKey: ['stores', scope], queryFn: () => fetchAllPages((cursor) => apiStores.listStores(100, cursor)), ...V })
 }
 export const useStoreOperations = (id: string | null) => {
   const scope = useScope()
@@ -50,15 +64,15 @@ export const useStoreOperations = (id: string | null) => {
 }
 export const useZones = () => {
   const scope = useScope()
-  return useQuery({ queryKey: ['zones', scope], queryFn: () => apiStores.listZones(100).then((p) => p.items), ...V })
+  return useQuery({ queryKey: ['zones', scope], queryFn: () => fetchAllPages((cursor) => apiStores.listZones(100, cursor)), ...V })
 }
 export const useCities = () => {
   const scope = useScope()
-  return useQuery({ queryKey: ['cities', scope], queryFn: () => apiStores.listCities(100).then((p) => p.items), ...V })
+  return useQuery({ queryKey: ['cities', scope], queryFn: () => fetchAllPages((cursor) => apiStores.listCities(100, cursor)), ...V })
 }
 export const useLegalEntities = () => {
   const scope = useScope()
-  return useQuery({ queryKey: ['legal-entities', scope], queryFn: () => apiStores.listLegalEntities(100).then((p) => p.items), ...V })
+  return useQuery({ queryKey: ['legal-entities', scope], queryFn: () => fetchAllPages((cursor) => apiStores.listLegalEntities(100, cursor)), ...V })
 }
 
 // ── §3 Products & pricing ────────────────────────────────────────────────────
@@ -77,11 +91,11 @@ export const useVariants = (limit = 100, productId?: string, enabled = true) => 
 }
 export const useCategories = () => {
   const scope = useScope()
-  return useQuery({ queryKey: ['categories', scope], queryFn: () => apiCatalog.listCategories(100).then((p) => p.items), ...V })
+  return useQuery({ queryKey: ['categories', scope], queryFn: () => fetchAllPages((cursor) => apiCatalog.listCategories(100, cursor)), ...V })
 }
 export const useBrands = () => {
   const scope = useScope()
-  return useQuery({ queryKey: ['brands', scope], queryFn: () => apiCatalog.listBrands(100).then((p) => p.items), ...V })
+  return useQuery({ queryKey: ['brands', scope], queryFn: () => fetchAllPages((cursor) => apiCatalog.listBrands(100, cursor)), ...V })
 }
 
 // ── §4 Inventory ─────────────────────────────────────────────────────────────
@@ -245,6 +259,36 @@ export const useCampaigns = (cursor?: string) => {
   const scope = useScope()
   return useQuery({ queryKey: ['campaigns', scope, cursor ?? null], queryFn: () => apiOffers.listCampaigns(cursor), ...V })
 }
+export const useCampaignDetail = (id: string | null) => {
+  const scope = useScope()
+  return useQuery({ queryKey: ['campaign-detail', scope, id], queryFn: () => apiOffers.getCampaign(id!), enabled: !!id, ...V })
+}
+export const useAppContent = () => {
+  const scope = useScope()
+  return useQuery({ queryKey: ['app-content', scope], queryFn: () => apiAppContent.listAppContent(), ...V })
+}
+export const useAppContentHistory = (slot: string | null, locale: string | null) => {
+  const scope = useScope()
+  return useQuery({
+    queryKey: ['app-content-history', scope, slot, locale],
+    queryFn: () => apiAppContent.getAppContentHistory(slot as apiAppContent.AppContentSlot, locale as apiAppContent.AppContentLocale),
+    enabled: !!slot && !!locale,
+    ...V,
+  })
+}
+export const useNotificationTemplates = () => {
+  const scope = useScope()
+  return useQuery({ queryKey: ['notification-templates', scope], queryFn: () => apiNotificationTemplates.listNotificationTemplates(), ...V })
+}
+export const useNotificationTemplateHistory = (templateKey: string | null, locale: string | null, channel: string | null) => {
+  const scope = useScope()
+  return useQuery({
+    queryKey: ['notification-template-history', scope, templateKey, locale, channel],
+    queryFn: () => apiNotificationTemplates.getNotificationTemplateHistory(templateKey!, locale!, channel!),
+    enabled: !!templateKey && !!locale && !!channel,
+    ...V,
+  })
+}
 export const useInbox = (cursor?: string) => {
   const scope = useScope()
   return useQuery({ queryKey: ['inbox', scope, cursor ?? null], queryFn: () => apiOffers.listInbox(cursor, 30), ...V })
@@ -259,24 +303,6 @@ export const useUnreadCount = (enabled = true) => {
     refetchIntervalInBackground: false,
     staleTime: 30_000,
   })
-}
-
-// ── §10 Subscriptions ────────────────────────────────────────────────────────
-export const useSubscriptionPlans = () => {
-  const scope = useScope()
-  return useQuery({ queryKey: ['sub-plans', scope], queryFn: () => apiSubs.subscriptionPlans(100).then((p) => p.items), ...V })
-}
-export const useSubscriptionSlots = (storeId: string | null) => {
-  const scope = useScope()
-  return useQuery({ queryKey: ['sub-slots', scope, storeId], queryFn: () => apiSubs.subscriptionSlots(storeId!), enabled: !!storeId, ...V })
-}
-export const useSubscriptionHolidays = (storeId: string | null) => {
-  const scope = useScope()
-  return useQuery({ queryKey: ['sub-holidays', scope, storeId], queryFn: () => apiSubs.subscriptionHolidays(storeId!), enabled: !!storeId, ...V })
-}
-export const useSubscriptionRuns = (storeId?: string) => {
-  const scope = useScope()
-  return useQuery({ queryKey: ['sub-runs', scope, storeId ?? null], queryFn: () => apiSubs.subscriptionRuns({ storeId, limit: 50 }), ...V })
 }
 
 // ── §11 Support & reviews ────────────────────────────────────────────────────

@@ -117,7 +117,7 @@ const storeRow = {
 }
 
 let passwordResetCalls = 0
-export let stateFlags = { cod: true, wallets: true, subscriptions: true }
+export let stateFlags = { cod: true, wallets: true }
 
 export function getTestState() {
   return { passwordResetCalls: () => passwordResetCalls, ids: { STORE_ID, STORE2_ID, PRODUCT_ID, VARIANT_ID, ORDER_ID, CUSTOMER_ID, TICKET_ID, PAYOUT_ID } }
@@ -316,6 +316,8 @@ export function installDefaultRoutes() {
     userId: 'rd-app-1', status: 'PENDING', vehicleType: 'SCOOTER', vehicleNo: 'MH01AB1234',
     homeStoreId: STORE_ID, requiredDocuments: ['license'], documents: [{ id: 'doc-1', type: 'license', status: 'PENDING', reason: null, createdAt: '2026-01-20T00:00:00.000Z' }],
   }))
+  setRoute('GET', /^\/v1\/admin\/rider-documents\/(?<id>[^/]+)\/read-url$/, () => ({ url: 'https://cdn.test/rider-doc/expiring?sig=short-lived' }))
+  setRoute('POST', /^\/v1\/admin\/rider-documents\/(?<id>[^/]+)\/review$/, () => ({ reviewed: true }))
 
   // ── payments (pinned attempts/refunds lists) ──
   setRoute('GET', /^\/v1\/admin\/payments\/attempts$/, () => page([
@@ -381,26 +383,6 @@ export function installDefaultRoutes() {
   setRoute('POST', /^\/v1\/admin\/notifications\/read-all$/, () => ({ updated: 1 }))
   setRoute('GET', /^\/v1\/admin\/notification-preferences$/, () => ([{ category: 'ADMIN', enabled: true }, { category: 'PROMOTIONS', enabled: false }]))
   setRoute('PATCH', /^\/v1\/admin\/notification-preferences$/, ({ body }) => body)
-
-  // ── subscriptions ──
-  setRoute('GET', /^\/v1\/admin\/subscriptions\/plans$/, () => page([{ variantId: VARIANT_ID, active: true, version: '1' }]))
-  setRoute('PUT', /^\/v1\/admin\/subscriptions\/plans$/, () => ({}))
-  setRoute('GET', /^\/v1\/admin\/subscriptions\/slots$/, () => page([
-    { id: 'sl-1', storeId: STORE_ID, name: 'Morning 6–9', startTime: '06:00', endTime: '09:00', active: true, version: '1' },
-  ]))
-  setRoute('PUT', /^\/v1\/admin\/subscriptions\/slots$/, () => ({}))
-  setRoute('GET', /^\/v1\/admin\/subscriptions\/holidays$/, () => page([{ storeId: STORE_ID, date: '2026-01-26', reason: 'Republic Day' }]))
-  setRoute('PUT', /^\/v1\/admin\/subscriptions\/holidays$/, () => ({}))
-  setRoute('DELETE', /^\/v1\/admin\/subscriptions\/holidays\/(?<storeId>[^/]+)\/(?<date>[^/]+)$/, () => ({}))
-  setRoute('GET', /^\/v1\/admin\/subscriptions\/runs$/, () => page([
-    { id: 'run-1', storeId: STORE_ID, runDate: '2026-01-20', status: 'PARTIAL', generatedCount: 40, failedCount: 2, lastError: 'wallet blocked', createdAt: '2026-01-20T00:00:00.000Z' },
-  ]))
-  setRoute('POST', /^\/v1\/admin\/subscriptions\/runs\/(?<id>[^/]+)\/retry$/, ({ headers }) => {
-    if (!headers['idempotency-key']) {
-      return { status: 400, body: { code: 'IDEMPOTENCY_KEY_REQUIRED' } } as unknown as ProblemResponse
-    }
-    return { retried: 2 }
-  })
 
   // ── support ──
   setRoute('GET', /^\/v1\/admin\/tickets$/, () => page([
@@ -480,7 +462,7 @@ export function installDefaultRoutes() {
   // ── config (pinned) ──
   setRoute('GET', /^\/v1\/admin\/config$/, () => ({
     config: { minOrderPaise: '14900', deliveryFeeSlabs: [] },
-    flags: { cod_enabled: stateFlags.cod, wallets_enabled: stateFlags.wallets, subscriptions_enabled: stateFlags.subscriptions },
+    flags: { cod_enabled: stateFlags.cod, wallets_enabled: stateFlags.wallets },
   }))
   setRoute('POST', /^\/v1\/admin\/config\/(?<key>[^/]+)$/, ({ body }) => body)
   setRoute('POST', /^\/v1\/admin\/feature-flags\/(?<key>[^/]+)$/, ({ body }) => body)

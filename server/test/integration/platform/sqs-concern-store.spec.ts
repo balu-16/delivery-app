@@ -82,6 +82,29 @@ test('concurrent scheduler ticks create one durable job for a due occurrence', a
   expect(rows.rows[0]?.count).toBe(1);
 });
 
+test('disabling a scheduler preserves existing jobs and upserting it reactivates it', async () => {
+  const retired = randomUUID();
+  const maintenance = randomUUID();
+  const schedule = { everyMs: 60_000 };
+  const queued = await store.enqueue('subscriptions', 'generate', {}, randomUUID());
+  await store.upsertScheduler('subscriptions', retired, 'generate', {}, schedule);
+  await store.upsertScheduler('maintenance', maintenance, 'scan', {}, schedule);
+  await sql`UPDATE sqs_concern_schedules SET next_run_at=clock_timestamp()-interval '1 second'
+    WHERE scheduler_id IN (${retired}, ${maintenance})`.execute(database.db);
+  await store.disableScheduler('subscriptions', retired);
+  await store.disableScheduler('subscriptions', retired);
+  expect(await store.tickSchedules()).toBe(1);
+  const jobs = await sql`SELECT id FROM sqs_concern_jobs WHERE concern='subscriptions'`.execute(
+    database.db,
+  );
+  expect(jobs.rows).toEqual([{ id: queued }]);
+
+  await store.upsertScheduler('subscriptions', retired, 'generate', {}, schedule);
+  const active = await sql`SELECT isfinite(next_run_at) AS active FROM sqs_concern_schedules
+    WHERE concern='subscriptions' AND scheduler_id=${retired}`.execute(database.db);
+  expect(active.rows).toEqual([{ active: true }]);
+});
+
 test('repeated worker crashes eventually mark an expired job failed', async () => {
   const id = await store.enqueue('notifications', 'deliver', {}, randomUUID());
   const pointer = { version: 1 as const, jobId: id, generation: 1 };

@@ -19,6 +19,7 @@ export interface Support {
     staff: boolean,
     cursor?: string,
     limit?: number,
+    category?: string,
   ): Promise<{ items: unknown[]; nextCursor: string | null }>;
   detail(
     actorId: string,
@@ -26,6 +27,7 @@ export interface Support {
     staff: boolean,
     cursor?: string,
     limit?: number,
+    category?: string,
   ): Promise<unknown>;
   acknowledge(actorId: string, ticketId: string): Promise<void>;
   canned(
@@ -41,7 +43,14 @@ export interface Support {
   message(
     actorId: string,
     ticketId: string,
-    input: { body: string; internal?: boolean; mediaIds?: string[]; reference?: string },
+    input: {
+      body: string;
+      internal?: boolean;
+      mediaIds?: string[];
+      reference?: string;
+      category?: string;
+    },
+    guard?: { beforeMessage(tx: TransactionContext): Promise<void> },
   ): Promise<string>;
   update(
     actorId: string,

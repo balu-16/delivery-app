@@ -85,8 +85,20 @@ export const updateVariant = (id: string, input: VariantInput) => put<{ id: stri
 export const deleteVariant = (id: string) => del<unknown>(`/v1/admin/catalog/variants/${id}`)
 
 // ── Assortment & prices ──────────────────────────────────────────────────────
-export const addAssortment = (storeId: string, variantId: string) =>
-  post<unknown>('/v1/admin/catalog/assortment', { storeId, variantId })
+export const addAssortment = (storeId: string, variantId: string, active = true) =>
+  post<unknown>('/v1/admin/catalog/assortment', { storeId, variantId, active })
+
+export interface AssortmentRow { storeId: string; storeName: string; listed: boolean }
+export function listAssortment(variantId: string, limit = 100, cursor?: string): Promise<CursorPage<AssortmentRow>> {
+  return page(get<BackendPage<AssortmentRow>>(`/v1/admin/catalog/assortment${buildQuery({ limit, cursor, variantId })}`), (r) => r)
+}
+
+// ── Product image collection ─────────────────────────────────────────────────
+export interface ProductImage { mediaId: string; url: string; position: number }
+export interface ProductImages { items: ProductImage[]; revision: string }
+export const listProductImages = (productId: string) => get<ProductImages>(`/v1/admin/catalog/products/${productId}/images`)
+export const replaceProductImages = (productId: string, mediaIds: string[], expectedRevision: string) =>
+  put<ProductImages>(`/v1/admin/catalog/products/${productId}/images`, { mediaIds, expectedRevision })
 
 export interface PriceInput {
   storeId: string
@@ -110,22 +122,24 @@ export function listSynonyms(limit = 50, cursor?: string): Promise<CursorPage<Sy
 export const setSynonym = (term: string, expansion: string | null) =>
   put<unknown>('/v1/admin/catalog/synonyms', { term, expansion })
 
-// ── Media targets (PRODUCT_IMAGE / CATALOG_IMPORT) ───────────────────────────
+// ── Media targets (PRODUCT_IMAGE / CATALOG_IMPORT / CONTENT_IMAGE) ───────────
 export interface CatalogMediaTarget { mediaId: string; url: string; fields: Record<string, string> }
 
-export const createCatalogMediaTarget = (purpose: 'PRODUCT_IMAGE' | 'CATALOG_IMPORT', contentType: string, size: number) =>
+export const createCatalogMediaTarget = (purpose: 'PRODUCT_IMAGE' | 'CATALOG_IMPORT' | 'CONTENT_IMAGE', contentType: string, size: number) =>
   post<CatalogMediaTarget>('/v1/admin/catalog/media/targets', { purpose, contentType, size })
 
 export const registerCatalogMedia = (mediaId: string, productId?: string) =>
   post<{ mediaId: string }>(`/v1/admin/catalog/media/${mediaId}/register`, productId ? { productId } : {})
 
 /**
- * Upload a file to a presigned target (PUT body, no multipart — the target's
- * fields come back as headers when provided).
+ * Upload a file to a presigned target. Uses the target's returned `fields`
+ * (form fields / headers from the storage adapter) when present; the PUT body
+ * is the raw file. The server still verifies size, MIME and image signature.
  */
 export async function uploadToTarget(target: CatalogMediaTarget, file: File): Promise<void> {
-  const headers: Record<string, string> = { 'Content-Type': file.type || 'application/octet-stream' }
-  await fetch(target.url, { method: 'PUT', headers, body: file })
+  const headers: Record<string, string> = { 'Content-Type': file.type || 'application/octet-stream', ...target.fields }
+  const res = await fetch(target.url, { method: 'PUT', headers, body: file })
+  if (!res.ok) throw new Error(`Upload failed (${res.status})`)
 }
 
 // ── Catalog imports (CSV) ────────────────────────────────────────────────────
@@ -139,6 +153,7 @@ export interface CatalogImport {
   checkpoint: number
   errors: Array<{ row: number; code: string }>
   approvalId: string | null
+  rejectionReason?: string | null
   createdAt: string
   updatedAt: string
 }

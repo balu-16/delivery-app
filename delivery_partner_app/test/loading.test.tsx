@@ -18,7 +18,7 @@ jest.mock('../src/components/Ui', () => {
     PageTitle:({title}:{title:string}) => React.createElement(native.Text,null,title), IconBox:() => null, IconButton:() => null,
   };
 });
-jest.mock('../src/files', () => ({uploadDocument:jest.fn()}));
+jest.mock('../src/files', () => ({uploadDocument:jest.fn(),restoreDocumentUploads:jest.fn().mockResolvedValue([])}));
 jest.mock('../src/push', () => ({usePush:() => ({status:'unsupported',message:''}),startPush:() => () => {},enablePush:jest.fn(),unregisterPush:jest.fn()}));
 jest.mock('../src/realtime', () => ({startRiderRealtime:() => () => {}}));
 jest.mock('../src/store', () => ({useDemo:(selector:(value:unknown)=>unknown) => selector({language:'en',setLanguage:jest.fn()})}));
@@ -36,16 +36,20 @@ function deferred<T>() {
   const promise = new Promise<T>(yes => {resolve=yes;});
   return {promise,resolve};
 }
-const application = {userId:'rider',status:'PENDING',vehicleType:null,vehicleNo:null,homeStoreId:null,requiredDocuments:[],documents:[]} as Application;
+const application = {userId:'rider',status:'PENDING',vehicleType:null,vehicleNo:null,homeStoreId:null,homeStore:null,requiredDocuments:[],documents:[]} as Application;
 beforeEach(() => {
   jest.clearAllMocks();
   Object.values(riderApi).forEach(value => { if (jest.isMockFunction(value)) value.mockReset(); });
 });
 
-test('store selection stops loading after an empty response and retries failures', async () => {
+test('store picker fetches on open, stops loading after an empty response and retries failures', async () => {
   const retry = deferred<Awaited<ReturnType<typeof riderApi.onboardingStores>>>();
   jest.mocked(riderApi.onboardingStores).mockRejectedValueOnce(new Error('offline')).mockReturnValueOnce(retry.promise);
-  await render(<ApplicationScreen application={application} reload={async () => {}} signOut={async () => {}} />);
+  await render(<ApplicationScreen application={application} signOut={async () => {}} />);
+  // Lazy: no fetch until the picker opens; main scroll never holds the rows.
+  expect(jest.mocked(riderApi.onboardingStores)).not.toHaveBeenCalled();
+  await fireEvent.press(screen.getByText('Choose store'));
+  await act(async () => {});
   expect(await screen.findByText('Could not load stores. Please try again.')).toBeTruthy();
   await fireEvent.press(screen.getByText('Try again'));
   expect(screen.getByLabelText('Loading stores')).toBeTruthy();

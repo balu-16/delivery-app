@@ -16,6 +16,7 @@ type AppTextProps = {
   allowFontScaling?: boolean;
   selectable?: boolean;
   accessibilityLiveRegion?: TextProps['accessibilityLiveRegion'];
+  accessibilityRole?: TextProps['accessibilityRole'];
 };
 
 export function AppText({
@@ -28,6 +29,7 @@ export function AppText({
   allowFontScaling = false,
   selectable,
   accessibilityLiveRegion,
+  accessibilityRole,
 }: AppTextProps) {
   return (
     <Text
@@ -35,6 +37,7 @@ export function AppText({
       allowFontScaling={allowFontScaling}
       selectable={selectable}
       accessibilityLiveRegion={accessibilityLiveRegion}
+      accessibilityRole={accessibilityRole}
       style={[
         typography[variant],
         center ? { textAlign: 'center' } : null,

@@ -61,6 +61,34 @@ export class PostgresReservations implements InventoryReservations {
       const reference = `reserve:${input.orderId}${input.cycleReference ? `:${input.cycleReference}` : ''}`;
       if (!(await operation(tx, reference, 'RESERVE', { ...input, lines }))) return;
       const missing = await lockStock(tx, lines, true);
+      // New commerce reservations only: decide listing-vs-withdrawal under the
+      // inventory row lock taken by lockStock above.
+      if (input.requireListed) {
+        let pairs: ReturnType<typeof sql> | undefined;
+        for (const line of lines) {
+          const pair = sql`(${line.storeId}::uuid,${line.variantId}::uuid)`;
+          pairs = pairs ? sql`${pairs},${pair}` : pair;
+        }
+        const listing = await sql<{
+          store_id: string;
+          variant_id: string;
+          listed: boolean;
+        }>`SELECT store_id::text AS store_id,variant_id::text AS variant_id,listed FROM store_inventory WHERE (store_id,variant_id) IN (VALUES ${pairs!}) FOR SHARE`.execute(
+          tx,
+        );
+        const unlisted = new Set(
+          listing.rows.filter((r) => !r.listed).map((r) => `${r.store_id}:${r.variant_id}`),
+        );
+        const withdrawn = lines.filter((line) => unlisted.has(`${line.storeId}:${line.variantId}`));
+        if (withdrawn.length)
+          throw new InventoryInsufficient(
+            withdrawn.map((line) => ({
+              ...line,
+              requested: line.quantity,
+              available: '0',
+            })),
+          );
+      }
       const previous = await sql<{
         state: string;
         generation: number;
@@ -148,28 +176,57 @@ export class PostgresReservations implements InventoryReservations {
           });
       }
       if (shortfalls.length) throw new InventoryInsufficient(shortfalls);
-      for (const { line, batches } of candidates) {
-        await sql`INSERT INTO inventory_reservations(order_id,store_id,variant_id,quantity,state,expires_at,target_delivery_at,generation) VALUES(${input.orderId}::uuid,${line.storeId}::uuid,${line.variantId}::uuid,${line.quantity}::bigint,'HELD',${new Date(now.getTime() + input.ttlSeconds * 1000)},${target},${generation})`.execute(
+      // Batch the reservation + allocation inserts as single multi-row
+      // statements in the same sorted line / FEFO batch order as the
+      // per-row loop. All effects stay in this transaction (all-or-nothing).
+      // Movements deliberately stay per-batch: each call bumps
+      // store_inventory.version once, so batching them would change version
+      // semantics; the lock order is already fixed by lockStock above.
+      if (candidates.length) {
+        const expiresAt = new Date(now.getTime() + input.ttlSeconds * 1000);
+        let reservationValues: ReturnType<typeof sql> | undefined;
+        for (const { line } of candidates) {
+          const row = sql`(${input.orderId}::uuid,${line.storeId}::uuid,${line.variantId}::uuid,${line.quantity}::bigint,'HELD',${expiresAt},${target},${generation})`;
+          reservationValues = reservationValues ? sql`${reservationValues},${row}` : row;
+        }
+        await sql`INSERT INTO inventory_reservations(order_id,store_id,variant_id,quantity,state,expires_at,target_delivery_at,generation) VALUES ${reservationValues!}`.execute(
           tx,
         );
-        let remaining = BigInt(line.quantity);
-        for (const batch of batches) {
-          const take = remaining < BigInt(batch.available) ? remaining : BigInt(batch.available);
-          if (!take) continue;
-          await sql`INSERT INTO inventory_allocations(order_id,store_id,variant_id,batch_id,quantity) VALUES(${input.orderId}::uuid,${line.storeId}::uuid,${line.variantId}::uuid,${batch.id}::uuid,${take.toString()}::bigint)`.execute(
+        const allocations: Array<{
+          line: ReservationLine;
+          batchId: string;
+          take: bigint;
+        }> = [];
+        for (const { line, batches } of candidates) {
+          let remaining = BigInt(line.quantity);
+          for (const batch of batches) {
+            const take = remaining < BigInt(batch.available) ? remaining : BigInt(batch.available);
+            if (!take) continue;
+            allocations.push({ line, batchId: batch.id, take });
+            remaining -= take;
+            if (!remaining) break;
+          }
+        }
+        if (allocations.length) {
+          let allocationValues: ReturnType<typeof sql> | undefined;
+          for (const allocation of allocations) {
+            const row = sql`(${input.orderId}::uuid,${allocation.line.storeId}::uuid,${allocation.line.variantId}::uuid,${allocation.batchId}::uuid,${allocation.take.toString()}::bigint)`;
+            allocationValues = allocationValues ? sql`${allocationValues},${row}` : row;
+          }
+          await sql`INSERT INTO inventory_allocations(order_id,store_id,variant_id,batch_id,quantity) VALUES ${allocationValues!}`.execute(
             tx,
           );
+        }
+        for (const allocation of allocations) {
           await movement(tx, {
             reference,
-            storeId: line.storeId,
-            variantId: line.variantId,
-            batchId: batch.id,
+            storeId: allocation.line.storeId,
+            variantId: allocation.line.variantId,
+            batchId: allocation.batchId,
             kind: 'RESERVE',
             onHand: 0n,
-            reserved: take,
+            reserved: allocation.take,
           });
-          remaining -= take;
-          if (!remaining) break;
         }
       }
       for (const line of lines) await stockAlerts(tx, line.storeId, line.variantId);

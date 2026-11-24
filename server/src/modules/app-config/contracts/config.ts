@@ -123,6 +123,9 @@ export interface ConfigValues extends PhaseConfigValues {
   pickingWeightToleranceBps: number;
   pickingDisconnectMinutes: number;
   pickingShortRateAlertBps: number;
+  referralIssuanceEnabled: boolean;
+  referralRewardPaise: string;
+  referralCreditExpiryMonths: number;
 }
 export type ConfigKey = keyof ConfigValues;
 export interface AppConfig {
@@ -149,13 +152,35 @@ export const FEATURE_FLAG_KEYS = [
   'surge_enabled',
 ] as const;
 export type FeatureFlagKey = (typeof FEATURE_FLAG_KEYS)[number];
+export interface ConfigChange {
+  key: ConfigKey;
+  value: unknown;
+  /** Current revision as a decimal string; "0" means the default with no row. */
+  expectedVersion?: string;
+}
+export interface ConfigChangeResult {
+  key: string;
+  value: unknown;
+  version: string;
+}
 export interface AdminConfig extends AppConfig {
-  snapshot(): Promise<{ config: ConfigValues; flags: Record<FeatureFlagKey, boolean> }>;
+  snapshot(): Promise<{
+    config: ConfigValues;
+    flags: Record<FeatureFlagKey, boolean>;
+    configRevisions: Record<string, string>;
+    flagRevisions: Record<string, string>;
+  }>;
   flag(
     key: FeatureFlagKey,
     tx?: import('../../../platform/database/database.js').TransactionContext,
   ): Promise<boolean>;
-  update(actorId: string, key: ConfigKey, value: unknown): Promise<void>;
-  setFlag(actorId: string, key: FeatureFlagKey, enabled: boolean): Promise<void>;
+  update(actorId: string, key: ConfigKey, value: unknown, expectedVersion?: string): Promise<void>;
+  updateBatch(actorId: string, changes: readonly ConfigChange[]): Promise<ConfigChangeResult[]>;
+  setFlag(
+    actorId: string,
+    key: FeatureFlagKey,
+    enabled: boolean,
+    expectedVersion?: string,
+  ): Promise<void>;
 }
 export const ADMIN_CONFIG = Symbol('ADMIN_CONFIG');

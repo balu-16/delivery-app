@@ -292,6 +292,49 @@ it('revokes portal access when the super-admin role is removed mid-session', asy
   expect((revoked.json() as { code: string }).code).toBe('FORBIDDEN');
 });
 
+it('denies guarded cookie mutations without a valid CSRF token before any mutation runs', async () => {
+  const server = app.getHttpAdapter().getInstance();
+  const fresh = await login(server, adminEmail, password);
+  expect(fresh.statusCode).toBe(200);
+  const { csrfToken } = fresh.json() as { csrfToken: string };
+  const cookie = sessionCookieOf(fresh);
+  const approvalId = uuidV7();
+  // Missing CSRF on a guarded admin mutation.
+  const missing = await server.inject({
+    method: 'POST',
+    url: `/v1/admin/approvals/${approvalId}/reject`,
+    payload: { decision: 'REJECTED', reason: 'no token' },
+    headers: { cookie },
+  });
+  expect(missing.statusCode).toBe(403);
+  expect((missing.json() as { code: string }).code).toBe('CSRF_TOKEN_INVALID');
+  // Stale CSRF on a guarded admin mutation.
+  const stale = await server.inject({
+    method: 'POST',
+    url: `/v1/admin/approvals/${approvalId}/reject`,
+    payload: { decision: 'REJECTED', reason: 'stale token' },
+    headers: { cookie, 'x-admin-csrf': 'stale-token' },
+  });
+  expect(stale.statusCode).toBe(403);
+  expect((stale.json() as { code: string }).code).toBe('CSRF_TOKEN_INVALID');
+  // A valid CSRF token passes the guard and reaches the handler (404: no such approval).
+  const valid = await server.inject({
+    method: 'POST',
+    url: `/v1/admin/approvals/${approvalId}/reject`,
+    payload: { decision: 'REJECTED', reason: 'valid token' },
+    headers: { cookie, 'x-admin-csrf': csrfToken },
+  });
+  expect(valid.statusCode).not.toBe(403);
+  expect((valid.json() as { code: string }).code).not.toBe('CSRF_TOKEN_INVALID');
+  // Reads are not CSRF-checked.
+  const read = await server.inject({
+    method: 'GET',
+    url: '/v1/admin/search?q=al',
+    headers: { cookie },
+  });
+  expect(read.statusCode).toBe(200);
+});
+
 it('expires unknown or malformed session cookies as SESSION_EXPIRED', async () => {
   const server = app.getHttpAdapter().getInstance();
   const response = await server.inject({

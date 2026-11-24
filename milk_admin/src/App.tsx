@@ -19,7 +19,7 @@ const People = lazy(pageImports.People)
 const Payments = lazy(pageImports.Payments)
 const Payouts = lazy(pageImports.Payouts)
 const Offers = lazy(pageImports.Offers)
-const Subscriptions = lazy(pageImports.Subscriptions)
+const AppContent = lazy(pageImports.AppContent)
 const Support = lazy(pageImports.Support)
 const Reports = lazy(pageImports.Reports)
 const Approvals = lazy(pageImports.Approvals)
@@ -70,8 +70,7 @@ export default function App() {
         <Route path="/payouts" element={page(<Payouts />, '/payouts')} />
         {/* 9 — Offers & notifications */}
         <Route path="/offers" element={page(<Offers />, '/offers')} />
-        {/* 10 — Subscriptions */}
-        <Route path="/subscriptions" element={page(<Subscriptions />, '/subscriptions')} />
+        <Route path="/app-content" element={page(<AppContent />, '/app-content')} />
         {/* 11 — Support & reviews */}
         <Route path="/support" element={page(<Support />, '/support')} />
         {/* 12 — Reports & exports */}

@@ -16,6 +16,7 @@ export class LocalStorage implements StoragePort {
   constructor(
     private readonly directory: string,
     secret: string,
+    private readonly privateDirectory?: string,
   ) {
     this.key = createHmac('sha256', secret).update('delivery:catalog-storage:v1').digest();
   }
@@ -95,7 +96,14 @@ export class LocalStorage implements StoragePort {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw storageError(error);
       }
     };
-    await Promise.all([remove(this.path(key)), remove(`${this.path(key)}.type`)]);
+    if (this.privateDirectory) {
+      // The private local adapter writes the final file directly after validating the capability.
+      if (key.startsWith('kyc/staging/')) return;
+      const finalId = /^kyc\/final\/([0-9a-f-]{36})$/i.exec(key)?.[1];
+      if (finalId) return remove(resolve(this.privateDirectory, finalId));
+    }
+    const path = this.path(key);
+    await Promise.all([remove(path), remove(`${path}.type`)]);
   }
   async putPrivateStream(
     key: string,

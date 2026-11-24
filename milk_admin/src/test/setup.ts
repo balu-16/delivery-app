@@ -72,7 +72,6 @@ beforeEach(() => {
   resetRoutes()
   stateFlags.cod = true
   stateFlags.wallets = true
-  stateFlags.subscriptions = true
   try { window.localStorage.clear() } catch { /* noop */ }
   try { window.sessionStorage.clear() } catch { /* noop */ }
 })

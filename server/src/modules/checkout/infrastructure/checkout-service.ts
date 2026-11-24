@@ -31,6 +31,8 @@ import type {
   CheckoutQuoteRequest,
   CheckoutQuoteResult,
 } from '../contracts/checkout.js';
+import { isDefinitivePlacementError } from '../contracts/checkout.js';
+import { DOMAIN_ERROR_STATUS } from '../../../common/http/problem-codes.js';
 import { codEligibility } from './cod-eligibility.js';
 import { PlaceOrderSaga } from './place-order.js';
 import { ScheduledOrderService } from './scheduled-order.js';
@@ -178,11 +180,12 @@ export class CheckoutService implements CheckoutOperations {
     const result = await sql<{
       state: 'PROCESSING' | 'COMPLETED';
       live: boolean | null;
+      rejection_code: string | null;
       order_id: string | null;
       order_number: string | null;
       order_status: OrderView['status'] | null;
       payment_status: OrderView['paymentStatus'] | null;
-    }>`SELECT i.state, i.lease_until > clock_timestamp() AS live,
+    }>`SELECT i.state, i.lease_until > clock_timestamp() AS live, i.rejection_code,
       o.id::text AS order_id,o.order_number,o.status AS order_status,o.payment_status
       FROM idempotency_keys i
       LEFT JOIN LATERAL (
@@ -203,6 +206,8 @@ export class CheckoutService implements CheckoutOperations {
           paymentStatus: row.payment_status,
         },
       };
+    // A committed order always wins; a proven rejection beats a live lease.
+    if (row?.rejection_code) return { state: 'REJECTED', code: row.rejection_code };
     if (row?.state === 'PROCESSING' && row.live) return { state: 'PROCESSING' };
     // Absence or an expired lease cannot prove the original request failed.
     return { state: 'UNKNOWN' };
@@ -211,9 +216,65 @@ export class CheckoutService implements CheckoutOperations {
   async recoverCommitted(userId: string, operationId: string): Promise<CheckoutPlaceResult | null> {
     const order = await this.saga.findResumable(operationId);
     if (!order || order.userId !== userId) return null;
+    return this.recoveryView(order);
+  }
+
+  /**
+   * Settle a placement whose business transaction failed. Recovers the
+   * committed order when one exists for the operation or the intent;
+   * otherwise records a proven terminal rejection for definitive failures.
+   * Returns null when the caller must rethrow the original error: recorded
+   * rejections surface through it immediately and through status checks
+   * permanently.
+   */
+  async settleFailedPlacement(
+    userId: string,
+    owner: IdempotencyOwner,
+    input: Pick<CheckoutPlaceRequest, 'intentId'>,
+    error: unknown,
+  ): Promise<CheckoutPlaceResult | null> {
+    if (!isDefinitivePlacementError(error)) return null;
+    const code = (error as Error).message;
+    const status = DOMAIN_ERROR_STATUS[code] ?? 409;
+    try {
+      // The fence covers both lookups: a rejection is recorded only when no
+      // order exists for this operation AND none for this intent, so a
+      // cross-key commit can never hide behind a REJECTED verdict.
+      const recorded = await new IdempotencyStore(this.db).recordRejection(
+        owner,
+        { status, code },
+        async (tx) => {
+          if (await this.saga.findResumable(owner.operationId, tx)) return false;
+          if (await this.saga.findByIntent(userId, input.intentId, tx)) return false;
+          return true;
+        },
+      );
+      if (recorded) return null;
+      // Not recorded: an order exists (recover it) or the lease was lost
+      // (ambiguous — the rethrown original error keeps the key retrying).
+      return (
+        (await this.recoverCommitted(userId, owner.operationId)) ??
+        (await this.recoverByIntent(userId, input.intentId))
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /** Cross-key recovery for an intent consumed outside this operation. Read-only. */
+  private async recoverByIntent(
+    userId: string,
+    intentId: string,
+  ): Promise<CheckoutPlaceResult | null> {
+    const order = await this.saga.findByIntent(userId, intentId);
+    if (!order || order.userId !== userId) return null;
+    return this.recoveryView(order);
+  }
+
+  /** Recovery reads the durable attempt only. It must never call the gateway. */
+  private async recoveryView(order: OrderView): Promise<CheckoutPlaceResult> {
     const attempts = await this.deps.paymentOrders.listAttempts(order.orderId);
     const latest = attempts[attempts.length - 1];
-    // Recovery reads the durable attempt only. It must never call the gateway.
     return {
       order,
       payment: latest ? this.toPaymentView(latest) : null,

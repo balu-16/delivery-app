@@ -7,7 +7,16 @@ import { formatPaise } from '@/src/utils/money';
 
 type Props = { card: AgentCard; locale?: string | null; busy: boolean; onDecision: (id: string, decision: 'approve' | 'reject') => void; onAction: (cardId: string, action: string, payload: Record<string, unknown>) => void | Promise<void>; onReview: (card: AgentCard) => void };
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
-export function AssistantCard({ card, locale, busy, onDecision, onAction, onReview }: Props) {
+export function AssistantCard(props: Props) {
+  if (props.card.type === 'cart_choice') {
+    return <View style={styles.card}>
+      <CartChoiceCard card={props.card} locale={props.locale} busy={props.busy} onAction={props.onAction} />
+    </View>;
+  }
+  return <StandardCard {...props} />;
+}
+
+function StandardCard({ card, locale, busy, onDecision, onAction, onReview }: Props) {
   const t = agentStrings(locale), payload = card.payload;
   const draftId = text(payload.draftId), expiresAt = text(payload.expiresAt);
   const [now, setNow] = useState(() => Date.now());
@@ -84,7 +93,6 @@ export function AssistantCard({ card, locale, busy, onDecision, onAction, onRevi
     {card.type === 'order_confirm' && !!text(payload.walletCashPaise) && text(payload.walletCashPaise) !== '0' && <View style={styles.item}><Text style={styles.grow}>{t.wallet}</Text><Text>-{formatPaise(text(payload.walletCashPaise))}</Text></View>}
     {card.type === 'order_confirm' && !!text(payload.walletPromoPaise) && text(payload.walletPromoPaise) !== '0' && <View style={styles.item}><Text style={styles.grow}>{t.promotionalBalance}</Text><Text>-{formatPaise(text(payload.walletPromoPaise))}</Text></View>}
     {card.type === 'order_confirm' && !!text(payload.amountDuePaise) && <View style={styles.item}><Text style={styles.grow}>{t.dueOnDelivery}</Text><Text style={styles.title}>{formatPaise(text(payload.amountDuePaise))}</Text></View>}
-    {card.type === 'cart_choice' && <CartChoiceCard card={card} busy={busy} onAction={onAction} />}
     {card.type === 'order_confirm' && <Pressable accessibilityRole="button" onPress={() => onReview(card)} style={styles.option}><Text style={styles.optionText}>Payment details</Text></Pressable>}
     {Array.isArray(payload.missingFields) && payload.missingFields.length > 0 && <Text style={styles.body}>Still needed: {payload.missingFields.filter(field => typeof field === 'string').join(', ')}.</Text>}
     {!!text(payload.message) && <Text style={styles.body}>{text(payload.message)}</Text>}
@@ -110,7 +118,8 @@ export function AssistantCard({ card, locale, busy, onDecision, onAction, onRevi
  * Quantity is asked even when only one size exists; "Other" leaves the
  * typed answer to the composer. One tap on a quantity submits exactly once.
  */
-function CartChoiceCard({ card, busy, onAction }: { card: AgentCard; busy: boolean; onAction: Props['onAction'] }) {
+function CartChoiceCard({ card, locale, busy, onAction }: Pick<Props, 'card' | 'locale' | 'busy' | 'onAction'>) {
+  const t = agentStrings(locale);
   const question = cartChoiceQuestion(card);
   const choiceId = cartChoiceId(card);
   const reference = cartChoiceReference(card);
@@ -119,11 +128,12 @@ function CartChoiceCard({ card, busy, onAction }: { card: AgentCard; busy: boole
   const status = text(card.payload.status);
   const expiresAt = cartChoiceExpiresAt(card);
   const [now, setNow] = useState(() => Date.now());
-  const [variantId, setVariantId] = useState(selection.variantId ?? '');
+  const [pickedVariant, setPickedVariant] = useState<string>();
   const [other, setOther] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
-  const submitted = confirmed || cartChoiceSubmitted(card);
+  const [submittingQuantity, setSubmittingQuantity] = useState<number | null>(null);
+  const variantId = pickedVariant ?? selection.variantId ?? (variants.length === 1 ? variants[0].variantId : undefined);
+  const selectedVariant = variants.find(variant => variant.variantId === variantId);
+  const submitted = cartChoiceSubmitted(card);
   const closed = !!status && status !== 'pending';
   const placing = useRef(false);
   useEffect(() => {
@@ -132,41 +142,64 @@ function CartChoiceCard({ card, busy, onAction }: { card: AgentCard; busy: boole
     return () => clearInterval(timer);
   }, [closed, expiresAt, submitted]);
   const expired = status === 'expired' || (expiresAt !== null && now >= expiresAt);
-  const blocked = busy || submitting || submitted || expired || closed;
-  const submit = (quantity: number) => {
-    if (!variantId || quantity < 1 || blocked || placing.current) return;
+  const blocked = busy || submittingQuantity !== null || submitted || expired || closed;
+  const submit = async (quantity: number) => {
+    if (!selectedVariant || quantity < 1 || blocked || placing.current) return;
     placing.current = true;
-    setSubmitting(true);
-    void Promise.resolve(onAction(card.cardId, 'cart_choice', { ...reference, choiceId, variantId, quantity }))
-      .then(() => setConfirmed(true))
-      .catch(() => undefined)
-      .finally(() => { placing.current = false; setSubmitting(false); });
+    setOther(false);
+    setSubmittingQuantity(quantity);
+    try {
+      await onAction(card.cardId, 'cart_choice', { ...reference, choiceId, variantId: selectedVariant.variantId, quantity });
+    } catch {
+      // The conversation shows the recovery action for a failed submission.
+    } finally {
+      placing.current = false;
+      setSubmittingQuantity(null);
+    }
   };
+  if (submitted) {
+    const receipt = selection.quantity === 1 ? t.choiceAddedOne
+      : selection.quantity ? t.choiceAddedMany.replace('{quantity}', String(selection.quantity)) : t.choiceAdded;
+    return <Text style={styles.body} accessibilityLiveRegion="polite">{receipt}</Text>;
+  }
+  if (expired) return <Text style={styles.muted}>This choice has expired. Ask for the item again.</Text>;
+  if (closed) return <Text style={styles.muted}>This choice has closed.</Text>;
   const remaining = expiresAt === null ? null : Math.max(0, Math.ceil((expiresAt - now) / 1000));
-  return <View style={styles.choice} accessibilityLabel={question}>
-    <Text style={styles.body}>{question}</Text>
-    {submitted
-      ? <Text style={styles.body} accessibilityLiveRegion="polite">Added to your cart.</Text>
-      : expired
-      ? <Text style={styles.muted}>This choice has expired. Ask for the item again.</Text>
-      : closed ? <Text style={styles.muted}>This choice has closed.</Text>
-      : variants.length === 0
-        ? <Text style={styles.muted}>Type your answer below — for example “2 packs of 500 g”.</Text>
-        : <>
-          <View style={styles.choiceRow} accessibilityLabel="Choose a size">
-            {variants.map((variant) => {
-              const active = variantId === variant.variantId;
-              return <Pressable key={variant.variantId} accessibilityRole="button" accessibilityLabel={`Choose ${variant.label}`} accessibilityState={{ selected: active, disabled: blocked }} disabled={blocked} onPress={() => { setOther(false); setVariantId(variant.variantId); }} style={[styles.choicePill, active && styles.choiceActive]}><Text style={[styles.choiceText, active && styles.choiceTextActive]}>{variant.label}{variant.sellingPaise ? ` · ${formatPaise(variant.sellingPaise)}` : ''}</Text></Pressable>;
-            })}
-          </View>
-          {!!variantId && (selection.quantity ?
-            <Pressable accessibilityRole="button" disabled={blocked} onPress={() => submit(selection.quantity!)} style={styles.choicePill}><Text style={styles.choiceText}>Add {selection.quantity} {selection.quantity === 1 ? 'pack' : 'packs'}</Text></Pressable>
-            : <>{question !== 'How many packs?' && <Text style={styles.muted}>How many packs?</Text>}<View style={styles.choiceRow} accessibilityLabel="Choose a quantity">
-            {[{ label: '1', value: 1 }, { label: '2', value: 2 }].map((option) => <Pressable key={option.label} accessibilityRole="button" accessibilityLabel={`${option.label} pack`} disabled={blocked} onPress={() => { setOther(false); submit(option.value); }} style={[styles.choicePill, submitting && styles.choiceActive]}><Text style={styles.choiceText}>{option.label}</Text></Pressable>)}
-            <Pressable accessibilityRole="button" accessibilityLabel="Other quantity" accessibilityState={{ selected: other }} onPress={() => setOther(true)} style={[styles.choicePill, other && styles.choiceActive]}><Text style={[styles.choiceText, other && styles.choiceTextActive]}>Other</Text></Pressable>
-          </View>{other && <Text style={styles.muted}>Type your answer, for example “4 packs of {variants.find(item => item.variantId === variantId)?.label}”.</Text>}</>)}
-          {remaining !== null && !expired && <Text style={styles.muted}>{t_expired(remaining)}</Text>}
-        </>}
+  return <View style={styles.choice}>
+    <Text style={styles.body}>{selectedVariant && !selection.variantId && variants.length > 1 ? t.choiceQuantity : question}</Text>
+    {variants.length === 0 ? <Text style={styles.muted}>Type your answer below — for example “2 packs of 500 g”.</Text> : <>
+      <View style={styles.choiceRow}>
+        {variants.map(variant => {
+          const active = variantId === variant.variantId;
+          return <Pressable key={variant.variantId} accessibilityRole="button" accessibilityLabel={`Choose ${variant.label}`}
+            accessibilityState={{ selected: active, disabled: blocked }} disabled={blocked}
+            onPress={() => { setOther(false); setPickedVariant(variant.variantId); }}
+            style={[styles.choicePill, active && styles.choiceActive]}>
+            <Text style={[styles.choiceText, active && styles.choiceTextActive]}>
+              {variant.label}{variant.sellingPaise ? ` · ${formatPaise(variant.sellingPaise)}` : ''}
+            </Text>
+          </Pressable>;
+        })}
+      </View>
+      {selectedVariant && <View style={styles.choiceRow}>
+        {(selection.quantity ? [selection.quantity] : [1, 2]).map(quantity => {
+          const active = submittingQuantity === quantity;
+          const label = `${quantity} ${quantity === 1 ? 'pack' : 'packs'}`;
+          return <Pressable key={quantity} accessibilityRole="button" accessibilityLabel={selection.quantity ? `Add ${label}` : label}
+            accessibilityState={{ selected: active, disabled: blocked }} disabled={blocked}
+            onPress={() => void submit(quantity)} style={[styles.choicePill, active && styles.choiceActive]}>
+            <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{selection.quantity ? `Add ${label}` : quantity}</Text>
+          </Pressable>;
+        })}
+        {!selection.quantity && <Pressable accessibilityRole="button" accessibilityLabel="Other quantity"
+          accessibilityState={{ selected: other, disabled: blocked }} disabled={blocked}
+          onPress={() => setOther(true)} style={[styles.choicePill, other && styles.choiceActive]}>
+          <Text style={[styles.choiceText, other && styles.choiceTextActive]}>Other</Text>
+        </Pressable>}
+      </View>}
+      {other && selectedVariant && <Text style={styles.muted}>Type your answer, for example “4 packs of {selectedVariant.label}”.</Text>}
+      {remaining !== null && <Text style={styles.muted}>{t_expired(remaining)}</Text>}
+    </>}
   </View>;
 }
 

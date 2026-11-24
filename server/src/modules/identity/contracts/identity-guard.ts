@@ -16,6 +16,7 @@ import { TOKEN_VERIFIER, type TokenVerifier } from './identity.js';
 import { IDENTITY_AUTHORIZER, type IdentityAuthorizer } from './identity.js';
 import {
   ADMIN_SESSION_AUTHENTICATOR,
+  ADMIN_SESSIONS,
   STORE_SESSION_AUTHENTICATOR,
   STORE_SESSIONS,
 } from './admin-auth.js';
@@ -47,6 +48,16 @@ export function translateAdminSessionError(error: unknown): unknown {
   return new UnauthorizedException({ code: 'SESSION_EXPIRED' });
 }
 
+/** Shared CSRF verification for both portal audiences. */
+export async function verifyPortalCsrf(
+  records: AdminSessions,
+  sessionCookie: string,
+  presented: string | string[] | undefined,
+): Promise<boolean> {
+  const token = Array.isArray(presented) ? presented[0] : presented;
+  return records.verifyCsrf(sessionCookie, token ?? '');
+}
+
 @Injectable()
 export class IdentityGuard implements CanActivate {
   constructor(
@@ -58,6 +69,7 @@ export class IdentityGuard implements CanActivate {
     private readonly adminSessions: AdminSessionAuthenticator,
     @Inject(STORE_SESSION_AUTHENTICATOR)
     private readonly storeSessions: AdminSessionAuthenticator,
+    @Inject(ADMIN_SESSIONS) private readonly adminSessionRecords: AdminSessions,
     @Inject(STORE_SESSIONS) private readonly storeSessionRecords: AdminSessions,
     @Optional() private readonly metrics?: HttpMetrics,
   ) {}
@@ -83,10 +95,13 @@ export class IdentityGuard implements CanActivate {
     if (!match?.[1] && sessionCookie) {
       const authenticator = policy.audience === 'store' ? this.storeSessions : this.adminSessions;
       let authenticated;
+      const sessionStarted = performance.now();
       try {
         authenticated = await authenticator.authenticate(sessionCookie);
       } catch (error: unknown) {
         throw translateAdminSessionError(error);
+      } finally {
+        this.metrics?.observeStage('session_auth', performance.now() - sessionStarted);
       }
       request.identity = authenticated.identity;
       request.principal = authenticated.principal;
@@ -95,28 +110,48 @@ export class IdentityGuard implements CanActivate {
       const requiredRole = policy.audience === 'store' ? 'STORE_MANAGER' : 'SUPER_ADMIN';
       if (!authenticated.principal.roles.includes(requiredRole))
         throw new ForbiddenException({ code: 'FORBIDDEN' });
-      if (
-        policy.audience === 'store' &&
-        !['GET', 'HEAD', 'OPTIONS'].includes((request.method ?? 'GET').toUpperCase())
-      ) {
-        const presented = request.headers['x-store-csrf'];
-        const token = Array.isArray(presented) ? presented[0] : presented;
-        if (!(await this.storeSessionRecords.verifyCsrf(sessionCookie, token ?? '')))
+      // Cookie writes are CSRF-checked after the matched session is established
+      // and before any mutation runs. Login/challenge/bootstrap stay on their
+      // own contracts (no guard), and bearer requests never reach this branch.
+      const isWrite = !['GET', 'HEAD', 'OPTIONS'].includes((request.method ?? 'GET').toUpperCase());
+      if (isWrite && policy.audience === 'admin') {
+        if (
+          !(await verifyPortalCsrf(
+            this.adminSessionRecords,
+            sessionCookie,
+            (request.headers as Record<string, string | string[] | undefined>)['x-admin-csrf'],
+          ))
+        )
+          throw new ForbiddenException({ code: 'CSRF_TOKEN_INVALID' });
+      } else if (isWrite && policy.audience === 'store') {
+        if (
+          !(await verifyPortalCsrf(
+            this.storeSessionRecords,
+            sessionCookie,
+            request.headers['x-store-csrf'],
+          ))
+        )
           throw new ForbiddenException({ code: 'CSRF_TOKEN_INVALID' });
       }
-      if (authenticated.rotation)
-        context
+      if (authenticated.rotation) {
+        const response = context
           .switchToHttp()
-          .getResponse<{ header(name: string, value: string): void }>()
-          .header(
-            'set-cookie',
-            portalSessionCookie(
-              policy.audience === 'store' ? 'store_session' : 'admin_session',
-              authenticated.rotation.session.sessionId,
-              new Date(authenticated.rotation.session.expiresAt),
-              { secure: cookieSecure(request) },
-            ),
-          );
+          .getResponse<{ header(name: string, value: string): void }>();
+        response.header(
+          'set-cookie',
+          portalSessionCookie(
+            policy.audience === 'store' ? 'store_session' : 'admin_session',
+            authenticated.rotation.session.sessionId,
+            new Date(authenticated.rotation.session.expiresAt),
+            { secure: cookieSecure(request) },
+          ),
+        );
+        // Hand back the rotated CSRF token so portal clients can adopt it.
+        response.header(
+          policy.audience === 'store' ? 'x-store-csrf' : 'x-admin-csrf',
+          authenticated.rotation.session.csrfToken,
+        );
+      }
       await this.limit(context, request, policy.audience);
       return true;
     }
@@ -180,6 +215,7 @@ export class IdentityGuard implements CanActivate {
       );
     } finally {
       this.metrics?.observeStage('actor_rate_limit', performance.now() - started);
+      this.metrics?.observeStage('redis', performance.now() - started);
     }
     if (decision.kind === 'limited') {
       context

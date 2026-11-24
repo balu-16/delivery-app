@@ -10,6 +10,8 @@ import { S3PrivateUploads } from '../../adapters/storage/s3-private.js';
 import { LocalPrivateUploads } from '../../adapters/storage/local-private.js';
 import { APP_CONFIG, type AppConfig } from '../app-config/contracts/config.js';
 import { PRIVATE_UPLOADS, RIDER_DOCUMENTS, type PrivateUploadPort } from './contracts/uploads.js';
+import { PROFILE_COVERS } from './contracts/profile-covers.js';
+import { PostgresProfileCovers } from './infrastructure/profile-covers.js';
 import { RiderOnboarding } from './infrastructure/rider-onboarding.js';
 import { RIDER_APPLICATIONS } from './contracts/rider-applications.js';
 import { PostgresRiderApplications } from './infrastructure/rider-applications.js';
@@ -29,6 +31,7 @@ import {
   AdminSessionStore,
   STORE_SESSION_NAMING,
 } from './infrastructure/admin-sessions.js';
+import { HttpMetrics } from '../../platform/metrics/http-metrics.js';
 import {
   ADMIN_PORTAL_AUTH_PROVIDER,
   ADMIN_SESSION_AUTHENTICATOR,
@@ -107,6 +110,12 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
       useFactory: (handle: DatabaseHandle) => new DatabaseUserProfiles(handle.db),
     },
     {
+      provide: PROFILE_COVERS,
+      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS, PRIVATE_UPLOADS],
+      useFactory: (handle: DatabaseHandle, access: IdentityAccess, uploads: PrivateUploadPort) =>
+        new PostgresProfileCovers(handle.db, access, uploads),
+    },
+    {
       provide: TOKEN_VERIFIER,
       inject: [PLATFORM_DATABASE, RuntimeConfig],
       useFactory: (handle: DatabaseHandle, config: RuntimeConfig) =>
@@ -170,8 +179,8 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
     },
     {
       provide: PRIVATE_UPLOADS,
-      inject: [PLATFORM_DATABASE, RuntimeConfig],
-      useFactory: (handle: DatabaseHandle, config: RuntimeConfig) =>
+      inject: [PLATFORM_DATABASE, RuntimeConfig, HttpMetrics],
+      useFactory: (handle: DatabaseHandle, config: RuntimeConfig, metrics: HttpMetrics) =>
         config.get('STORAGE_PROVIDER') === 'local' && config.get('NODE_ENV') !== 'production'
           ? new LocalPrivateUploads(
               handle.db,
@@ -188,13 +197,18 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
               config.get('PRIVATE_UPLOAD_MAX_BYTES'),
               config.get('PRIVATE_UPLOAD_URL_TTL_SECONDS'),
               config.get('PRIVATE_READ_URL_TTL_SECONDS'),
+              metrics,
             ),
     },
     {
       provide: RIDER_DOCUMENTS,
-      inject: [PLATFORM_DATABASE, PRIVATE_UPLOADS, APP_CONFIG],
-      useFactory: (handle: DatabaseHandle, storage: PrivateUploadPort | null, config: AppConfig) =>
-        storage ? new RiderOnboarding(handle.db, storage, config) : null,
+      inject: [PLATFORM_DATABASE, PRIVATE_UPLOADS, APP_CONFIG, HttpMetrics],
+      useFactory: (
+        handle: DatabaseHandle,
+        storage: PrivateUploadPort | null,
+        config: AppConfig,
+        metrics: HttpMetrics,
+      ) => (storage ? new RiderOnboarding(handle.db, storage, config, metrics) : null),
     },
     {
       provide: IDENTITY_ROSTER,
@@ -311,6 +325,7 @@ import { REFERRALS, type Referrals } from '../referrals/contracts/referrals.js';
     RIDER_PROFILE_ONBOARDING,
     RIDER_APPLICATIONS,
     PRIVATE_UPLOADS,
+    PROFILE_COVERS,
     RIDER_DOCUMENTS,
     ReferralsModule,
     IdentityGuard,
@@ -326,16 +341,20 @@ export class IdentityModule {}
 
 import { DevAuthController } from '../../surfaces/customer/identity/dev-auth.controller.js';
 import { CustomerIdentityController } from '../../surfaces/customer/identity/customer.controller.js';
+import { CustomerProfileCoverController } from '../../surfaces/customer/identity/profile-cover.controller.js';
 import { PrivateMediaController } from '../../surfaces/rider/identity/private-media.controller.js';
 import { RiderIdentityController } from '../../surfaces/rider/identity/rider.controller.js';
 import { StoreIdentityController } from '../../surfaces/store/identity/store.controller.js';
 import { StoreRiderApplicationsController } from '../../surfaces/store/identity/rider-applications.controller.js';
 import { StoreAuthController } from '../../surfaces/store/auth/auth.controller.js';
 import { AdminIdentityController } from '../../surfaces/admin/identity/admin.controller.js';
-@Module({ imports: [IdentityModule], controllers: [CustomerIdentityController, DevAuthController] })
-export class CustomerIdentitySurfaceModule {}
 @Module({ imports: [IdentityModule], controllers: [PrivateMediaController] })
 export class PrivateMediaSurfaceModule {}
+@Module({
+  imports: [IdentityModule, PrivateMediaSurfaceModule],
+  controllers: [CustomerIdentityController, CustomerProfileCoverController, DevAuthController],
+})
+export class CustomerIdentitySurfaceModule {}
 @Module({
   imports: [IdentityModule, PrivateMediaSurfaceModule],
   controllers: [RiderIdentityController],

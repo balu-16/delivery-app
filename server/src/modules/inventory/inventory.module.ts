@@ -50,9 +50,9 @@ import { InventoryExpiry } from './infrastructure/expiry.js';
     },
     {
       provide: INVENTORY_PORTAL_READS,
-      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS],
-      useFactory: (db: DatabaseHandle, identity: IdentityAccess) =>
-        new PostgresInventoryPortalReads(db.db, identity),
+      inject: [PLATFORM_DATABASE, IDENTITY_ACCESS, APP_CONFIG],
+      useFactory: (db: DatabaseHandle, identity: IdentityAccess, config: AppConfig) =>
+        new PostgresInventoryPortalReads(db.db, identity, config),
     },
     {
       provide: INVENTORY_RESERVATIONS,

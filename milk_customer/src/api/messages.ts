@@ -61,6 +61,8 @@ export function customerErrorMessage(error: unknown, action = 'complete your req
       case 'ADDRESS_LOCATION_REQUIRED': return 'Confirm the location at your delivery address.';
       case 'ADDRESS_REQUIRED': return 'Choose a delivery address.';
       case 'QUOTE_EXPIRED': return 'Your order summary expired. Review it again.';
+      case 'QUOTE_CONSUMED':
+      case 'CART_INTENT_CONSUMED': return 'This checkout was already used. Check My Dairy for your order.';
       case 'INVENTORY_INSUFFICIENT':
       case 'ITEM_UNAVAILABLE': return 'This item is no longer available.';
       case 'CART_NOT_FOUND': return 'Your cart is empty.';

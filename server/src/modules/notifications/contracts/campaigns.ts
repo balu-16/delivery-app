@@ -14,6 +14,7 @@ export interface CampaignInput extends CampaignPreview {
   body: string;
   clickAction?: string;
   imageUrl?: string;
+  imageMediaId?: string;
   data?: Record<string, string>;
 }
 export const PUSH_CAMPAIGNS = Symbol('PUSH_CAMPAIGNS');

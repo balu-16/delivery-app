@@ -66,6 +66,17 @@ export default function RootLayout() {
               name="product/[id]"
               options={{ animation: 'slide_from_right', gestureEnabled: true }}
             />
+            <Stack.Screen name="orders/[orderId]" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+            <Stack.Screen name="addresses" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+            <Stack.Screen name="addresses/new" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+            <Stack.Screen name="addresses/[addressId]/edit" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+            <Stack.Screen name="addresses/[addressId]/location" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+            <Stack.Screen name="wallet" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+            <Stack.Screen name="notifications" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+            <Stack.Screen name="referrals" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+            <Stack.Screen name="support" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+            <Stack.Screen name="support/[ticketId]" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+            <Stack.Screen name="chat-history" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
           </Stack>
         </FlyToCartProvider>
         </KeyboardProvider>

@@ -156,9 +156,11 @@ class PlacementStatusOrderView {
   @ApiProperty() paymentStatus!: string;
 }
 class PlacementStatusView {
-  @ApiProperty({ enum: ['ORDER_FOUND', 'PROCESSING', 'UNKNOWN'] })
-  state!: 'ORDER_FOUND' | 'PROCESSING' | 'UNKNOWN';
+  @ApiProperty({ enum: ['ORDER_FOUND', 'REJECTED', 'PROCESSING', 'UNKNOWN'] })
+  state!: 'ORDER_FOUND' | 'REJECTED' | 'PROCESSING' | 'UNKNOWN';
   @ApiPropertyOptional({ type: PlacementStatusOrderView }) order?: PlacementStatusOrderView;
+  @ApiPropertyOptional({ description: 'Terminal rejection code; present only for REJECTED.' })
+  code?: string;
 }
 @Controller('v1/customer')
 @ApiBearerAuth()
@@ -219,6 +221,8 @@ export class CustomerCheckoutController {
       async (operationId, _tx, owner) =>
         this.checkout.place(p.userId, { ...body, idempotencyOperationId: operationId }, owner),
       true,
+      async (owner, _operationId, error) =>
+        this.checkout.settleFailedPlacement(p.userId, owner, { intentId: body.intentId }, error),
     );
   }
   @Get('checkout/placement-status')
@@ -232,8 +236,19 @@ export class CustomerCheckoutController {
   }
   @Get('orders')
   @ApiOperation({ operationId: 'customerOrdersList' })
-  list(@CurrentPrincipal() p: Principal, @Query('cursor') cursor?: string) {
-    return this.orders.list(p.userId, 50, cursor);
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Query('cursor') cursor?: string,
+    @Query('group') group?: string,
+  ) {
+    if (group !== undefined && !['active', 'delivered', 'cancelled'].includes(group))
+      throw new HttpException({ code: 'INVALID_INPUT' }, 400);
+    return this.orders.list(
+      p.userId,
+      50,
+      cursor,
+      group as 'active' | 'delivered' | 'cancelled' | undefined,
+    );
   }
   @Get('orders/:orderId')
   @ApiOperation({ operationId: 'customerOrderGet' })
@@ -273,6 +288,7 @@ export class CustomerCheckoutController {
     body: unknown,
     work: (operationId: string, tx?: TransactionContext, owner?: IdempotencyOwner) => Promise<T>,
     external = false,
+    onError?: (owner: IdempotencyOwner, operationId: string, error: unknown) => Promise<T | null>,
   ): Promise<T> {
     if (!key || key.length > 150) throw new HttpException({ code: 'INVALID_INPUT' }, 400);
     const claimStarted = performance.now();
@@ -283,8 +299,23 @@ export class CustomerCheckoutController {
       hashCanonical(body),
     );
     this.metrics?.observeStage('idempotency_claim', performance.now() - claimStarted);
+    if (claim.kind === 'rejected') {
+      this.metrics?.observeOutcome('rejected');
+      throw new HttpException({ code: claim.code }, claim.status);
+    }
     if (claim.kind === 'replay') {
       this.metrics?.observeOutcome('replay');
+      // A cached error response must raise, never masquerade as a success body.
+      if (claim.status >= 400) {
+        const code =
+          claim.body &&
+          typeof claim.body === 'object' &&
+          'code' in claim.body &&
+          typeof claim.body.code === 'string'
+            ? claim.body.code
+            : 'REQUEST_FAILED';
+        throw new HttpException({ code }, claim.status);
+      }
       return claim.body as T;
     }
     if (
@@ -323,9 +354,22 @@ export class CustomerCheckoutController {
       return response.body as T;
     }
     return this.idem.withRenewal(claim.owner, async () => {
-      const result = await work(claim.owner.operationId, undefined, claim.owner);
-      await this.idem.execute(claim.owner, async () => ({ status: 200, body: result as Json }));
-      return result;
+      try {
+        const result = await work(claim.owner.operationId, undefined, claim.owner);
+        await this.idem.execute(claim.owner, async () => ({ status: 200, body: result as Json }));
+        return result;
+      } catch (error) {
+        // Settle runs under the live renewal so the fence holds the lease.
+        // A recovered order returns normally; anything else rethrows the
+        // original error after attempting to record a proven rejection.
+        if (onError) {
+          const settled = await onError(claim.owner, claim.owner.operationId, error).catch(
+            () => null,
+          );
+          if (settled) return settled;
+        }
+        throw error;
+      }
     });
   }
 }

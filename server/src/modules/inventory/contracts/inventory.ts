@@ -13,6 +13,14 @@ export interface ReserveInput {
   ttlSeconds: number;
   /** A stable new cycle reference is required to reacquire resolved stock. */
   cycleReference?: string;
+  /**
+   * When true, every line must be a listed (non-withdrawn) store_inventory pair
+   * at the resolved store; the check happens under the inventory row lock so a
+   * withdrawal race is decided before the reservation commits. Only NEW
+   * commerce reservations pass this: placed-order resolution, picking,
+   * returns and reinstated orders leave it unset.
+   */
+  requireListed?: boolean;
 }
 export interface PickLine {
   storeId: string;

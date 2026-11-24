@@ -64,15 +64,22 @@ export class StoreInventoryCountController {
     return this.adjustments.count(p.userId, { ...d, reference: key });
   }
   @Post('approvals/:id/approve')
-  @ApiOperation({ operationId: 'storeInventoryApproveCount' })
+  @ApiOperation({
+    operationId: 'storeInventoryApproveCount',
+    description:
+      'Legacy store approval route (retained for a clear denial). Gated stock approvals must be executed via the admin inventory approval route by an active SUPER_ADMIN.',
+  })
   @InventoryIdempotencyHeader()
-  @ApiResponse({ status: 201, description: 'Approval executed or replayed; empty response' })
+  @ApiResponse({
+    status: 403,
+    description: 'Gated stock approval is admin-only; no inventory movement was made.',
+  })
   approve(
-    @CurrentPrincipal() p: Principal,
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentPrincipal() _p: Principal,
+    @Param('id', new ParseUUIDPipe()) _id: string,
     @Headers('idempotency-key') key?: string,
   ) {
     if (!key || key.length > 150) throw new HttpException({ code: 'INVALID_INPUT' }, 400);
-    return this.adjustments.approve(p.userId, id, key);
+    throw new HttpException({ code: 'INVENTORY_APPROVAL_ADMIN_ONLY' }, 403);
   }
 }

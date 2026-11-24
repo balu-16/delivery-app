@@ -4,8 +4,13 @@ import type { Database, TransactionContext } from '../../../platform/database/da
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import type { VerifiedIdentity } from '../contracts/identity.js';
 import type { RiderApplications, RiderApplicationView } from '../contracts/rider-applications.js';
-import { canBootstrapRole, documentsReady } from '../domain/identity-policy.js';
+import { canBootstrapRole } from '../domain/identity-policy.js';
 import { assertRiderReviewAccess } from './store-review-access.js';
+import {
+  maybeAdvanceRiderReview,
+  readRiderApplication,
+  requireActiveRider,
+} from './rider-application-reader.js';
 
 /** Self-enrolment never adopts a workforce identity by email or approves a rider. */
 export class PostgresRiderApplications implements RiderApplications {
@@ -42,19 +47,18 @@ export class PostgresRiderApplications implements RiderApplications {
       const existing = await sql<{
         id: string;
         status: string;
-        normalized_email: string;
-        rider_status: string | null;
-        has_role: boolean;
-      }>`
-        SELECT u.id,u.status,u.normalized_email,p.status AS rider_status,
-          EXISTS(SELECT 1 FROM user_roles r WHERE r.user_id=u.id AND r.role='RIDER') AS has_role
-        FROM users u LEFT JOIN rider_profiles p ON p.user_id=u.id
-        WHERE u.pool='WORKFORCE' AND u.cognito_sub=${identity.sub} FOR UPDATE OF u`.execute(tx);
-      let user = existing.rows[0];
+      }>`SELECT id,status FROM users
+        WHERE pool='WORKFORCE' AND cognito_sub=${identity.sub} FOR UPDATE`.execute(tx);
+      const user = existing.rows[0];
+      const userId = user?.id ?? uuidV7();
+      let status: string | null = null;
       if (user) {
         if (user.status !== 'ACTIVE') throw new Error('ACCOUNT_DISABLED');
-        if (!user.has_role || !user.rider_status)
-          throw new Error('RIDER_ENROLLMENT_REQUIRES_REVIEW');
+        const rider = await sql<{ status: string | null }>`
+          SELECT p.status FROM user_roles r LEFT JOIN rider_profiles p ON p.user_id=r.user_id
+          WHERE r.user_id=${userId}::uuid AND r.role='RIDER'`.execute(tx);
+        if (!rider.rows[0]) throw new Error('ROLE_CONFLICT');
+        status = rider.rows[0].status;
       } else {
         // A provisioning saga or another workforce identity with this email needs manual review.
         const conflict =
@@ -63,10 +67,9 @@ export class PostgresRiderApplications implements RiderApplications {
             tx,
           );
         if (conflict.rows.length) throw new Error('RIDER_ENROLLMENT_REQUIRES_REVIEW');
-        const id = uuidV7();
         try {
           await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name,email_verified)
-            VALUES(${id}::uuid,'WORKFORCE',${identity.sub},${email},${identity.name?.trim().slice(0, 100) || email},true)`.execute(
+            VALUES(${userId}::uuid,'WORKFORCE',${identity.sub},${email},${identity.name?.trim().slice(0, 100) || email},true)`.execute(
             tx,
           );
         } catch (error: unknown) {
@@ -79,47 +82,38 @@ export class PostgresRiderApplications implements RiderApplications {
             throw new Error('RIDER_ENROLLMENT_REQUIRES_REVIEW', { cause: error });
           throw error;
         }
-        await sql`INSERT INTO user_roles(user_id,role) VALUES(${id}::uuid,'RIDER')`.execute(tx);
-        await sql`INSERT INTO rider_profiles(user_id,status) VALUES(${id}::uuid,'PENDING')`.execute(
-          tx,
-        );
-        await sql`INSERT INTO identity_sync_operations(id,user_id,action,details)
-          VALUES(${uuidV7()}::uuid,${id}::uuid,'ROLE_GRANTED',${JSON.stringify({ role: 'RIDER' })}::jsonb)`.execute(
+        await sql`INSERT INTO user_roles(user_id,role) VALUES(${userId}::uuid,'RIDER')`.execute(tx);
+      }
+      if (status === null) {
+        await sql`INSERT INTO rider_profiles(user_id,status) VALUES(${userId}::uuid,'PENDING')`.execute(
           tx,
         );
         await sql`INSERT INTO identity_status_history(id,user_id,actor_id,action,details)
-          VALUES(${uuidV7()}::uuid,${id}::uuid,${id}::uuid,'RIDER_APPLICATION_CREATED','{}'::jsonb)`.execute(
+          VALUES(${uuidV7()}::uuid,${userId}::uuid,${userId}::uuid,'RIDER_APPLICATION_CREATED','{}'::jsonb)`.execute(
           tx,
         );
         await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id)
-          VALUES(${uuidV7()}::uuid,${id}::uuid,'RIDER_APPLICATION_CREATED','user',${id})`.execute(
+          VALUES(${uuidV7()}::uuid,${userId}::uuid,'RIDER_APPLICATION_CREATED','user',${userId})`.execute(
           tx,
         );
-        user = {
-          id,
-          status: 'ACTIVE',
-          normalized_email: email,
-          rider_status: 'PENDING',
-          has_role: true,
-        };
+        status = 'PENDING';
       }
+      if (identity.groups.includes('RIDER')) return { userId, status, groupPending: false };
       const pending = await sql<{
         pending: boolean;
       }>`SELECT EXISTS(SELECT 1 FROM identity_sync_operations
-        WHERE user_id=${user.id}::uuid AND action='ROLE_GRANTED' AND details->>'role'='RIDER' AND state<>'COMPLETE') AS pending`.execute(
+        WHERE user_id=${userId}::uuid AND action='ROLE_GRANTED' AND details->>'role'='RIDER' AND state<>'COMPLETE') AS pending`.execute(
         tx,
       );
-      let groupPending = pending.rows[0]?.pending === true;
-      if (!identity.groups.includes('RIDER') && !groupPending) {
+      if (!pending.rows[0]?.pending) {
         // Reconcile a missing group for an existing applicant as well as a new
         // signup. The subject lock above prevents duplicate pending operations.
         await sql`INSERT INTO identity_sync_operations(id,user_id,action,details)
-          VALUES(${uuidV7()}::uuid,${user.id}::uuid,'ROLE_GRANTED',${JSON.stringify({ role: 'RIDER' })}::jsonb)`.execute(
+          VALUES(${uuidV7()}::uuid,${userId}::uuid,'ROLE_GRANTED',${JSON.stringify({ role: 'RIDER' })}::jsonb)`.execute(
           tx,
         );
-        groupPending = true;
       }
-      return { userId: user.id, status: user.rider_status!, groupPending };
+      return { userId, status, groupPending: true };
     });
   }
 
@@ -129,55 +123,7 @@ export class PostgresRiderApplications implements RiderApplications {
     requiredDocuments?: string[],
   ): Promise<RiderApplicationView> {
     const required = requiredDocuments ?? (await this.config.get('requiredRiderDocuments'));
-    const profile = await sql<{
-      status: string;
-      vehicle_type: string | null;
-      vehicle_no: string | null;
-      home_store_id: string | null;
-    }>`
-      SELECT status,vehicle_type,vehicle_no,home_store_id FROM rider_profiles WHERE user_id=${userId}::uuid`.execute(
-      tx ?? this.db,
-    );
-    if (!profile.rows[0]) throw new Error('RIDER_APPLICATION_NOT_FOUND');
-    const documents = await sql<{
-      id: string;
-      document_type: string;
-      status: string;
-      reason: string | null;
-      created_at: Date;
-    }>`
-      SELECT DISTINCT ON (document_type) id,document_type,status,reason,created_at FROM rider_documents
-      WHERE rider_id=${userId}::uuid ORDER BY document_type,created_at DESC,id DESC`.execute(
-      tx ?? this.db,
-    );
-    const account = await sql<{
-      name: string;
-      email: string;
-      applied_at: Date;
-    }>`SELECT name, normalized_email AS email, created_at AS applied_at FROM users WHERE id=${userId}::uuid`.execute(
-      tx ?? this.db,
-    );
-    const person = account.rows[0];
-    const row = profile.rows[0];
-    return {
-      userId,
-      name: person?.name ?? '',
-      email: person?.email ?? '',
-      phone: null,
-      appliedAt: (person?.applied_at ?? new Date()).toISOString(),
-      status: row.status,
-      vehicleType: row.vehicle_type,
-      vehicleNo: row.vehicle_no,
-      homeStoreId: row.home_store_id,
-      requiredDocuments: required,
-      documents: documents.rows.map((doc) => ({
-        id: doc.id,
-        type: doc.document_type,
-        status: doc.status,
-        reason: doc.reason,
-        createdAt: doc.created_at.toISOString(),
-      })),
-    };
+    return readRiderApplication(tx ?? this.db, userId, required);
   }
 
   async stores(): Promise<Array<{ id: string; name: string; city: string }>> {
@@ -187,32 +133,33 @@ export class PostgresRiderApplications implements RiderApplications {
     return rows.rows;
   }
 
-  async selectStore(userId: string, storeId: string): Promise<void> {
+  async selectStore(userId: string, storeId: string): Promise<RiderApplicationView> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(storeId))
       throw new Error('INVALID_INPUT');
     const required = await this.config.get('requiredRiderDocuments');
-    await this.db.transaction().execute(async (tx) => {
-      const actor =
-        await sql`SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id AND r.role='RIDER'
-        WHERE u.id=${userId}::uuid AND u.pool='WORKFORCE' AND u.status='ACTIVE' FOR SHARE OF u,r`.execute(
-          tx,
-        );
-      if (!actor.rows.length) throw new Error('FORBIDDEN');
-      const store = await sql`SELECT id FROM stores WHERE id=${storeId}::uuid FOR SHARE`.execute(
-        tx,
-      );
+    return this.db.transaction().execute(async (tx) => {
+      await requireActiveRider(tx, userId);
+      // Validate against the same source as the picker list.
+      const store = await sql`SELECT s.id FROM stores s JOIN cities c ON c.id=s.city_id
+        WHERE s.id=${storeId}::uuid FOR SHARE OF s`.execute(tx);
       if (!store.rows.length) throw new Error('STORE_NOT_FOUND');
       const previous = await sql<{
+        status: string;
         home_store_id: string | null;
-      }>`SELECT home_store_id FROM rider_profiles
-        WHERE user_id=${userId}::uuid AND status IN ('PENDING','REJECTED') FOR UPDATE`.execute(tx);
+      }>`SELECT status,home_store_id FROM rider_profiles
+        WHERE user_id=${userId}::uuid FOR UPDATE`.execute(tx);
       if (!previous.rows.length) throw new Error('RIDER_STATE_INVALID');
+      const current = previous.rows[0]!;
+      // Replay-safe: an already-saved selection returns the current snapshot
+      // without another audit event or status change, even mid-review.
+      if (current.home_store_id === storeId) return readRiderApplication(tx, userId, required);
+      if (!['PENDING', 'REJECTED'].includes(current.status)) throw new Error('RIDER_STATE_INVALID');
       const profile = await sql`UPDATE rider_profiles SET home_store_id=${storeId}::uuid
         WHERE user_id=${userId}::uuid AND status IN ('PENDING','REJECTED') RETURNING user_id`.execute(
         tx,
       );
       if (!profile.rows.length) throw new Error('RIDER_STATE_INVALID');
-      if (previous.rows[0]!.home_store_id && previous.rows[0]!.home_store_id !== storeId) {
+      if (current.home_store_id && current.home_store_id !== storeId) {
         // A manager at the newly selected store must review approvals from the old store.
         const approved = await sql<{
           document_type: string;
@@ -227,16 +174,12 @@ export class PostgresRiderApplications implements RiderApplications {
             tx,
           );
       }
-      const documents = await sql<{ document_type: string; status: string }>`
-        SELECT DISTINCT ON (document_type) document_type,status FROM rider_documents
-        WHERE rider_id=${userId}::uuid ORDER BY document_type,created_at DESC,id DESC`.execute(tx);
-      if (documentsReady(required, documents.rows))
-        await sql`UPDATE rider_profiles SET status='UNDER_REVIEW' WHERE user_id=${userId}::uuid
-          AND vehicle_type IS NOT NULL AND vehicle_no IS NOT NULL`.execute(tx);
+      await maybeAdvanceRiderReview(tx, userId, required);
       await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details)
         VALUES(${uuidV7()}::uuid,${userId}::uuid,'RIDER_STORE_SELECTED','user',${userId},${JSON.stringify({ storeId })}::jsonb)`.execute(
         tx,
       );
+      return readRiderApplication(tx, userId, required);
     });
   }
 

@@ -8,9 +8,15 @@ import {
   EyeOff, Eye, Save, ChevronLeft, ChevronRight, IndianRupee, ListChecks,
 } from 'lucide-react'
 import { useStagger } from '@/hooks/misc'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useProducts, useVariants, useCategories, useBrands, useStores } from '@/hooks/queries'
 import { useProductActions } from '@/hooks/mutations'
-import { createCatalogMediaTarget, uploadToTarget, createCatalogImport, getCatalogImport, approveCatalogImport, type CatalogImport } from '@/api/catalog'
+import {
+  createCatalogMediaTarget, uploadToTarget, createCatalogImport, getCatalogImport, approveCatalogImport,
+  listProductImages, registerCatalogMedia, listAssortment, listSynonyms,
+  type CatalogImport, type ProductImages,
+} from '@/api/catalog'
+import { rupeesStringToPaise, paiseToRupeesString } from '@/api/money'
 import { toast } from '@/lib/toast'
 import { PageHeader, SearchInput, StatusPill, EmptyState } from '@/components/shared/misc'
 import { Select, Field } from '@/components/ui/form'
@@ -167,7 +173,106 @@ function ProductFormDialog({ open, onOpenChange, initial, categories, brands, se
 }
 
 /* ── Product detail drawer: variants + store pricing ───────── */
-function ProductDrawer({ product, variants, stores, variantsLoading, variantsError, retryVariants, storesLoading, storesError, retryStores, onClose, onUpdateVariant, onAddVariant, onSetPrice, onAddAssortment, serverError }: {
+/** Publish checklist mirroring server assertPublishable + first missing step. */
+function publishChecklist(product: Product, variants: Variant[], imageCount: number): Array<{ label: string; ok: boolean }> {
+  return [
+    { label: 'At least one live variant', ok: variants.length > 0 },
+    { label: 'At least one registered product photo', ok: imageCount > 0 },
+    { label: 'Live category', ok: !!product.categoryId },
+    { label: 'HSN code set', ok: !!(product.hsnCode ?? '').trim() },
+    { label: 'GST rate set (allowed rate)', ok: product.gstRateBps != null },
+    { label: 'Expiry tracking for perishables', ok: !product.perishable || product.expiryTracking },
+  ]
+}
+function nextStepFor(checks: Array<{ label: string; ok: boolean }>): string {
+  const missing = checks.find((c) => !c.ok)
+  if (!missing) return 'Ready to publish — use Publish from the product menu.'
+  if (missing.label.includes('variant')) return 'Next: add a variant for this product.'
+  if (missing.label.includes('photo')) return 'Next: upload a product photo below.'
+  if (missing.label.includes('category')) return 'Next: assign a live category.'
+  return 'Next: set the HSN code, GST rate and expiry tracking on the product.'
+}
+
+/* ── Product photos (target → upload → register, read back) ── */
+function ProductPhotos({ productId, serverError, onSaved }: {
+  productId: string
+  serverError: string | null
+  onSaved: (message: string) => void
+}) {
+  const qc = useQueryClient()
+  const imagesQ = useQuery({ queryKey: ['product-images', productId], queryFn: () => listProductImages(productId) })
+  const [file, setFile] = useState<File | null>(null)
+  const [draftId, setDraftId] = useState<string | null>(null)
+  const [phase, setPhase] = useState<'idle' | 'uploading' | 'registering' | 'done' | 'error'>('idle')
+  const [error, setError] = useState('')
+  const [preview, setPreview] = useState('')
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
+  const images: ProductImages | undefined = imagesQ.data
+  const refresh = () => { void qc.invalidateQueries({ queryKey: ['product-images', productId] }) }
+
+  const upload = async () => {
+    if (!file) return
+    setPhase('registering'); setError('')
+    try {
+      const target = await createCatalogMediaTarget('PRODUCT_IMAGE', file.type || 'image/jpeg', file.size)
+      setDraftId(target.mediaId)
+      setPhase('uploading')
+      await uploadToTarget(target, file)
+      setPhase('registering')
+      try {
+        await registerCatalogMedia(target.mediaId, productId)
+      } catch (e) {
+        // Lost-response reconcile: the upload may have registered anyway.
+        const listed = await listProductImages(productId)
+        if (listed.items.some((i) => i.mediaId === target.mediaId)) {
+          refresh(); setPhase('done'); onSaved('Photo registered (reconciled)')
+          return
+        }
+        throw e
+      }
+      setDraftId(null); refresh(); setPhase('done'); onSaved('Photo uploaded')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed'); setPhase('error')
+    }
+  }
+  const saveOrder = async () => {
+    if (!images) return
+    try {
+      const { replaceProductImages } = await import('@/api/catalog')
+      await replaceProductImages(productId, images.items.map((i) => i.mediaId), images.revision)
+      refresh()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not save photo order') }
+  }
+  return (
+    <section>
+      <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Product photos</h4>
+      <div className="space-y-2">
+        {(images?.items ?? []).map((im) => (
+          <div key={im.mediaId} className="flex items-center gap-3 rounded-xl border border-border/70 px-3 py-2">
+            <img src={im.url} alt="" className="h-12 w-12 rounded-lg object-cover" />
+            <span className="font-mono text-[11px]">{im.mediaId.slice(0, 8)}… · position {im.position}</span>
+            {im.position === 0 && <Badge tone="green">Primary</Badge>}
+          </div>
+        ))}
+        {imagesQ.isLoading ? <p className="text-xs text-muted-foreground">Loading photos…</p> : (images?.items.length ?? 0) === 0 && <p className="text-xs text-muted-foreground">No photos yet — publishing needs at least one.</p>}
+        {serverError && <p className="text-[11px] font-semibold text-destructive">{serverError}</p>}
+        <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { const f = e.target.files?.[0] ?? null; setFile(f); setPreview(f ? URL.createObjectURL(f) : ''); setPhase('idle') }} className="w-full rounded-xl border border-input bg-card px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary-soft file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-brand-700" />
+        {preview && <img src={preview} alt="Preview" className="h-24 w-24 rounded-xl object-cover" />}
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="primary" disabled={!file || phase === 'uploading' || phase === 'registering'} onClick={() => void upload()}>
+            {phase === 'uploading' ? 'Uploading…' : phase === 'registering' ? 'Registering…' : 'Upload photo'}
+          </Button>
+          {images && images.items.length > 1 && <Button size="sm" variant="outline" onClick={() => void saveOrder()}>Save order</Button>}
+        </div>
+        {phase === 'done' && <p className="text-[11px] font-semibold text-success">Registered photo is shown after readback.</p>}
+        {phase === 'error' && <p className="rounded-lg bg-destructive-soft px-3 py-2 text-xs font-semibold text-destructive">Upload failed: {error}{draftId ? ` (draft ${draftId.slice(0, 8)}… kept — retry registers the same draft)` : ' — request a new target'}</p>}
+        <p className="text-[11px] text-muted-foreground">First photo is primary. JPEG, PNG and WebP only; the server verifies size, MIME and image signature.</p>
+      </div>
+    </section>
+  )
+}
+
+function ProductDrawer({ product, variants, stores, variantsLoading, variantsError, retryVariants, storesLoading, storesError, retryStores, onClose, onUpdateVariant, onAddVariant, onDeleteVariant, onSetPrice, onSetAssortment, serverError }: {
   product: Product
   variants: Variant[]
   stores: Array<{ id: string; name: string }>
@@ -180,17 +285,29 @@ function ProductDrawer({ product, variants, stores, variantsLoading, variantsErr
   onClose: () => void
   onUpdateVariant: (v: Variant, values: VariantFormValues) => void
   onAddVariant: (values: VariantFormValues) => void
-  onSetPrice: (variantId: string, storeId: string, selling: number, mrp: number) => void
-  onAddAssortment: (variantId: string, storeId: string) => void
+  onDeleteVariant: (v: Variant) => void
+  onSetPrice: (variantId: string, storeId: string, sellingPaise: string, mrpPaise: string) => void
+  onSetAssortment: (variantId: string, storeId: string, active: boolean) => void
   serverError: string | null
 }) {
   const [editVariant, setEditVariant] = useState<Variant | null>(null)
   const [addingVariant, setAddingVariant] = useState(false)
   const [priceVariantId, setPriceVariantId] = useState(variants[0]?.id ?? '')
+  const [priceStoreId, setPriceStoreId] = useState(stores[0]?.id ?? '')
   const [selling, setSelling] = useState('')
   const [mrp, setMrp] = useState('')
+  const [priceNote, setPriceNote] = useState('')
   const selectedVariantId = variants.some(v => v.id === priceVariantId) ? priceVariantId : variants[0]?.id ?? ''
   const selectedVariant = variants.find(v => v.id === selectedVariantId)
+  const selectedStoreId = stores.some(s => s.id === priceStoreId) ? priceStoreId : stores[0]?.id ?? ''
+  const assortmentQ = useQuery({
+    queryKey: ['assortment', selectedVariantId],
+    queryFn: () => listAssortment(selectedVariantId),
+    enabled: !!selectedVariantId,
+  })
+  const listedByStore = new Map((assortmentQ.data?.items ?? []).map((r) => [r.storeId, r.listed]))
+  const imagesQ = useQuery({ queryKey: ['product-images', product.id], queryFn: () => listProductImages(product.id) })
+  const checks = publishChecklist(product, variants, imagesQ.data?.items.length ?? 0)
 
   return (
     <Drawer open onOpenChange={(v) => { if (!v) onClose() }} width="lg" title={product.name} subtitle={`${product.perishable ? 'Perishable' : 'Shelf-stable'} · GST ${((product.gstRateBps ?? 0) / 100).toFixed(1)}%`}>
@@ -204,6 +321,22 @@ function ProductDrawer({ product, variants, stores, variantsLoading, variantsErr
             <Badge tone={product.published ? 'green' : 'neutral'}>{product.published ? 'Published' : 'Unpublished'}</Badge>
           </div>
         </div>
+
+        {/* publish checklist */}
+        <section className="rounded-xl border border-border/70 bg-muted/30 p-4">
+          <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Publish checklist</h4>
+          <ul className="space-y-1">
+            {checks.map((c) => (
+              <li key={c.label} className="flex items-center gap-2 text-[12px] font-medium">
+                <span className={c.ok ? 'text-success' : 'text-muted-foreground'}>{c.ok ? '✓' : '○'}</span>
+                <span className={c.ok ? '' : 'text-muted-foreground'}>{c.label}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[12px] font-bold text-brand-700 dark:text-brand-300">{nextStepFor(checks)}</p>
+        </section>
+
+        <ProductPhotos productId={product.id} serverError={serverError} onSaved={() => {}} />
 
         {/* variant list */}
         <section>
@@ -219,6 +352,7 @@ function ProductDrawer({ product, variants, stores, variantsLoading, variantsErr
                   <p className="truncate font-mono text-[11px] text-muted-foreground">SKU {v.sku}{v.barcode ? ` · barcode ${v.barcode}` : ''}</p>
                 </div>
                 <Button size="sm" variant="ghost" onClick={() => setEditVariant(v)}><Pencil className="h-3.5 w-3.5" /> Edit</Button>
+                <Button size="sm" variant="ghost" className="text-destructive" onClick={() => onDeleteVariant(v)}><Trash2 className="h-3.5 w-3.5" /> Delete</Button>
               </div>
             ))}
           </div>
@@ -233,29 +367,50 @@ function ProductDrawer({ product, variants, stores, variantsLoading, variantsErr
               <Select value={selectedVariantId} onValueChange={setPriceVariantId} options={variants.map((v) => ({ value: v.id, label: `${v.name} · ${v.sku}` }))} />
             </div>
           )}
-          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-border/70 px-3 py-2.5">
-            <span className="min-w-0 flex-1 text-[13px] font-semibold">Price for all stores{selectedVariant?.sellingPaise != null ? ` · Current ₹${(Number(selectedVariant.sellingPaise)/100).toFixed(2)}` : ' · Not set'}</span>
-            <Input type="number" value={selling} onChange={(e) => setSelling(e.target.value)} placeholder="Selling ₹" className="h-8 w-28" />
-            <Input type="number" value={mrp} onChange={(e) => setMrp(e.target.value)} placeholder="MRP ₹" className="h-8 w-24" />
-            <Button size="sm" variant="primary" disabled={!selectedVariantId || !stores.length || !Number(selling) || !Number(mrp)} onClick={() => onSetPrice(selectedVariantId, stores[0].id, Number(selling), Number(mrp))}>
-              <IndianRupee className="h-3.5 w-3.5" /> Set price
-            </Button>
+          <div className="mb-3 rounded-xl border border-border/70 px-3 py-2.5">
+            <p className="text-[13px] font-semibold">
+              Shared price (all stores)
+              {selectedVariant?.sellingPaise != null
+                ? ` · Current selling ₹${paiseToRupeesString(selectedVariant.sellingPaise)} · Current MRP ₹${selectedVariant.mrpPaise != null ? paiseToRupeesString(selectedVariant.mrpPaise) : '—'}`
+                : ' · Not set'}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Input type="text" inputMode="decimal" value={selling} onChange={(e) => setSelling(e.target.value)} placeholder="Selling ₹ (0 allowed)" className="h-8 w-32" />
+              <Input type="text" inputMode="decimal" value={mrp} onChange={(e) => setMrp(e.target.value)} placeholder="MRP ₹" className="h-8 w-28" />
+              <Select value={selectedStoreId} onValueChange={setPriceStoreId} options={stores.map((s) => ({ value: s.id, label: `Store: ${s.name}` }))} />
+              <Button size="sm" variant="primary" disabled={!selectedVariantId || !selectedStoreId} onClick={() => {
+                try {
+                  const sP = rupeesStringToPaise(selling)
+                  const mP = rupeesStringToPaise(mrp)
+                  if (BigInt(sP) > BigInt(mP)) { setPriceNote('Selling price must be at most the MRP.'); return }
+                  setPriceNote('')
+                  onSetPrice(selectedVariantId, selectedStoreId, sP, mP)
+                } catch { setPriceNote('Enter exact amounts like 99.50 (paise are exact).') }
+              }}>
+                <IndianRupee className="h-3.5 w-3.5" /> Set shared price
+              </Button>
+            </div>
+            {priceNote && <p className="mt-1 text-[11px] font-semibold text-destructive">{priceNote}</p>}
+            <p className="mt-1 text-[11px] text-muted-foreground">Shared across stores — the store above is the selected listing store for this write. A large change goes to approval; the result appears in Approvals.</p>
           </div>
           <div className="space-y-1.5">
-            {stores.map((s) => (
-              <div key={s.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 px-3 py-2.5">
-                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{s.name}</span>
-                <Tooltip content="List this variant at the store (assortment)">
-                  <span>
-                    <Button size="sm" variant="outline" disabled={!selectedVariantId} onClick={() => onAddAssortment(selectedVariantId, s.id)}>
-                      <ListChecks className="h-3.5 w-3.5" /> List
-                    </Button>
-                  </span>
-                </Tooltip>
-              </div>
-            ))}
+            {stores.map((s) => {
+              const listed = listedByStore.get(s.id) ?? false
+              return (
+                <div key={s.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 px-3 py-2.5">
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{s.name}</span>
+                  <Badge tone={listed ? 'green' : 'neutral'}>{listed ? 'Listed' : 'Withdrawn'}</Badge>
+                  <Tooltip content={listed ? 'Withdraw this variant from the store' : 'List this variant at the store'}>
+                    <span>
+                      <Button size="sm" variant="outline" disabled={!selectedVariantId} onClick={() => onSetAssortment(selectedVariantId, s.id, !listed)}>
+                        <ListChecks className="h-3.5 w-3.5" /> {listed ? 'Withdraw' : 'List'}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                </div>
+              )
+            })}
           </div>
-          <p className="mt-2 text-[11px] text-muted-foreground">The price applies to every store. Listing and stock are managed per store. Price changes may require approval.</p>
           </>}
         </section>
       </div>
@@ -273,6 +428,83 @@ function ProductDrawer({ product, variants, stores, variantsLoading, variantsErr
         }}
       />
     </Drawer>
+  )
+}
+
+/* ── Category / brand manager ────────────────────────────── */
+function NamedManagerDialog({ open, onOpenChange, title, rows, onAdd, onEdit, onDelete }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  title: string
+  rows: Array<{ id: string; name: string }>
+  onAdd: (name: string) => void
+  onEdit: (id: string, name: string) => void
+  onDelete: (row: { id: string; name: string }) => void
+}) {
+  const [name, setName] = useState('')
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null)
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent title={title} description="Deleting is blocked server-side while published products use the entry.">
+        <div className="space-y-2">
+          {rows.map((r) => (
+            <div key={r.id} className="flex items-center gap-2 rounded-xl border border-border/70 px-3 py-2">
+              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{r.name}</span>
+              <Button size="sm" variant="ghost" onClick={() => { setEditing(r); setName(r.name) }}>Rename</Button>
+              <Button size="sm" variant="ghost" className="text-destructive" onClick={() => onDelete(r)}>Delete</Button>
+            </div>
+          ))}
+          {rows.length === 0 && <p className="text-xs text-muted-foreground">None yet.</p>}
+        </div>
+        <div className="mt-3 flex items-end gap-2">
+          <div className="min-w-0 flex-1"><Field label={editing ? 'New name' : 'New name'}><Input value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
+          <Button size="md" variant="primary" disabled={!name.trim()} onClick={() => {
+            const n = name.trim()
+            if (editing) onEdit(editing.id, n)
+            else onAdd(n)
+            setName(''); setEditing(null)
+          }}>{editing ? 'Save' : `Add ${title.toLowerCase()}`}</Button>
+          {editing && <Button size="md" variant="secondary" onClick={() => { setEditing(null); setName('') }}>Cancel</Button>}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/* ── Search synonyms editor ──────────────────────────────── */
+function SynonymsDialog({ open, onOpenChange, onSave, serverError }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onSave: (term: string, expansion: string | null) => void
+  serverError: string | null
+}) {
+  const q = useQuery({ queryKey: ['synonyms'], queryFn: () => listSynonyms(100), enabled: open })
+  const [term, setTerm] = useState('')
+  const [expansion, setExpansion] = useState('')
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent title="Search synonyms" description="Map a search term to its expansion (blank expansion deletes the synonym).">
+        <div className="space-y-2">
+          {(q.data?.items ?? []).map((s) => (
+            <div key={s.term} className="flex items-center gap-2 rounded-xl border border-border/70 px-3 py-2 text-[13px]">
+              <span className="font-mono font-bold">{s.term}</span>
+              <span className="text-muted-foreground">→</span>
+              <span className="min-w-0 flex-1 truncate">{s.expansion}</span>
+              <Button size="sm" variant="ghost" className="text-destructive" onClick={() => onSave(s.term, null)}>Delete</Button>
+            </div>
+          ))}
+          {q.isLoading && <p className="text-xs text-muted-foreground">Loading…</p>}
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Field label="Term"><Input value={term} onChange={(e) => setTerm(e.target.value)} /></Field>
+          <Field label="Expansion"><Input value={expansion} onChange={(e) => setExpansion(e.target.value)} /></Field>
+        </div>
+        {serverError && <p className="mt-2 rounded-lg bg-destructive-soft px-3 py-2 text-xs font-semibold text-destructive">{serverError}</p>}
+        <div className="mt-3 flex justify-end gap-2">
+          <Button variant="primary" size="md" disabled={!term.trim() || !expansion.trim()} onClick={() => { onSave(term.trim(), expansion.trim()); setTerm(''); setExpansion('') }}>Save synonym</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -364,7 +596,7 @@ function CatalogImportDialog({ open, onOpenChange, stores }: {
             </div>
           )}
           {phase === 'done' && import_?.status === 'COMPLETED' && <p className="rounded-xl bg-success-soft px-3 py-2 text-[13px] font-bold text-success">Import completed</p>}
-          {phase === 'done' && import_?.status === 'FAILED' && <p className="rounded-xl bg-destructive-soft px-3 py-2 text-[13px] font-bold text-destructive">Import failed — check the error report</p>}
+          {phase === 'done' && import_?.status === 'FAILED' && <p className="rounded-xl bg-destructive-soft px-3 py-2 text-[13px] font-bold text-destructive">Import failed{import_?.rejectionReason ? `: ${import_.rejectionReason}` : ' — check the error report'}{import_?.rejectionReason ? ' (correct the CSV and submit a new import)' : ''}</p>}
           {error && <p className="rounded-lg bg-destructive-soft px-3 py-2 text-xs font-semibold text-destructive">{error}</p>}
 
           <div className="flex justify-end gap-2 pt-1">
@@ -436,6 +668,9 @@ export function Products() {
   const [publishTarget, setPublishTarget] = useState<Product | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [csvOpen, setCsvOpen] = useState(false)
+  const [catMgrOpen, setCatMgrOpen] = useState(false)
+  const [brandMgrOpen, setBrandMgrOpen] = useState(false)
+  const [synOpen, setSynOpen] = useState(false)
 
   const detailProduct = detail ? rows.find((p) => p.id === detail.id) ?? detail : null
   // Drawer variants come straight from the server (productId filter) with the
@@ -467,6 +702,9 @@ export function Products() {
           <Button variant="secondary" size="md" onClick={() => setCsvOpen(true)}>
             <FileUp className="h-4 w-4" /> CSV import
           </Button>
+          <Button variant="secondary" size="md" onClick={() => setCatMgrOpen(true)}>Categories</Button>
+          <Button variant="secondary" size="md" onClick={() => setBrandMgrOpen(true)}>Brands</Button>
+          <Button variant="secondary" size="md" onClick={() => setSynOpen(true)}>Synonyms</Button>
         </motion.section>
 
         <motion.section variants={container.item} className="space-y-3">
@@ -576,14 +814,19 @@ export function Products() {
             onError: (e) => setServerError(e.message),
             onSuccess: () => setServerError(null),
           })}
-          onSetPrice={(variantId, storeId, selling, mrp) => actions.setPrice(storeId, variantId, selling, mrp).mutate(undefined, {
+          onDeleteVariant={(v) => actions.deleteVariant(v.id, v.sku).mutate(undefined, {
+            onError: (e) => setServerError(`Could not delete variant: ${e.message}`),
+            onSuccess: () => setServerError(null),
+          })}
+          onSetPrice={(variantId, storeId, sellingPaise, mrpPaise) => actions.setPrice(storeId, variantId, sellingPaise, mrpPaise).mutate(undefined, {
             onError: (e) => setServerError(e.message),
             onSuccess: (res) => {
               setServerError(null)
-              if (res?.approvalId) toast.info('Price change sent for approval')
+              if (res?.approvalId) toast.info('Price change sent for approval — track it in Approvals')
+              else toast.success('Shared price saved')
             },
           })}
-          onAddAssortment={(variantId, storeId) => actions.addAssortment(storeId, variantId).mutate(undefined, {
+          onSetAssortment={(variantId, storeId, active) => actions.setAssortmentActive(storeId, variantId, active).mutate(undefined, {
             onError: (e) => setServerError(e.message),
             onSuccess: () => setServerError(null),
           })}
@@ -629,7 +872,7 @@ export function Products() {
         onOpenChange={(v) => { if (!v) setPublishTarget(null) }}
         title={publishTarget?.published ? `Unpublish ${publishTarget?.name}?` : `Publish ${publishTarget?.name}?`}
         description={publishTarget?.published
-          ? 'The product disappears from the storefront immediately. Existing subscriptions keep working.'
+          ? 'The product disappears from the storefront immediately.'
           : 'The product goes live on the storefront in all stores that carry it.'}
         confirmLabel={publishTarget?.published ? 'Unpublish' : 'Publish'}
         destructive={publishTarget?.published}
@@ -652,6 +895,23 @@ export function Products() {
 
       {/* CSV import (server-side) */}
       <CatalogImportDialog open={csvOpen} onOpenChange={setCsvOpen} stores={stores.map((s) => ({ id: s.id, name: s.name }))} />
+
+      <NamedManagerDialog
+        open={catMgrOpen} onOpenChange={setCatMgrOpen} title="Categories" rows={categories}
+        onAdd={(name) => actions.addCategory(name).mutate(undefined, { onError: (e) => setServerError(e.message), onSuccess: () => setServerError(null) })}
+        onEdit={(id, name) => actions.updateCategory(id, name).mutate(undefined, { onError: (e) => setServerError(e.message), onSuccess: () => setServerError(null) })}
+        onDelete={(r) => actions.deleteCategory(r.id, r.name).mutate(undefined, { onError: (e) => setServerError(`Could not delete category: ${e.message}`), onSuccess: () => setServerError(null) })}
+      />
+      <NamedManagerDialog
+        open={brandMgrOpen} onOpenChange={setBrandMgrOpen} title="Brands" rows={brands}
+        onAdd={(name) => actions.addBrand(name).mutate(undefined, { onError: (e) => setServerError(e.message), onSuccess: () => setServerError(null) })}
+        onEdit={(id, name) => actions.updateBrand(id, name).mutate(undefined, { onError: (e) => setServerError(e.message), onSuccess: () => setServerError(null) })}
+        onDelete={(r) => actions.deleteBrand(r.id, r.name).mutate(undefined, { onError: (e) => setServerError(`Could not delete brand: ${e.message}`), onSuccess: () => setServerError(null) })}
+      />
+      <SynonymsDialog
+        open={synOpen} onOpenChange={setSynOpen} serverError={serverError}
+        onSave={(term, expansion) => actions.setSynonym(term, expansion).mutate(undefined, { onError: (e) => setServerError(e.message), onSuccess: () => setServerError(null) })}
+      />
     </div>
   )
 }

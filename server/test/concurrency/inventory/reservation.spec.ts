@@ -9,6 +9,8 @@ import { PostgresInventoryManagement } from '../../../src/modules/inventory/infr
 import { PostgresReservations } from '../../../src/modules/inventory/infrastructure/reservations.js';
 import { InventoryExpiry } from '../../../src/modules/inventory/infrastructure/expiry.js';
 import { startTestServices, type TestServices } from '../../helpers/services.js';
+// Contended tests keep a tight local bound with headroom against remote Aurora latency.
+const TEST_TIMEOUT = process.env.AWS_P13_INTEGRATION === 'yes' ? 300000 : 30000;
 let services: TestServices,
   db: DatabaseHandle,
   inventory: PostgresInventoryManagement,
@@ -89,6 +91,7 @@ afterAll(async () => {
   await db?.close();
   await services?.stop();
 }, 120000);
+// prettier-ignore
 test('100 simultaneous attempts against ten units have exactly ten successes and reconcile', async () => {
   const id = await variant();
   await inventory.receive(manager, {
@@ -157,7 +160,7 @@ test('100 simultaneous attempts against ten units have exactly ten successes and
     ledger_on_hand: '10',
     ledger_reserved: '10',
   });
-}, 30000);
+}, TEST_TIMEOUT);
 test('FEFO and target shelf life; commit survives sweeper and pick releases shorts', async () => {
   const id = await variant();
   let order = uuidV7();
@@ -267,7 +270,7 @@ test('concurrent release and pick resolve exactly once', async () => {
   expect(stock.rows[0]!.reserved).toBe('0');
   expect(['0', '1']).toContain(stock.rows[0]!.on_hand);
 });
-test('large cycle-count requires a different currently assigned manager and cannot consume reserved units', async () => {
+test('large cycle-count requires a super-admin checker and cannot consume reserved units', async () => {
   const { PostgresAdjustments } =
     await import('../../../src/modules/inventory/infrastructure/adjustments.js');
   const { ConfigService } =
@@ -275,14 +278,16 @@ test('large cycle-count requires a different currently assigned manager and cann
   const { MakerChecker } =
     await import('../../../src/modules/compliance/infrastructure/maker-checker.js');
   const checker = uuidV7(),
+    managerChecker = uuidV7(),
     id = await variant();
-  await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${checker}::uuid,'WORKFORCE',${checker},${checker + '@example.invalid'},'Checker')`.execute(
+  await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${checker}::uuid,'WORKFORCE',${checker},${checker + '@example.invalid'},'Admin Checker'),
+    (${managerChecker}::uuid,'WORKFORCE',${managerChecker},${managerChecker + '@example.invalid'},'Manager Checker')`.execute(
     db.db,
   );
-  await sql`INSERT INTO user_roles(user_id,role) VALUES(${checker}::uuid,'STORE_MANAGER')`.execute(
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${checker}::uuid,'SUPER_ADMIN'),(${managerChecker}::uuid,'STORE_MANAGER')`.execute(
     db.db,
   );
-  await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${checker}::uuid,${store}::uuid,'STORE_MANAGER')`.execute(
+  await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${managerChecker}::uuid,${store}::uuid,'STORE_MANAGER')`.execute(
     db.db,
   );
   await inventory.receive(manager, {
@@ -317,17 +322,11 @@ test('large cycle-count requires a different currently assigned manager and cann
   expect(approval.approvalId).toBeDefined();
   expect(await counter.count(manager, req)).toEqual(approval);
   await expect(counter.approve(manager, approval.approvalId!, 'maker-attempt')).rejects.toThrow(
-    'APPROVAL_INVALID',
-  );
-  await sql`DELETE FROM store_staff WHERE user_id=${checker}::uuid AND store_id=${store}::uuid`.execute(
-    db.db,
-  );
-  await expect(counter.approve(checker, approval.approvalId!, 'checker-approval')).rejects.toThrow(
     'FORBIDDEN',
   );
-  await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${checker}::uuid,${store}::uuid,'STORE_MANAGER')`.execute(
-    db.db,
-  );
+  await expect(
+    counter.approve(managerChecker, approval.approvalId!, 'manager-attempt'),
+  ).rejects.toThrow('FORBIDDEN');
   await counter.approve(checker, approval.approvalId!, 'checker-approval');
   await counter.approve(checker, approval.approvalId!, 'checker-approval');
   expect(await counter.count(manager, req)).toEqual(approval);
@@ -340,6 +339,65 @@ test('large cycle-count requires a different currently assigned manager and cann
     db.db,
   );
   expect(stock.rows[0]!.on_hand).toBe('20');
+});
+test('threshold boundary: deltas 24 and 25 apply immediately, 26 waits for admin approval', async () => {
+  const { PostgresAdjustments } =
+    await import('../../../src/modules/inventory/infrastructure/adjustments.js');
+  const { PostgresInventoryPortalReads } =
+    await import('../../../src/modules/inventory/infrastructure/postgres-portal-reads.js');
+  const { MakerChecker } =
+    await import('../../../src/modules/compliance/infrastructure/maker-checker.js');
+  const id = await variant();
+  const access = new DatabaseIdentityAccess(db.db);
+  const counter = new PostgresAdjustments(db.db, access, { get: async () => 25 } as never, {
+    create: (actions) => new MakerChecker(db.db, actions),
+  });
+  await inventory.receive(manager, {
+    storeId: store,
+    variantId: id,
+    batchCode: 'boundary',
+    quantity: '100',
+    reference: uuidV7(),
+  });
+  const readBatch = async () =>
+    (
+      await sql<{
+        id: string;
+        version: string;
+      }>`SELECT b.id,i.version::text FROM inventory_batches b JOIN store_inventory i ON i.store_id=b.store_id AND i.variant_id=b.variant_id WHERE b.store_id=${store}::uuid AND b.variant_id=${id}::uuid`.execute(
+        db.db,
+      )
+    ).rows[0]!;
+  const onHand = async () =>
+    (
+      await sql<{
+        on_hand: string;
+      }>`SELECT on_hand::text FROM store_inventory WHERE store_id=${store}::uuid AND variant_id=${id}::uuid`.execute(
+        db.db,
+      )
+    ).rows[0]!.on_hand;
+  const countTo = async (counted: string) => {
+    const batch = await readBatch();
+    return counter.count(manager, {
+      storeId: store,
+      variantId: id,
+      batchId: batch.id,
+      counted,
+      expectedVersion: batch.version,
+      reason: 'boundary check',
+      reference: uuidV7(),
+    });
+  };
+  expect(await countTo('76')).toEqual({}); // delta 24, applies
+  expect(await onHand()).toBe('76');
+  expect(await countTo('51')).toEqual({}); // delta 25 = threshold, applies
+  expect(await onHand()).toBe('51');
+  const pending = await countTo('25'); // delta 26 > threshold, waits
+  expect(pending.approvalId).toBeDefined();
+  expect(await onHand()).toBe('51');
+  const reads = new PostgresInventoryPortalReads(db.db, access, { get: async () => 25 } as never);
+  const page = await reads.batches(manager, store, '', undefined, 1);
+  expect(page.inventoryAdjustmentApprovalUnits).toBe(25);
 });
 test('damaged allocated stock records a durable obligation and never violates reserved stock', async () => {
   const { PostgresInventoryQuality } =
@@ -447,6 +505,39 @@ test('multi-item shortfall rolls back every line and reports missing assortment'
     );
   expect(partial.rows).toHaveLength(0);
 });
+// prettier-ignore
+test('withdraw-vs-place race: new commerce reservations require listing, placed orders do not', async () => {
+  const id = await variant();
+  await inventory.receive(manager, {
+    storeId: store,
+    variantId: id,
+    batchCode: 'listed-batch',
+    quantity: '10',
+    reference: uuidV7(),
+  });
+  await sql`UPDATE store_inventory SET listed=false WHERE store_id=${store}::uuid AND variant_id=${id}::uuid`.execute(db.db);
+  // New commerce reservation is rejected under the inventory lock.
+  await expect(
+    reservations.reserve({ ...input(id), requireListed: true }),
+  ).rejects.toThrow('INVENTORY_INSUFFICIENT');
+  // Placed-order resolution (no listing restriction) still reserves on full stock.
+  const [orderId] = await seedFixtureOrders(1);
+  await reservations.reserve({ ...input(id, orderId!) });
+  await reservations.commit(orderId!);
+  // A receipt into the withdrawn row does not reactivate it.
+  await inventory.receive(manager, {
+    storeId: store,
+    variantId: id,
+    batchCode: 'listed-batch-2',
+    quantity: '5',
+    reference: uuidV7(),
+  });
+  const row = await sql<{ listed: boolean; on_hand: string }>`SELECT listed,on_hand::text FROM store_inventory WHERE store_id=${store}::uuid AND variant_id=${id}::uuid`.execute(db.db);
+  expect(row.rows[0]!.listed).toBe(false);
+  expect(Number(row.rows[0]!.on_hand)).toBe(14); // 10 - 1 committed + 5 receipted
+  await sql`UPDATE store_inventory SET listed=true WHERE store_id=${store}::uuid AND variant_id=${id}::uuid`.execute(db.db);
+});
+// prettier-ignore
 test('store HTTP receipt validates input, replays safely, and isolates assignments', async () => {
   const { createApplication } = await import('../../../src/bootstrap.js');
   const { readEnv } = await import('../../../src/config/env.schema.js');
@@ -527,7 +618,7 @@ test('store HTTP receipt validates input, replays safely, and isolates assignmen
   } finally {
     await app.close();
   }
-}, 30000);
+}, TEST_TIMEOUT);
 test('opposite line orders serialize without deadlock and never leave a partial reservation', async () => {
   const a = await variant(),
     b = await variant();
@@ -761,6 +852,7 @@ test('shelf-life changes require current admin authority, version and durable re
     'CONCURRENT_MODIFICATION',
   );
 });
+// prettier-ignore
 test('durable count claims make progress on a two-connection pool and fence conflicting requests', async () => {
   const { PostgresAdjustments } =
     await import('../../../src/modules/inventory/infrastructure/adjustments.js');
@@ -857,7 +949,7 @@ test('durable count claims make progress on a two-connection pool and fence conf
   } finally {
     await limited.close();
   }
-}, 30000);
+}, TEST_TIMEOUT);
 
 test('stock cursor pages preserve ordering and reject reuse with a different filter', async () => {
   const first = await inventory.list(manager, store, '', undefined, 1);

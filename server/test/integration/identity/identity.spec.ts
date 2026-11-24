@@ -284,7 +284,8 @@ test('rider review serializes concurrent approvals and accepts profile after doc
     await import('../../../src/modules/app-config/infrastructure/config-service.js');
   const config = new ConfigService(db.db);
   const uploads = {
-    createTarget: async () => ({ mediaId: '', url: '', fields: {} }),
+    createTarget: async () => ({ mediaId: '', url: '', fields: {}, expiresAt: '' }),
+    prepareOwnedUpload: async () => ({ commit: async () => {}, release: async () => {} }),
     assertOwnedRegistered: async () => undefined,
     signedRead: async () => '',
   };
@@ -299,7 +300,11 @@ test('rider review serializes concurrent approvals and accepts profile after doc
   const documents = await sql<{
     id: string;
   }>`SELECT id FROM rider_documents WHERE rider_id=${rider}::uuid`.execute(db.db);
-  await Promise.all(documents.rows.map(({ id }) => onboarding.review(reviewer, id, true, '')));
+  await Promise.all(
+    documents.rows.map(({ id }) =>
+      onboarding.review(reviewer, id, true, '', { role: 'STORE_MANAGER' }),
+    ),
+  );
   const approved = await sql<{
     status: string;
   }>`SELECT status FROM rider_profiles WHERE user_id=${rider}::uuid`.execute(db.db);

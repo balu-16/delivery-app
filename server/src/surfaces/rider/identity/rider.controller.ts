@@ -6,25 +6,32 @@ import {
   ForbiddenException,
   Get,
   Inject,
+  Logger,
+  NotFoundException,
   Post,
   Req,
   ServiceUnavailableException,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiResponse } from '@nestjs/swagger';
 import {
   ProblemDto,
   RiderResponseDto,
   RiderBootstrapResponseDto,
-  RiderApplicationDto,
+  RiderOnboardingDto,
+  RiderOnboardingUpdatedDto,
   RiderOnboardingStoreDto,
   UploadTargetResponseDto,
 } from '../../../modules/identity/contracts/swagger.js';
 import { IsInt, IsString, IsUUID, Length, Min } from 'class-validator';
+import type { FastifyRequest } from 'fastify';
 import {
   RIDER_DOCUMENTS,
   type RiderDocuments,
 } from '../../../modules/identity/contracts/uploads.js';
+import { ConfigService } from '../../../config/config.service.js';
+import { DomainErrorInterceptor } from '../../domain-errors.js';
 
 import {
   AuthPolicy,
@@ -33,6 +40,7 @@ import {
 } from '../../../modules/identity/contracts/http.js';
 import {
   RIDER_APPLICATIONS,
+  projectRiderApplication,
   type RiderApplications,
 } from '../../../modules/identity/contracts/rider-applications.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
@@ -70,8 +78,11 @@ class SelectStoreDto {
 @Controller('v1/rider')
 @AuthPolicy({ audience: 'rider', allowPendingRider: true })
 @UseGuards(IdentityGuard)
+@UseInterceptors(DomainErrorInterceptor)
 export class RiderIdentityController {
+  private readonly logger = new Logger(RiderIdentityController.name);
   constructor(
+    @Inject(ConfigService) private readonly env: ConfigService,
     @Inject(USER_PROFILES) private readonly profiles: UserProfiles,
     @Inject(RIDER_PROFILE_ONBOARDING) private readonly onboarding: RiderProfileOnboarding,
     @Inject(RIDER_DOCUMENTS) private readonly documents: RiderDocuments | null,
@@ -81,7 +92,7 @@ export class RiderIdentityController {
   @ApiOperation({ operationId: 'riderBootstrap' })
   @ApiResponse({ status: 201, type: RiderBootstrapResponseDto })
   @AuthPolicy({ audience: 'rider', tokenUse: 'id', bootstrap: true })
-  async bootstrap(@Req() request: AuthenticatedRequest) {
+  async bootstrap(@Req() request: AuthenticatedRequest & Pick<FastifyRequest, 'id'>) {
     try {
       return await this.applications.bootstrap(request.identity!);
     } catch (error: unknown) {
@@ -90,15 +101,21 @@ export class RiderIdentityController {
         throw new BadRequestException({ code });
       if (code === 'EMAIL_NOT_VERIFIED' || code === 'ACCOUNT_DISABLED' || code === 'ROLE_CONFLICT')
         throw new ForbiddenException({ code });
-      if (code === 'RIDER_ENROLLMENT_REQUIRES_REVIEW') throw new ConflictException({ code });
+      if (code === 'RIDER_ENROLLMENT_REQUIRES_REVIEW') {
+        this.logger.warn(`Rider enrollment identity conflict (request ${request.id})`);
+        throw new ConflictException({ code });
+      }
       throw error;
     }
   }
   @Get('onboarding')
   @ApiOperation({ operationId: 'riderGetOnboarding' })
-  @ApiResponse({ status: 200, type: RiderApplicationDto })
-  onboardingStatus(@CurrentPrincipal() principal: Principal) {
-    return this.applications.get(principal.userId);
+  @ApiResponse({ status: 200, type: RiderOnboardingDto })
+  async onboardingStatus(@CurrentPrincipal() principal: Principal) {
+    return {
+      ...projectRiderApplication(await this.applications.get(principal.userId)),
+      maxDocumentBytes: this.env.get('PRIVATE_UPLOAD_MAX_BYTES'),
+    };
   }
   @Get('onboarding/stores')
   @ApiOperation({ operationId: 'riderListOnboardingStores' })
@@ -108,16 +125,19 @@ export class RiderIdentityController {
   }
   @Post('onboarding/store')
   @ApiOperation({ operationId: 'riderSelectOnboardingStore' })
-  @ApiResponse({ status: 201, description: 'Store selected' })
+  @ApiResponse({ status: 201, type: RiderOnboardingUpdatedDto })
   async selectStore(@CurrentPrincipal() principal: Principal, @Body() body: SelectStoreDto) {
     try {
-      await this.applications.selectStore(principal.userId, body.storeId);
-      return { updated: true };
+      const application = projectRiderApplication(
+        await this.applications.selectStore(principal.userId, body.storeId),
+      );
+      return { updated: true, application };
     } catch (error: unknown) {
       const code = error instanceof Error ? error.message : '';
-      if (code === 'STORE_NOT_FOUND' || code === 'INVALID_INPUT')
-        throw new BadRequestException({ code });
+      if (code === 'STORE_NOT_FOUND') throw new NotFoundException({ code });
+      if (code === 'INVALID_INPUT') throw new BadRequestException({ code });
       if (code === 'RIDER_STATE_INVALID') throw new ConflictException({ code });
+      if (code === 'FORBIDDEN') throw new ForbiddenException({ code });
       throw error;
     }
   }
@@ -133,46 +153,46 @@ export class RiderIdentityController {
     try {
       return await this.documents.uploadTarget(principal.userId, body.contentType, body.size);
     } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'INVALID_MEDIA')
-        throw new BadRequestException();
+      const code = error instanceof Error ? error.message : '';
+      if (code === 'INVALID_MEDIA') throw new BadRequestException({ code });
+      if (code === 'FORBIDDEN') throw new ForbiddenException({ code });
       throw error;
     }
   }
   @Post('onboarding/documents')
-  @ApiResponse({ status: 201, description: 'Document registered; empty response' })
-  async registerDocument(
-    @CurrentPrincipal() principal: Principal,
-    @Body() body: DocumentDto,
-  ): Promise<void> {
+  @ApiResponse({ status: 201, type: RiderOnboardingUpdatedDto })
+  @ApiResponse({ status: 404, type: ProblemDto, description: 'Media not found' })
+  @ApiResponse({ status: 410, type: ProblemDto, description: 'Upload expired' })
+  async registerDocument(@CurrentPrincipal() principal: Principal, @Body() body: DocumentDto) {
     if (!this.documents) throw new ServiceUnavailableException();
     try {
-      await this.documents.registerDocument(principal.userId, body.documentType, body.mediaId);
+      const application = projectRiderApplication(
+        await this.documents.registerDocument(principal.userId, body.documentType, body.mediaId),
+      );
+      return { updated: true, application };
     } catch (error: unknown) {
-      if (
-        error instanceof Error &&
-        ['INVALID_DOCUMENT_TYPE', 'MEDIA_NOT_FOUND'].includes(error.message)
-      )
-        throw new BadRequestException();
-      if (error instanceof Error && error.message === 'RIDER_STATE_INVALID')
-        throw new ConflictException();
-      if (error instanceof Error && error.message === 'FORBIDDEN') throw new ForbiddenException();
+      const code = error instanceof Error ? error.message : '';
+      if (['INVALID_DOCUMENT_TYPE', 'INVALID_INPUT'].includes(code))
+        throw new BadRequestException({ code });
+      if (code === 'MEDIA_NOT_FOUND') throw new NotFoundException({ code });
+      if (code === 'RIDER_STATE_INVALID') throw new ConflictException({ code });
+      if (code === 'FORBIDDEN') throw new ForbiddenException({ code });
       throw error;
     }
   }
   @Post('onboarding/profile')
-  @ApiResponse({ status: 201, description: 'Profile updated; empty response' })
-  async profile(
-    @CurrentPrincipal() principal: Principal,
-    @Body() body: RiderProfileDto,
-  ): Promise<void> {
+  @ApiResponse({ status: 201, type: RiderOnboardingUpdatedDto })
+  async profile(@CurrentPrincipal() principal: Principal, @Body() body: RiderProfileDto) {
     try {
-      await this.onboarding.profile(principal.userId, body.vehicleType, body.vehicleNo);
+      const application = projectRiderApplication(
+        await this.onboarding.profile(principal.userId, body.vehicleType, body.vehicleNo),
+      );
+      return { updated: true, application };
     } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'FORBIDDEN') throw new ForbiddenException();
-      if (error instanceof Error && error.message === 'RIDER_STATE_INVALID')
-        throw new ConflictException();
-      if (error instanceof Error && error.message === 'INVALID_RIDER_PROFILE')
-        throw new BadRequestException();
+      const code = error instanceof Error ? error.message : '';
+      if (code === 'FORBIDDEN') throw new ForbiddenException({ code });
+      if (code === 'RIDER_STATE_INVALID') throw new ConflictException({ code });
+      if (code === 'INVALID_RIDER_PROFILE') throw new BadRequestException({ code });
       throw error;
     }
   }

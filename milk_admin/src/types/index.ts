@@ -493,40 +493,6 @@ export interface NotificationPreference {
   enabled: boolean
 }
 
-// ── §10 Subscriptions ────────────────────────────────────────────────────────
-export interface SubscriptionPlan {
-  variantId: string
-  active: boolean
-  version: string
-}
-
-export interface DeliverySlot {
-  id: string
-  storeId: string
-  name: string
-  startTime: string
-  endTime: string
-  active: boolean
-  version: string
-}
-
-export interface SubscriptionHoliday {
-  storeId: string
-  date: string
-  reason: string | null
-}
-
-export interface SubscriptionRun {
-  id: string
-  storeId: string | null
-  runDate: string | null
-  status: string
-  generatedCount: number | null
-  failedCount: number | null
-  lastError: string | null
-  createdAt: string
-}
-
 // ── §11 Support & reviews ────────────────────────────────────────────────────
 export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed'
 
@@ -576,7 +542,7 @@ export interface RatingRow {
 }
 
 // ── §12 Reports & exports ────────────────────────────────────────────────────
-export type ReportKind = 'catalog' | 'stock' | 'financial' | 'picking' | 'rider' | 'subscription' | 'support'
+export type ReportKind = 'catalog' | 'stock' | 'financial' | 'picking' | 'rider' | 'support'
 export type ExportJobStatus = 'queued' | 'running' | 'complete' | 'failed' | 'expired'
 
 export interface ReportPreviewRow {
@@ -610,6 +576,10 @@ export interface Approval {
   status: ApprovalStatus
   expiresAt: string
   createdAt: string
+  /** Server-calculated decision capability as this admin sees it. */
+  canApprove?: boolean
+  canReject?: boolean
+  cannotApproveReason?: string | null
 }
 
 export type FraudReviewDecision = 'acknowledged' | 'dismissed' | 'escalated' | 'resolved' | 'rejected'
@@ -667,12 +637,25 @@ export interface OutboxStatus {
 export interface FeatureFlags {
   cod: boolean
   wallets: boolean
-  subscriptions: boolean
 }
 
 export interface ConfigSnapshot {
   config: Record<string, unknown>
   flags: Record<string, boolean>
+  configRevisions: Record<string, string>
+  flagRevisions: Record<string, string>
+}
+
+export interface ConfigChange {
+  key: string
+  value: unknown
+  expectedVersion?: string
+}
+
+export interface ConfigChangeResult {
+  key: string
+  value: unknown
+  version: string
 }
 
 export interface BackgroundJob {

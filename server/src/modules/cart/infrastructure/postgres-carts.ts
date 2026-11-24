@@ -92,16 +92,18 @@ export class PostgresCartService implements CartService {
   ): Promise<CartWriteResult> {
     const parsed = parseQuantity(quantity);
     return this.run(opts.tx, async (tx) => {
-      // Use the same transaction as the idempotent write. Fetching config from
-      // the pool here can deadlock when that transaction owns the last client.
+      const lockStarted = performance.now();
+      // Lock order matches the quote path: advisory cart lock, then the
+      // shared config lock taken by the batched config read, then the cart
+      // row. Config joins the caller's transaction so the read never fetches
+      // from the pool while the idempotent write owns the last client.
+      await advisoryLockCart(tx, userId);
       const { catalogMaxPerOrder: maxPerOrder, maxCartLines: maxLines } = this.config.getMany
         ? await this.config.getMany(['catalogMaxPerOrder', 'maxCartLines'], tx)
         : {
             catalogMaxPerOrder: await this.config.get('catalogMaxPerOrder', tx),
             maxCartLines: await this.config.get('maxCartLines', tx),
           };
-      const lockStarted = performance.now();
-      await advisoryLockCart(tx, userId);
       const cart = await this.lockedCart(tx, userId, opts.addressId);
       this.metrics?.observeStage('cart_lock_wait', performance.now() - lockStarted);
       requireVersion(BigInt(cart.version), opts.expectedVersion);

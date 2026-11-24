@@ -6,9 +6,12 @@ import {
   Send, Eye, CheckCheck,
 } from 'lucide-react'
 import { useStagger } from '@/hooks/misc'
-import { useCoupons, useCampaigns, useInbox, useCategories, useStores, useProducts } from '@/hooks/queries'
-import { useOfferActions } from '@/hooks/mutations'
+import { useCoupons, useCampaigns, useCampaignDetail, useInbox, useCategories, useStores, useProducts, useUsers } from '@/hooks/queries'
+import { useOfferActions, campaignAttemptKey } from '@/hooks/mutations'
 import { rupeesToPaise } from '@/api/money'
+import { CAMPAIGN_DESTINATIONS, type CampaignTargetInput } from '@/api/offers'
+import { ApiError } from '@/api/http'
+import { createCatalogMediaTarget, registerCatalogMedia, uploadToTarget } from '@/api/catalog'
 import { timeAgo } from '@/lib/utils'
 import { PageHeader, TabPills, tabCount, SearchInput, StatusPill, EmptyState } from '@/components/shared/misc'
 import { Select, Field } from '@/components/ui/form'
@@ -18,7 +21,7 @@ import {
   DropdownItem, Tooltip,
 } from '@/components/ui/overlays'
 import { DataTable } from '@/components/shared/DataTable'
-import type { AdminNotification, Coupon, CouponKind, PushCampaign } from '@/types'
+import type { AdminNotification, AdminUser, Coupon, CouponKind, PushCampaign } from '@/types'
 import { fmtDateTime, fmtINR } from '@/lib/utils'
 
 type MainTab = 'coupons' | 'campaigns' | 'inbox'
@@ -29,6 +32,7 @@ type CouponFormValues = {
   code: string; kind: CouponKindUi; valuePercent: number; valueRupees: number
   maxCapRupees: number; minOrderRupees: number; perUserLimit: number; globalLimit: number
   storeId: string; categoryId: string; productId: string; stackable: boolean; firstOrderOnly: boolean
+  validFrom: string; validTo: string
 }
 
 function CouponFormDialog({ open, onOpenChange, initial, categories, stores, products, serverError, onSubmit }: {
@@ -44,8 +48,9 @@ function CouponFormDialog({ open, onOpenChange, initial, categories, stores, pro
   const [v, setV] = useState<CouponFormValues>({
     code: '', kind: 'flat', valuePercent: 10, valueRupees: 50, maxCapRupees: 0,
     minOrderRupees: 199, perUserLimit: 1, globalLimit: 0, storeId: '', categoryId: '', productId: '',
-    stackable: false, firstOrderOnly: false,
+    stackable: false, firstOrderOnly: false, validFrom: '', validTo: '',
   })
+  const toLocal = (iso: string | null) => (iso ? new Date(iso).toISOString().slice(0, 16) : '')
   useEffect(() => {
     if (!open) return
     if (initial) {
@@ -63,9 +68,11 @@ function CouponFormDialog({ open, onOpenChange, initial, categories, stores, pro
         productId: initial.productId ?? '',
         stackable: initial.stackable,
         firstOrderOnly: initial.firstOrderOnly,
+        validFrom: toLocal(initial.validFrom),
+        validTo: toLocal(initial.validTo),
       })
     } else {
-      setV({ code: '', kind: 'flat', valuePercent: 10, valueRupees: 50, maxCapRupees: 0, minOrderRupees: 199, perUserLimit: 1, globalLimit: 0, storeId: '', categoryId: '', productId: '', stackable: false, firstOrderOnly: false })
+      setV({ code: '', kind: 'flat', valuePercent: 10, valueRupees: 50, maxCapRupees: 0, minOrderRupees: 199, perUserLimit: 1, globalLimit: 0, storeId: '', categoryId: '', productId: '', stackable: false, firstOrderOnly: false, validFrom: '', validTo: '' })
     }
   }, [open, initial])
 
@@ -120,6 +127,12 @@ function CouponFormDialog({ open, onOpenChange, initial, categories, stores, pro
           <Field label="Scoped product (optional)">
             <Select value={v.productId} onValueChange={(val) => set('productId', val)} options={[{ value: '', label: 'All products' }, ...products.map((p) => ({ value: p.id, label: p.name }))]} />
           </Field>
+          <Field label="Valid from (optional)">
+            <Input type="datetime-local" value={v.validFrom} onChange={(e) => set('validFrom', e.target.value)} />
+          </Field>
+          <Field label="Valid to (optional)">
+            <Input type="datetime-local" value={v.validTo} onChange={(e) => set('validTo', e.target.value)} />
+          </Field>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="flex items-center justify-between rounded-xl border border-border bg-muted/40 px-4 py-3">
@@ -143,37 +156,110 @@ function CouponFormDialog({ open, onOpenChange, initial, categories, stores, pro
   )
 }
 
-/* ── Campaign dialog (preview → create) ────────────────────── */
-function CampaignDialog({ open, onOpenChange, onCreate }: {
+/* ── Campaign dialog (preview → create; customize2 §3E) ───── */
+type CampaignMode = 'ALL' | 'USERS' | 'PLATFORM'
+type CampaignApp = 'CUSTOMER' | 'RIDER' | 'STORE' | 'ADMIN'
+
+function memberOf(user: AdminUser, apps: CampaignApp[]): boolean {
+  if (user.pool === 'CUSTOMER') return apps.includes('CUSTOMER')
+  if (user.roles.includes('RIDER')) return apps.includes('RIDER')
+  if (user.roles.includes('STORE_MANAGER')) return apps.includes('STORE')
+  if (user.roles.includes('SUPER_ADMIN')) return apps.includes('ADMIN')
+  return apps.length > 0
+}
+
+function campaignErrorText(error: unknown): string {
+  if (error instanceof ApiError && error.code === 'INVALID_INPUT')
+    return 'The campaign was rejected: no recipients, audience too large (>10,000 devices), or invalid target. Check the audience and preview again.'
+  return error instanceof Error ? error.message : 'The server rejected the campaign.'
+}
+
+function CampaignDialog({ open, onOpenChange, onCreate, onTestSend }: {
   open: boolean
   onOpenChange: (v: boolean) => void
-  onCreate: (input: { title: string; body: string; kind: 'PROMOTIONAL' | 'OPERATIONAL'; target: { mode: 'ALL' | 'USERS'; apps: Array<'CUSTOMER' | 'RIDER' | 'STORE' | 'ADMIN'> } }, estimated: number | null) => void
+  onCreate: (input: { title: string; body: string; kind: 'PROMOTIONAL' | 'OPERATIONAL'; target: CampaignTargetInput; clickAction?: string; imageMediaId?: string }, attemptKey: string) => void
+  onTestSend: (input: { title: string; body: string; kind: 'PROMOTIONAL' | 'OPERATIONAL'; target: CampaignTargetInput; clickAction?: string; imageMediaId?: string }, attemptKey: string, note: (msg: string) => void) => void
 }) {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [kind, setKind] = useState<'PROMOTIONAL' | 'OPERATIONAL'>('PROMOTIONAL')
-  const [apps, setApps] = useState<Array<'CUSTOMER' | 'RIDER' | 'STORE' | 'ADMIN'>>(['CUSTOMER'])
-  const [estimated, setEstimated] = useState<number | null>(null)
+  const [mode, setMode] = useState<CampaignMode>('ALL')
+  const [apps, setApps] = useState<CampaignApp[]>(['CUSTOMER'])
+  const [platform, setPlatform] = useState<'ANDROID' | 'WEB'>('ANDROID')
+  const [selected, setSelected] = useState<AdminUser[]>([])
+  const [search, setSearch] = useState('')
+  const [clickAction, setClickAction] = useState('')
+  const [imageMediaId, setImageMediaId] = useState<string | null>(null)
+  const [imageUrl, setImageUrl] = useState('')
+  const [preview, setPreview] = useState<{ devices: number; users: number; digest: string } | null>(null)
   const [previewing, setPreviewing] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [confirmWhole, setConfirmWhole] = useState(false)
+  const [testNote, setTestNote] = useState<string | null>(null)
+  const [attemptKey, setAttemptKey] = useState<string | null>(null)
+  const usersQ = useUsers({ search: search || undefined, limit: 20 })
 
-  const invalid = title.trim().length < 1 || body.trim().length < 1 || apps.length === 0
+  const target: CampaignTargetInput = mode === 'USERS'
+    ? { mode, apps, userIds: selected.map((user) => user.userId) }
+    : mode === 'PLATFORM'
+      ? { mode, apps, platform }
+      : { mode, apps }
+  const digest = JSON.stringify({ target, kind, title: title.trim(), body: body.trim() })
+  const fresh = preview !== null && preview.digest === digest
+  const mismatched = selected.filter((user) => !memberOf(user, apps))
+  const invalid = title.trim().length < 1
+    || body.trim().length < 1
+    || apps.length === 0
+    || (mode === 'USERS' && selected.length === 0)
+    || mismatched.length > 0
+  const wholeApp = mode === 'ALL' || mode === 'PLATFORM'
 
-  const preview = async () => {
-    setPreviewing(true)
+  useEffect(() => {
+    if (open) {
+      setTitle(''); setBody(''); setKind('PROMOTIONAL'); setMode('ALL'); setApps(['CUSTOMER'])
+      setPlatform('ANDROID'); setSelected([]); setSearch(''); setClickAction(''); setImageMediaId(null)
+      setImageUrl(''); setPreview(null); setPreviewError(null); setConfirmWhole(false)
+      setTestNote(null); setAttemptKey(null)
+    }
+  }, [open])
+
+  // Preview is stale the moment the audience, platform or kind changes.
+  useEffect(() => { setPreview(null) }, [digest])
+
+  const runPreview = async () => {
+    setPreviewing(true); setPreviewError(null)
     try {
       const { previewCampaign } = await import('@/api/offers')
-      const res = await previewCampaign({ target: { mode: 'ALL', apps }, kind })
-      setEstimated(res.estimatedRecipients)
-    } catch {
-      setEstimated(null)
-    } finally {
-      setPreviewing(false)
+      const res = await previewCampaign({ target, kind })
+      setPreview({ devices: res.devices ?? 0, users: res.users ?? 0, digest })
+      if ((res.devices ?? 0) === 0) setPreviewError('No recipients match this audience. Check the app selection and selected users.')
+    } catch (error) {
+      setPreview(null)
+      setPreviewError(campaignErrorText(error))
+    } finally { setPreviewing(false) }
+  }
+
+  const uploadImage = async (file: File | undefined) => {
+    if (!file) return
+    setPreviewError(null)
+    try {
+      const targetMedia = await createCatalogMediaTarget('CONTENT_IMAGE', file.type || 'image/jpeg', file.size)
+      await uploadToTarget(targetMedia, file)
+      await registerCatalogMedia(targetMedia.mediaId)
+      setImageMediaId(targetMedia.mediaId)
+      setImageUrl(`/media/${targetMedia.mediaId}`)
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : 'Image upload failed.')
     }
   }
 
-  useEffect(() => {
-    if (open) { setTitle(''); setBody(''); setKind('PROMOTIONAL'); setApps(['CUSTOMER']); setEstimated(null) }
-  }, [open])
+  const payload = () => ({
+    title: title.trim(), body: body.trim(), kind,
+    target,
+    ...(clickAction ? { clickAction } : {}),
+    ...(imageMediaId ? { imageMediaId } : {}),
+    ...(imageUrl && !imageMediaId ? { imageUrl } : {}),
+  })
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -187,35 +273,114 @@ function CampaignDialog({ open, onOpenChange, onCreate }: {
                 { value: 'PROMOTIONAL', label: 'Promotional' }, { value: 'OPERATIONAL', label: 'Operational' },
               ]} />
             </Field>
-            <Field label="Audience apps" required hint="Target apps for the push">
-              <div className="flex flex-wrap gap-3 pt-1">
-                {(['CUSTOMER', 'RIDER', 'STORE', 'ADMIN'] as const).map((a) => (
-                  <label key={a} className="flex cursor-pointer items-center gap-1.5 text-[12.5px] font-semibold">
-                    <input
-                      type="checkbox"
-                      checked={apps.includes(a)}
-                      onChange={(e) => setApps((cur) => (e.target.checked ? [...cur, a] : cur.filter((x) => x !== a)))}
-                      className="h-4 w-4 rounded border-input accent-[#2E7D1A]"
-                    />
-                    {a.toLowerCase()}
-                  </label>
-                ))}
-              </div>
+            <Field label="Audience mode" required>
+              <Select value={mode} onValueChange={(v) => setMode(v as CampaignMode)} options={[
+                { value: 'ALL', label: 'Whole app (all)' },
+                { value: 'USERS', label: 'Selected users' },
+                { value: 'PLATFORM', label: 'Platform (device OS)' },
+              ]} />
             </Field>
           </div>
+          <Field label="Audience apps" required hint="Target apps for the push">
+            <div className="flex flex-wrap gap-3 pt-1">
+              {(['CUSTOMER', 'RIDER', 'STORE', 'ADMIN'] as const).map((a) => (
+                <label key={a} className="flex cursor-pointer items-center gap-1.5 text-[12.5px] font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={apps.includes(a)}
+                    onChange={(e) => setApps((cur) => (e.target.checked ? [...cur, a] : cur.filter((x) => x !== a)))}
+                    className="h-4 w-4 rounded border-input accent-[#2E7D1A]"
+                  />
+                  {a.toLowerCase()}
+                </label>
+              ))}
+            </div>
+          </Field>
+          {mode === 'PLATFORM' && (
+            <Field label="Platform" required hint="Server only delivers to this device platform">
+              <Select value={platform} onValueChange={(v) => setPlatform(v as 'ANDROID' | 'WEB')} options={[
+                { value: 'ANDROID', label: 'Android' }, { value: 'WEB', label: 'Web' },
+              ]} />
+            </Field>
+          )}
+          {mode === 'USERS' && (
+            <Field label="Users" required hint={mismatched.length ? `${mismatched.length} selected account(s) do not belong to the selected app — remove them or fix the app selection.` : 'Search People and pick recipients'}>
+              <div className="space-y-2">
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or email…" />
+                <div className="max-h-36 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
+                  {(usersQ.data?.items ?? []).map((user) => {
+                    const picked = selected.some((item) => item.userId === user.userId)
+                    return (
+                      <button
+                        key={user.userId} type="button"
+                        className="flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-[12.5px] hover:bg-muted"
+                        onClick={() => setSelected((cur) => (picked ? cur.filter((item) => item.userId !== user.userId) : [...cur, user]))}
+                      >
+                        <span className="font-semibold">{user.name} <span className="font-normal text-muted-foreground">{user.email}</span></span>
+                        {picked && <span className="text-[11px] font-bold text-success">selected</span>}
+                      </button>
+                    )
+                  })}
+                  {(usersQ.data?.items ?? []).length === 0 && <p className="px-2 py-1 text-xs text-muted-foreground">No people match.</p>}
+                </div>
+                {selected.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selected.map((user) => (
+                      <span key={user.userId} className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold">
+                        {user.name}
+                        <button type="button" aria-label={`Remove ${user.name}`} onClick={() => setSelected((cur) => cur.filter((item) => item.userId !== user.userId))}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Field>
+          )}
+          <Field label="Click action (optional)" hint="Approved destination; anything unsupported falls back to the notifications screen">
+            <Select value={clickAction} onValueChange={setClickAction} options={[{ value: '', label: 'No tap target' }, ...CAMPAIGN_DESTINATIONS.map((value) => ({ value, label: value }))]} />
+          </Field>
+          <Field label="Image (optional)" hint="Registered content image (JPEG/PNG/WebP)">
+            <div className="space-y-2">
+              <Input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void uploadImage(event.target.files?.[0])} />
+              {imageMediaId && <p className="text-xs text-muted-foreground">Registered as {imageMediaId} <button type="button" className="font-bold" onClick={() => { setImageMediaId(null); setImageUrl('') }}>remove</button></p>}
+              {imageUrl && imageMediaId && <img src={imageUrl} alt="Campaign image preview" className="h-20 rounded-lg border border-border object-cover" />}
+            </div>
+          </Field>
           <div className="flex items-center justify-between rounded-xl border border-border bg-muted/40 px-4 py-3">
             <div>
               <Label className="mb-0">Estimated audience</Label>
-              <p className="text-xs text-muted-foreground">{estimated == null ? 'Run the preview to fetch a server-side count' : `${estimated.toLocaleString('en-IN')} devices match`}</p>
+              <p className="text-xs text-muted-foreground">
+                {preview == null ? 'Run the preview to fetch a server-side count'
+                  : `${preview.devices.toLocaleString('en-IN')} devices · ${preview.users.toLocaleString('en-IN')} users match`}
+              </p>
+              {previewError && <p className="text-xs font-semibold text-destructive">{previewError}</p>}
+              {testNote && <p className="text-xs text-muted-foreground">{testNote}</p>}
             </div>
-            <Button size="sm" variant="outline" disabled={invalid || previewing} onClick={() => void preview()}>
+            <Button size="sm" variant="outline" disabled={invalid || previewing} onClick={() => void runPreview()}>
               <Send className="h-3.5 w-3.5" /> {previewing ? 'Previewing…' : 'Preview'}
             </Button>
           </div>
+          {mode === 'USERS' && (
+            <div className="flex items-center justify-between rounded-xl border border-border bg-muted/40 px-4 py-3">
+              <div>
+                <Label className="mb-0">Test recipient</Label>
+                <p className="text-xs text-muted-foreground">Sends only to the first selected user via the same selected-user path.</p>
+              </div>
+              <Button size="sm" variant="outline" disabled={invalid || selected.length === 0} onClick={() => onTestSend({ ...payload(), target: { mode: 'USERS', apps, userIds: [selected[0]!.userId] } }, campaignAttemptKey(), setTestNote)}>
+                Test send
+              </Button>
+            </div>
+          )}
+          {wholeApp && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-border bg-muted/40 px-4 py-3 text-[12.5px] font-semibold">
+              <input type="checkbox" checked={confirmWhole} onChange={(e) => setConfirmWhole(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-input accent-[#2E7D1A]" />
+              I confirm this send goes to the entire selected app/platform audience.
+            </label>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="secondary" size="md" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button variant="primary" size="md" disabled={invalid} onClick={() => { onCreate({ title: title.trim(), body: body.trim(), kind, target: { mode: 'ALL', apps } }, estimated); onOpenChange(false) }}>
-              <Megaphone className="h-4 w-4" /> Create campaign
+            <Button variant="primary" size="md" disabled={invalid || !fresh || (wholeApp && !confirmWhole)} onClick={() => { const key = attemptKey ?? campaignAttemptKey(); setAttemptKey(key); onCreate(payload(), key) }}>
+              <Megaphone className="h-4 w-4" /> {fresh ? 'Create campaign' : 'Run preview to enable'}
             </Button>
           </div>
         </div>
@@ -224,8 +389,10 @@ function CampaignDialog({ open, onOpenChange, onCreate }: {
   )
 }
 
-/* ── Campaign detail drawer ────────────────────────────────── */
+/* ── Campaign detail drawer (fetches live delivery detail) ── */
 function CampaignDrawer({ campaign, onClose }: { campaign: PushCampaign; onClose: () => void }) {
+  const detail = useCampaignDetail(campaign.id)
+  const counts = detail.data?.counts
   return (
     <Drawer open onOpenChange={(v) => { if (!v) onClose() }} width="md" title={campaign.title} subtitle={`${campaign.kind} · created ${fmtDateTime(campaign.createdAt)}`}>
       <div className="space-y-4">
@@ -241,7 +408,22 @@ function CampaignDrawer({ campaign, onClose }: { campaign: PushCampaign; onClose
           <div className="flex gap-2"><dt className="font-semibold text-muted-foreground">Recipients:</dt><dd className="font-bold tabular">{campaign.recipients ?? '—'}</dd></div>
           <div className="flex gap-2"><dt className="font-semibold text-muted-foreground">Created:</dt><dd className="font-medium">{fmtDateTime(campaign.createdAt)}</dd></div>
         </dl>
-        <p className="text-[11px] text-muted-foreground">Per-device delivery state is tracked by the notifications service.</p>
+        {detail.isLoading && <p className="text-xs text-muted-foreground">Loading delivery detail…</p>}
+        {detail.isError && (
+          <div className="rounded-xl border border-border/70 p-4 text-[13px]">
+            <p className="font-semibold">Could not load delivery detail.</p>
+            <Button size="sm" variant="outline" onClick={() => void detail.refetch()}>Try again</Button>
+          </div>
+        )}
+        {counts && (
+          <div className="grid grid-cols-2 gap-2 text-[13px] sm:grid-cols-4">
+            <div className="rounded-xl border border-border/70 p-3"><p className="font-bold tabular">{counts.pending}</p><p className="text-xs text-muted-foreground">Pending</p></div>
+            <div className="rounded-xl border border-border/70 p-3"><p className="font-bold tabular">{counts.delivered}</p><p className="text-xs text-muted-foreground">Delivered</p></div>
+            <div className="rounded-xl border border-border/70 p-3"><p className="font-bold tabular">{counts.skipped}</p><p className="text-xs text-muted-foreground">Skipped</p></div>
+            <div className="rounded-xl border border-border/70 p-3"><p className="font-bold tabular">{counts.failed}</p><p className="text-xs text-muted-foreground">Failed</p></div>
+          </div>
+        )}
+        <p className="text-[11px] text-muted-foreground">Counts are the delivery service's per-device results (provider acceptance). Token values are never shown.</p>
       </div>
     </Drawer>
   )
@@ -282,6 +464,8 @@ export function Offers() {
         minOrderPaise: rupeesToPaise(values.minOrderRupees),
         perUserLimit: values.perUserLimit > 0 ? values.perUserLimit : null,
         globalLimit: values.globalLimit > 0 ? values.globalLimit : null,
+        validFrom: values.validFrom ? new Date(values.validFrom).toISOString() : null,
+        validTo: values.validTo ? new Date(values.validTo).toISOString() : null,
         active: editingCoupon.active,
         expectedVersion: editingCoupon.version,
       }, values.code).mutate(undefined, {
@@ -297,6 +481,8 @@ export function Offers() {
         minOrderPaise: rupeesToPaise(values.minOrderRupees),
         perUserLimit: values.perUserLimit > 0 ? values.perUserLimit : undefined,
         globalLimit: values.globalLimit > 0 ? values.globalLimit : undefined,
+        validFrom: values.validFrom ? new Date(values.validFrom).toISOString() : undefined,
+        validTo: values.validTo ? new Date(values.validTo).toISOString() : undefined,
         storeId: values.storeId || undefined,
         categoryId: values.categoryId || undefined,
         productId: values.productId || undefined,
@@ -473,12 +659,14 @@ export function Offers() {
       <CampaignDialog
         open={campaignOpen}
         onOpenChange={setCampaignOpen}
-        onCreate={(input) => actions.addCampaign({
-          target: { mode: input.target.mode, apps: input.target.apps },
-          kind: input.kind,
-          title: input.title,
-          body: input.body,
-        }).mutate(undefined, { onError: (e) => setServerError(e.message) })}
+        onCreate={(input, attemptKey) => actions.addCampaign(input, attemptKey).mutate(undefined, {
+          onError: (e) => setServerError(campaignErrorText(e)),
+          onSuccess: () => { setServerError(null); setCampaignOpen(false) },
+        })}
+        onTestSend={(input, attemptKey, note) => actions.addCampaign(input, attemptKey).mutate(undefined, {
+          onError: (e) => note(campaignErrorText(e)),
+          onSuccess: () => note('Test campaign sent to the test recipient.'),
+        })}
       />
       {campaignDetail && <CampaignDrawer campaign={campaignDetail} onClose={() => setCampaignDetail(null)} />}
     </div>

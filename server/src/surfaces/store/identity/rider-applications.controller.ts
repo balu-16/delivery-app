@@ -74,7 +74,11 @@ export class StoreRiderApplicationsController {
     @Param('documentId', ParseUUIDPipe) documentId: string,
   ) {
     if (!this.documents) throw new ServiceUnavailableException();
-    return { url: await this.documents.reviewUrl(principal.userId, documentId) };
+    return {
+      url: await this.documents.reviewUrl(principal.userId, documentId, {
+        role: 'STORE_MANAGER',
+      }),
+    };
   }
 
   @Post('rider-documents/:documentId/review')
@@ -86,7 +90,9 @@ export class StoreRiderApplicationsController {
     @Body() body: ReviewDto,
   ) {
     if (!this.documents) throw new ServiceUnavailableException();
-    await this.documents.review(principal.userId, documentId, body.approved, body.reason);
+    await this.documents.review(principal.userId, documentId, body.approved, body.reason, {
+      role: 'STORE_MANAGER',
+    });
     return { reviewed: true };
   }
 }

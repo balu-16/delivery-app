@@ -14,7 +14,7 @@ import { closeP5World, createP5World, type P5World } from '../../helpers/p5-worl
 let world: P5World;
 
 beforeAll(async () => {
-  world = await createP5World();
+  world = await createP5World({ skipAwsCache: process.env.AWS_P13_INTEGRATION === 'yes' });
 }, 300000);
 afterAll(async () => {
   if (world) await closeP5World(world);
@@ -161,9 +161,27 @@ test('a typed size survives a reconnect and a competing tap, with one durable ca
     (message) => message.cards,
   );
   expect(history.find((c) => c.cardId === initial.cardId)?.payload.status).toBe('superseded');
-  expect(history.find((c) => c.cardId === picked.cardId)?.payload.status).toBe('committed');
+  expect(history.find((c) => c.cardId === picked.cardId)?.payload).toMatchObject({
+    status: 'committed',
+    selection: { variantId: first.id, quantity: 2 },
+  });
   expect(history.find((c) => c.cardId === next.cardId)?.payload.status).toBe('stale');
-  expect(history.at(-1)?.payload.variants).toMatchObject([{ variantId: second.id }]);
+  const replacement = history.at(-1)!;
+  expect(replacement.payload.variants).toMatchObject([{ variantId: second.id }]);
+  const typed = await send('1', uuidV7(), ref(replacement));
+  expect(typed.events).toContainEqual(
+    expect.objectContaining({
+      event: 'message.delta',
+      data: { text: 'Added 1 × Milk to your cart.' },
+    }),
+  );
+  const reopened = (await threads.messages(userId, threadId)).messages.flatMap(
+    (message) => message.cards,
+  );
+  expect(reopened.find((c) => c.cardId === replacement.cardId)?.payload).toMatchObject({
+    status: 'committed',
+    selection: { variantId: second.id, quantity: 1, answeredInMessage: true },
+  });
   expect(card((await send('Where is my cart?')).events).payload.options).toEqual([
     { label: 'Open cart', action: 'open_screen', payload: { screen: 'cart' } },
   ]);

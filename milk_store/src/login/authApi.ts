@@ -78,19 +78,29 @@ export async function completeChallenge(
   return outcome
 }
 
+/** One in-flight bootstrap shared by concurrent callers (incl. CSRF recovery). */
+let bootstrapPromise: Promise<{ user: StoreAuthUser; idleExpiresAt: string | null } | null> | null = null
+
 /** Refresh bootstrap: resolves the cookie session, rotating it when needed. */
-export async function bootstrapSession(): Promise<{ user: StoreAuthUser; idleExpiresAt: string | null } | null> {
-  try {
-    const result = await apiGet<{ manager: ManagerPayload; csrfToken: string; idleExpiresAt?: string }>(
-      '/v1/store/auth/session',
-    )
-    adoptCsrf(result.csrfToken)
-    return { user: toUser(result.manager), idleExpiresAt: result.idleExpiresAt ?? null }
-  } catch (error) {
-    adoptCsrf(null)
-    if ((error as { status?: number }).status === 401) return null
-    throw error
+export function bootstrapSession(): Promise<{ user: StoreAuthUser; idleExpiresAt: string | null } | null> {
+  if (!bootstrapPromise) {
+    bootstrapPromise = (async () => {
+      try {
+        const result = await apiGet<{ manager: ManagerPayload; csrfToken: string; idleExpiresAt?: string }>(
+          '/v1/store/auth/session',
+        )
+        adoptCsrf(result.csrfToken)
+        return { user: toUser(result.manager), idleExpiresAt: result.idleExpiresAt ?? null }
+      } catch (error) {
+        adoptCsrf(null)
+        if ((error as { status?: number }).status === 401) return null
+        throw error
+      }
+    })().finally(() => {
+      bootstrapPromise = null
+    })
   }
+  return bootstrapPromise
 }
 
 export async function forgotPassword(email: string): Promise<void> {

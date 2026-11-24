@@ -5,7 +5,7 @@ import { riderApi } from '../src/api';
 
 jest.mock('../src/api', () => ({
   ApiError: class ApiError extends Error {},
-  riderApi:{tickets:jest.fn(),ticket:jest.fn(),createTicket:jest.fn(),ticketMessage:jest.fn()},
+  riderApi:{tickets:jest.fn(),ticket:jest.fn(),createTicket:jest.fn(),ticketMessage:jest.fn(),appContent:jest.fn(async () => [])},
 }));
 jest.mock('../src/actions', () => ({performAction:jest.fn()}));
 jest.mock('../src/components/Ui', () => {

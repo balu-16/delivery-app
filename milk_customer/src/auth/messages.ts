@@ -11,6 +11,8 @@ export function authErrorMessage(cause: unknown): string {
       case 'INVALID_REFERRAL_CODE':
       case 'REFERRAL_SIGNUP_ONLY':
         return 'This referral code cannot be applied.';
+      case 'REFERRAL_INVITE_USED':
+        return 'That invite has already been used. Check the code or sign in without a referral.';
       case 'REFERRAL_UNAVAILABLE':
       case 'REFERRALS_UNAVAILABLE':
         return 'Referral rewards are unavailable right now.';
@@ -20,10 +22,10 @@ export function authErrorMessage(cause: unknown): string {
     }
     return customerErrorMessage(cause, 'finish setting up your account');
   }
-  if (cause instanceof Error && cause.message.startsWith('Enter a valid 16-character')) return cause.message;
+  if (cause instanceof Error && cause.message.startsWith('Enter a valid')) return cause.message;
   return customerErrorMessage(cause);
 }
 
 export function isReferralError(cause: unknown): boolean {
-  return cause instanceof ApiError && ['INVALID_REFERRAL_CODE', 'REFERRAL_SIGNUP_ONLY', 'REFERRAL_UNAVAILABLE', 'REFERRALS_UNAVAILABLE'].includes(cause.code);
+  return cause instanceof ApiError && ['INVALID_REFERRAL_CODE', 'REFERRAL_SIGNUP_ONLY', 'REFERRAL_INVITE_USED', 'REFERRAL_UNAVAILABLE', 'REFERRALS_UNAVAILABLE'].includes(cause.code);
 }

@@ -104,12 +104,12 @@ loadTest(
         world.db.db,
       );
       expect(result.rows[0]).toEqual({
-        occurrences: '10000',
-        orders: '10000',
-        debits: '10000',
-        reserved: '10000',
-        capacity: '10000',
-        stores: '10',
+        occurrences: '0',
+        orders: '0',
+        debits: '0',
+        reserved: '0',
+        capacity: '0',
+        stores: '0',
       });
     } finally {
       await app.close();

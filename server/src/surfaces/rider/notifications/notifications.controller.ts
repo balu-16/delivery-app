@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { DomainErrorInterceptor } from '../../domain-errors.js';
 import {
   DEVICE_TOKENS,
@@ -24,6 +24,10 @@ import {
   type NotificationPreferences,
   type NotificationViews,
 } from '../../../modules/notifications/contracts/notifications.js';
+import {
+  APP_CONTENT,
+  type AppContentService,
+} from '../../../modules/app-content/contracts/app-content.js';
 import {
   DeviceTokenDto,
   NotificationApiErrors,
@@ -44,6 +48,10 @@ export class InboxQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number;
 }
 
+export class AppContentQueryDto {
+  @IsOptional() @IsIn(['en', 'hi', 'te']) locale?: string;
+}
+
 /** Rider audience: self-scoped inbox, tokens and preferences (manifest P9). */
 @Controller('v1/rider')
 @ApiBearerAuth()
@@ -56,7 +64,15 @@ export class RiderNotificationsController {
     @Inject(NOTIFICATION_VIEWS) private readonly views: NotificationViews,
     @Inject(DEVICE_TOKENS) private readonly tokens: DeviceTokens,
     @Inject(NOTIFICATION_PREFERENCES) private readonly preferences: NotificationPreferences,
+    @Inject(APP_CONTENT) private readonly content: AppContentService,
   ) {}
+
+  @Get('app-content')
+  @ApiOperation({ operationId: 'riderAppContent' })
+  @AuthPolicy({ audience: 'rider', roles: ['RIDER'], allowPendingRider: true })
+  appContent(@Query() query: AppContentQueryDto) {
+    return this.content.audience('RIDER', query.locale);
+  }
 
   @Post('device-tokens')
   @ApiOperation({ operationId: 'riderRegisterDeviceToken' })

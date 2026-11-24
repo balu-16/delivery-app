@@ -23,14 +23,15 @@ import { IdentityGuard } from '../../../modules/identity/contracts/identity-guar
 import type { Principal } from '../../../modules/identity/contracts/identity.js';
 import { CATALOG_MEDIA, type CatalogMedia } from '../../../modules/media/contracts/storage.js';
 class TargetDto {
-  @ApiProperty({ enum: ['PRODUCT_IMAGE', 'CATALOG_IMPORT'] })
-  @IsIn(['PRODUCT_IMAGE', 'CATALOG_IMPORT'])
-  purpose!: 'PRODUCT_IMAGE' | 'CATALOG_IMPORT';
+  @ApiProperty({ enum: ['PRODUCT_IMAGE', 'CATALOG_IMPORT', 'CONTENT_IMAGE'] })
+  @IsIn(['PRODUCT_IMAGE', 'CATALOG_IMPORT', 'CONTENT_IMAGE'])
+  purpose!: 'PRODUCT_IMAGE' | 'CATALOG_IMPORT' | 'CONTENT_IMAGE';
   @ApiProperty() @IsString() contentType!: string;
   @ApiProperty() @IsInt() @Min(1) size!: number;
 }
 class RegisterDto {
   @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() productId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsIn(['CONTENT_IMAGE']) purpose?: 'CONTENT_IMAGE';
 }
 class TargetView {
   @ApiProperty({ format: 'uuid' }) mediaId!: string;

@@ -21,7 +21,15 @@ export default function Layout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right', gestureEnabled: true }}>
+          <Stack.Screen name="offers/[offerId]" />
+          <Stack.Screen name="tasks/[taskId]" />
+          <Stack.Screen name="tasks/[taskId]/report" />
+          <Stack.Screen name="history/[taskId]" />
+          <Stack.Screen name="notifications" />
+          <Stack.Screen name="support" />
+          <Stack.Screen name="support/[ticketId]" />
+        </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

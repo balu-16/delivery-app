@@ -38,6 +38,19 @@ export function setReauthHook(fn: (() => Promise<void>) | null): void {
   reauthHook = fn
 }
 
+/** Concurrent stale-credential failures share one in-flight re-auth. */
+let reauthPromise: Promise<void> | null = null
+async function reauthenticate(): Promise<void> {
+  if (!reauthPromise) {
+    reauthPromise = (async () => {
+      await reauthHook!()
+    })().finally(() => {
+      reauthPromise = null
+    })
+  }
+  return reauthPromise
+}
+
 export function newIdempotencyKey(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -100,7 +113,7 @@ async function request<T>(
     const stale = retried === false && method !== 'GET' && reauthHook !== null &&
       ((status === 403 && code === 'CSRF_TOKEN_INVALID') || (status === 401 && code === 'SESSION_EXPIRED'))
     if (!stale) throw error
-    await reauthHook!()
+    await reauthenticate()
     return requestOnce<T>(method, path, init)
   }
 }

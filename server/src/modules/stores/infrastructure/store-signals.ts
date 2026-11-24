@@ -64,7 +64,7 @@ export class PostgresStoreSignals implements StoreSignals {
         tx,
       );
       const row = changed.rows[0]!;
-      await sql`INSERT INTO store_status_history(store_id,version,previous_status,status,reason,actor_id) VALUES (${storeId},${row.version}::bigint,'ONLINE','PAUSED',${reason},NULL)`.execute(
+      await sql`INSERT INTO store_status_history(store_id,version,previous_status,status,reason,actor_id,source) VALUES (${storeId},${row.version}::bigint,'ONLINE','PAUSED',${reason},NULL,'SYSTEM')`.execute(
         tx,
       );
       await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()},NULL,'STORE_AUTO_PAUSED','store',${storeId},${JSON.stringify({ reason })}::jsonb)`.execute(
@@ -110,7 +110,7 @@ export class PostgresStoreSignals implements StoreSignals {
         tx,
       );
       const row = changed.rows[0]!;
-      await sql`INSERT INTO store_status_history(store_id,version,previous_status,status,reason,actor_id) VALUES (${storeId},${row.version}::bigint,'ONLINE','PAUSED','AUTO_NO_RIDERS',NULL)`.execute(
+      await sql`INSERT INTO store_status_history(store_id,version,previous_status,status,reason,actor_id,source) VALUES (${storeId},${row.version}::bigint,'ONLINE','PAUSED','AUTO_NO_RIDERS',NULL,'SYSTEM')`.execute(
         tx,
       );
       await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()},NULL,'STORE_AUTO_PAUSED','store',${storeId},'{"reason":"AUTO_NO_RIDERS"}'::jsonb)`.execute(

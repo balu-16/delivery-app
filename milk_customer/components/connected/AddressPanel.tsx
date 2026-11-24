@@ -14,6 +14,7 @@ import { useCustomer } from '@/src/store/customer';
 import { addressErrors, type AddressErrors, type AddressField } from '@/src/utils/address-validation';
 import { indianPhoneE164, indianPhoneInput } from '@/src/utils/indian-phone';
 import { Card, shared } from './Shared';
+import { ORDER_CONFIRMATION_WAIT } from '@/src/store/checkout-recovery';
 
 export function AddressPanel({ visible, onClose, seed, onAddressSaved, onLocationConfirmed }: { visible: boolean; onClose: () => void; onAddressSaved?: (addressId: string) => void; onLocationConfirmed?: (addressId: string) => void; seed?: { addressId?: string; line1?: string; line2?: string; pincode?: string; phone?: string; contact?: string; focus?: 'line1' | 'pincode' | 'phone' } }) {
   const addresses = useCustomer(state => state.addresses);
@@ -217,7 +218,8 @@ export function AddressPanel({ visible, onClose, seed, onAddressSaved, onLocatio
       const warnings = [result.needsConfirmation ? 'The entered address differs from the selected location. Check the pin and address carefully.' : result.degraded ? 'The address could not be independently verified. Check your selected location carefully.' : '', result.temporarilyUnavailable ? 'Delivery is temporarily unavailable at this address.' : ''].filter(Boolean);
       if (warnings.length) setNotice(`Address saved. ${warnings.join(' ')}`); else onClose();
     } catch (cause) {
-      if (cause instanceof ApiError && cause.code === 'INVALID_PINCODE') setErrors(previous => ({ ...previous, pincode: 'Enter a six-digit PIN code.' }));
+      if (cause instanceof Error && cause.message === ORDER_CONFIRMATION_WAIT) setError(ORDER_CONFIRMATION_WAIT);
+      else if (cause instanceof ApiError && cause.code === 'INVALID_PINCODE') setErrors(previous => ({ ...previous, pincode: 'Enter a six-digit PIN code.' }));
       else if (cause instanceof ApiError && cause.code === 'INVALID_CONTACT_PHONE') setErrors(previous => ({ ...previous, phone: 'Enter a valid 10-digit Indian phone number.' }));
       else if (cause instanceof ApiError && cause.code === 'INVALID_COORDINATES') setErrors(previous => ({ ...previous, location: 'Select your current location again.' }));
       else if (cause instanceof ApiError && cause.code === 'ADDRESS_LIMIT_REACHED') setError('You have reached the saved address limit. Contact support to update an address.');
@@ -240,7 +242,8 @@ export function AddressPanel({ visible, onClose, seed, onAddressSaved, onLocatio
       else if (result.degraded) {onLocationConfirmed?.(id);setNotice('Location saved. Map verification is not available yet, so please check your written address before ordering.');}
       else { onLocationConfirmed?.(id); onClose(); }
     } catch (cause) {
-      setError(cause instanceof Error && cause.message.includes('outside') ? 'We do not deliver to this location yet. Choose another address or contact support.' : 'Couldn’t confirm this location.');
+      if (cause instanceof Error && cause.message === ORDER_CONFIRMATION_WAIT) setError(ORDER_CONFIRMATION_WAIT);
+      else setError(cause instanceof Error && cause.message.includes('outside') ? 'We do not deliver to this location yet. Choose another address or contact support.' : 'Couldn’t confirm this location.');
     }
   };
   return <BottomSheet visible={visible} onClose={onClose} title="Delivery address" subtitle="Choose a saved address or add a new one." keyboardAware={adding} refreshControl={adding ? undefined : <RefreshControl refreshing={savedRefresh.refreshing} onRefresh={() => void savedRefresh.onRefresh()} tintColor={colors.green} />}>
@@ -292,7 +295,7 @@ export function AddressPanel({ visible, onClose, seed, onAddressSaved, onLocatio
     </View> : <View style={{ gap: 10 }}>
       {!!notice && <Card><AppText style={shared.body}>{notice}</AppText><Button label="Got it" size="sm" variant="soft" onPress={() => { setNotice(''); onClose(); }} /></Card>}
       {!!error && <AppText accessibilityLiveRegion="polite" style={styles.error}>{error}</AppText>}
-      {addresses.length === 0 ? <AppText style={shared.muted}>Add an address to see products available near you.</AppText> : addresses.map(address => <Pressable key={address.id} onPress={() => {if (locationRequired && !address.point) {setConfirming(address.id);onAddressSaved?.(address.id);setError('');setNotice('');} else void chooseAddress(address.id).then(() => {onLocationConfirmed?.(address.id);onClose();}).catch(() => setError('Couldn’t select this address.'));}}><Card><AppText style={shared.label}>{address.line1} {selectedAddress === address.id ? '✓' : ''}</AppText><AppText style={shared.muted}>{[address.line2, address.pincode].filter(Boolean).join(', ')}</AppText>{locationRequired && !address.point && <AppText style={styles.error}>Location needed · Tap to confirm</AppText>}</Card></Pressable>)}
+      {addresses.length === 0 ? <AppText style={shared.muted}>Add an address to see products available near you.</AppText> : addresses.map(address => <Pressable key={address.id} onPress={() => {if (locationRequired && !address.point) {setConfirming(address.id);onAddressSaved?.(address.id);setError('');setNotice('');} else void chooseAddress(address.id).then(() => {onLocationConfirmed?.(address.id);onClose();}).catch(() => setError(busy ? ORDER_CONFIRMATION_WAIT : 'Couldn’t select this address.'));}}><Card><AppText style={shared.label}>{address.line1} {selectedAddress === address.id ? '✓' : ''}</AppText><AppText style={shared.muted}>{[address.line2, address.pincode].filter(Boolean).join(', ')}</AppText>{locationRequired && !address.point && <AppText style={styles.error}>Location needed · Tap to confirm</AppText>}</Card></Pressable>)}
       <Button label="Add address" variant="soft" fullWidth icon="add" onPress={() => setAdding(true)} />
     </View>}
   </BottomSheet>;

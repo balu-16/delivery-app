@@ -43,6 +43,10 @@ import {
   SynonymPageDto,
   SynonymPageView,
   VariantsPageDto,
+  AssortmentPageDto,
+  AssortmentPageView,
+  ProductImagesPutDto,
+  ProductImagesView,
 } from './catalog.dto.js';
 export class IdView {
   @ApiProperty({ format: 'uuid' }) id!: string;
@@ -211,7 +215,29 @@ export class AdminCatalogController {
     @CurrentPrincipal() p: Principal,
     @Body() d: AssortmentDto,
   ) {
-    return this.catalog.setAssortment(p.userId, d.storeId, d.variantId);
+    return this.catalog.setAssortment(p.userId, d.storeId, d.variantId, d.active ?? true);
+  }
+  @Get('assortment')
+  @ApiOperation({ operationId: 'adminListAssortment' })
+  @ApiOkResponse({ type: AssortmentPageView })
+  listAssortment(@CurrentPrincipal() p: Principal, @Query() q: AssortmentPageDto) {
+    return this.catalog.listAssortment(p.userId, q.variantId, q.limit ?? 50, q.cursor);
+  }
+  @Get('products/:id/images')
+  @ApiOperation({ operationId: 'adminListProductImages' })
+  @ApiOkResponse({ type: ProductImagesView })
+  listImages(@CurrentPrincipal() p: Principal, @Param('id', new ParseUUIDPipe()) id: string) {
+    return this.catalog.listImages(p.userId, id);
+  }
+  @Put('products/:id/images')
+  @ApiOperation({ operationId: 'adminReplaceProductImages' })
+  @ApiOkResponse({ type: ProductImagesView })
+  replaceImages(
+    @CurrentPrincipal() p: Principal,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() d: ProductImagesPutDto,
+  ) {
+    return this.catalog.replaceImages(p.userId, id, d.mediaIds, d.expectedRevision);
   }
   @Post('prices')
   @ApiOperation({ operationId: 'adminSetPrice' })

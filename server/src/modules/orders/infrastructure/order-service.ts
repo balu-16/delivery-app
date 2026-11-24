@@ -228,8 +228,23 @@ export class OrderService implements OrderOperations {
     );
     return true;
   }
-  async list(userId: string, limit: number, cursor?: string): Promise<OrderListPage> {
-    return listPage(this.db, sql`user_id=${userId}::uuid`, limit, cursor);
+  async list(
+    userId: string,
+    limit: number,
+    cursor?: string,
+    group?: 'active' | 'delivered' | 'cancelled',
+  ): Promise<OrderListPage> {
+    // Plan3 §4: ownership + group filtering before pagination. Omitting the
+    // group retains existing ordering and cursor behavior.
+    const where =
+      group === 'active'
+        ? sql`user_id=${userId}::uuid AND status IN ('PENDING_PAYMENT','CONFIRMED','PICKING','PACKED','OUT_FOR_DELIVERY')`
+        : group === 'delivered'
+          ? sql`user_id=${userId}::uuid AND status='DELIVERED'`
+          : group === 'cancelled'
+            ? sql`user_id=${userId}::uuid AND status='CANCELLED'`
+            : sql`user_id=${userId}::uuid`;
+    return listPage(this.db, where, limit, cursor);
   }
   async purchaseSummary(userId: string, limit = 10): Promise<readonly UsualPurchase[]> {
     return rankUsualPurchases(await deliveredPurchaseLines(this.db, userId, limit));

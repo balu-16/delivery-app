@@ -6,6 +6,7 @@ import {
   SendMessageCommand,
   type SQSClient,
 } from '@aws-sdk/client-sqs';
+import { SqsOperationError } from './sqs-operation-error.js';
 
 export const SQS_LANES = [
   'platform-events',
@@ -174,9 +175,19 @@ export class SqsTransport {
   }
   async ping(lane: SqsLane): Promise<void> {
     if (!SQS_LANES.includes(lane)) throw new Error('INVALID_SQS_LANE');
-    await this.client.send(
-      new GetQueueAttributesCommand({ QueueUrl: this.urls[lane], AttributeNames: ['QueueArn'] }),
-    );
+    try {
+      await this.client.send(
+        new GetQueueAttributesCommand({ QueueUrl: this.urls[lane], AttributeNames: ['QueueArn'] }),
+      );
+    } catch (cause) {
+      throw new SqsOperationError(
+        'SQS_READINESS_FAILED',
+        'sqs',
+        'get-queue-attributes',
+        lane,
+        cause,
+      );
+    }
   }
 
   async counts(lane: SqsLane): Promise<{ waiting: number; active: number; delayed: number }> {

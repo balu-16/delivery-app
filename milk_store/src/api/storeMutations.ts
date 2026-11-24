@@ -192,6 +192,8 @@ export function useStoreInventoryActions() {
       run(() => apiPost(`/v1/store/inventory/count-sessions/${sessionId}/complete`, undefined, newIdempotencyKey()), 'Stock count completed — adjustments applied'),
     cancelCountSession: (sessionId: string) =>
       run(() => apiPost(`/v1/store/inventory/count-sessions/${sessionId}/cancel`, {}), 'Stock count cancelled'),
+    // No success message: the caller toasts from the server result so a
+    // pending approval is distinguished from an immediately applied delta.
     createAdjustment: (storeId: string, variantId: string, batchId: string, delta: number, expectedVersion: string, reason: string) =>
       run(() => apiPost<{ approvalId?: string }>('/v1/store/inventory/adjustments', {
         storeId,
@@ -200,7 +202,7 @@ export function useStoreInventoryActions() {
         delta: String(Math.round(delta)),
         expectedVersion,
         reason,
-      }, newIdempotencyKey()), 'Adjustment submitted'),
+      }, newIdempotencyKey())),
   }
 }
 

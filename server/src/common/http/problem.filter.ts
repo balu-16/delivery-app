@@ -19,6 +19,7 @@ export function createProblem(status: number, traceId: string, supplied?: unknow
     405: ['Method Not Allowed', 'METHOD_NOT_ALLOWED'],
     408: ['Request Timeout', 'REQUEST_TIMEOUT'],
     409: ['Conflict', 'CONFLICT'],
+    410: ['Gone', 'GONE'],
     413: ['Payload Too Large', 'PAYLOAD_TOO_LARGE'],
     415: ['Unsupported Media Type', 'UNSUPPORTED_MEDIA_TYPE'],
     429: ['Too Many Requests', 'RATE_LIMITED'],

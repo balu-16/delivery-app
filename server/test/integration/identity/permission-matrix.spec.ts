@@ -73,6 +73,8 @@ test('each identity operation rejects missing credentials, the wrong pool, and i
     { method: 'POST', url: '/v1/admin/feature-flags/wallet_enabled', audience: 'admin' },
     { method: 'GET', url: `/v1/store/rider-documents/${id}/read-url`, audience: 'store' },
     { method: 'POST', url: `/v1/store/rider-documents/${id}/review`, audience: 'store' },
+    { method: 'GET', url: `/v1/admin/rider-documents/${id}/read-url`, audience: 'admin' },
+    { method: 'POST', url: `/v1/admin/rider-documents/${id}/review`, audience: 'admin' },
     { method: 'POST', url: '/v1/admin/users/workforce', audience: 'admin' },
     { method: 'POST', url: `/v1/admin/users/${id}/block`, audience: 'admin' },
     { method: 'POST', url: `/v1/admin/users/${id}/password-reset`, audience: 'admin' },

@@ -4,7 +4,7 @@ import { customerRequest } from './client';
 /** Addressed catalog page size shared by Home, category, favorites, and search. */
 export const CATALOG_PAGE_LIMIT = 24;
 
-export type CustomerProfile = components['schemas']['ProfileResponseDto'];
+export type CustomerProfile = components['schemas']['CustomerProfileResponseDto'];
 export type CustomerPrincipal = components['schemas']['PrincipalResponseDto'];
 export type CustomerAddress = components['schemas']['AddressView'];
 export type NewCustomerAddress = components['schemas']['CustomerAddressDto'];
@@ -35,6 +35,14 @@ export interface PlacementOrder { orderId: string; orderNumber?: string; status:
 export type PlacementStatus = components['schemas']['PlacementStatusView'];
 export interface PlaceResult { order: PlacementOrder; confirmation: 'CONFIRMED' | 'PENDING_PAYMENT'; payment: { attemptId: string } | null }
 export interface WalletBalances { userId: string; cashPaise: string; promoPaise: string; version: string }
+export interface AppContentItem {
+  slot: 'CUSTOMER_HOME_BANNER' | 'CUSTOMER_OFFERS_CARD' | 'RIDER_HOME_ANNOUNCEMENT' | 'CUSTOMER_HELP' | 'RIDER_HELP';
+  state: 'UNSET' | 'VISIBLE' | 'DISABLED' | 'INACTIVE';
+  locale: 'en' | 'hi' | 'te' | null;
+  title: string | null; body: string | null;
+  imageMediaId: string | null; imageUrl: string | null;
+  destination: string | null; version: number | null;
+}
 
 let previewInFlight: {token:string; request:Promise<CatalogPreview>} | null = null;
 function catalogPreview(token:string):Promise<CatalogPreview> {
@@ -53,6 +61,7 @@ export const customerApi = {
   createAddress: (token: string, body: NewCustomerAddress) => customerRequest<AddressResult>('/v1/customer/addresses', { method: 'POST', token, body }),
   createPendingAddress: (token: string, body: PendingCustomerAddress, key: string) => customerRequest<AddressResult>('/v1/customer/addresses/pending', { method: 'POST', token, body, idempotencyKey: key }),
   confirmAddressLocation: (token: string, id: string, body: components['schemas']['ConfirmAddressLocationDto']) => customerRequest<AddressResult>(`/v1/customer/addresses/${encodeURIComponent(id)}/location`, { method: 'PATCH', token, body }),
+  updateAddress: (token: string, id: string, body: components['schemas']['UpdateAddressDto']) => customerRequest<AddressResult>(`/v1/customer/addresses/${encodeURIComponent(id)}`, { method: 'PATCH', token, body }),
   selectDefaultAddress: (token: string, id: string) => customerRequest<void>(`/v1/customer/addresses/${encodeURIComponent(id)}/default`, { method: 'POST', token }),
   serviceability: (token: string, pincode: string) => customerRequest<Serviceability>(`/v1/customer/serviceability?pincode=${encodeURIComponent(pincode)}`, { token }),
   deliverySettings: (token: string) => customerRequest<DeliverySettings>('/v1/customer/delivery-settings', { token }),
@@ -76,18 +85,14 @@ export const customerApi = {
   place: (token: string, body: PlaceRequest, key: string) => customerRequest<PlaceResult>('/v1/customer/checkout/place', { method: 'POST', token, body, idempotencyKey: key, timeoutMs:30000 }),
   placementStatus: (token:string,key:string) => customerRequest<PlacementStatus>('/v1/customer/checkout/placement-status',{token,idempotencyKey:key}),
   wallet: (token: string) => customerRequest<WalletBalances>('/v1/customer/wallet', { token }),
+  appContent: (token: string, locale?: string) => customerRequest<AppContentItem[]>(`/v1/customer/app-content${locale ? `?${new URLSearchParams({ locale })}` : ''}`, { token }),
 };
 
 export interface CustomerOrder {
   orderId: string; orderNumber: string; status: string; paymentStatus: string; totalPaise: string;
   placedAt: string; items: { id: string; variantId: string; name: string; orderedQty: string; unitPricePaise: string }[];
 }
-export interface CustomerSubscription {
-  id: string; status: string; variant_id: string; next_delivery_date: string | null;
-}
-export interface SubscriptionOptions { enabled: boolean; eligible: boolean; firstStartDate: string; slots: {id:string; name:string; startTime:string; endTime:string}[] }
 export interface ReferralView { enabled:boolean; code:string | null; successfulReferrals:number; rewardPaise:string; freeDeliveryAvailable:boolean }
-export interface SubscriptionCreateRequest { variantId:string; quantity:string; frequencyRule:{type:'DAILY' | 'ALTERNATE_DAYS'}; startDate:string; slotId:string; addressId:string }
 export interface WalletEntry { id: string; bucket: string; deltaPaise: string; reason: string; createdAt: string }
 export interface Page<T> { items: T[]; nextCursor: string | null }
 export type Notification = components['schemas']['NotificationViewDto'];
@@ -95,17 +100,23 @@ export interface SupportTicket { id: string; category: string; status: string; c
 export interface SupportMessage { id: string; author_id: string; body: string; created_at: string }
 export interface SupportProgress { type: 'ACKNOWLEDGED' | 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED'; created_at: string }
 
+export type OrderGroupFilter = 'active' | 'delivered' | 'cancelled';
+
 export const customerDetailsApi = {
-  orders: (token: string) => customerRequest<Page<CustomerOrder>>('/v1/customer/orders', { token }),
+  orders: (token: string, group?: OrderGroupFilter | 'all', cursor?: string) => {
+    const qs = new URLSearchParams();
+    if (group && group !== 'all') qs.set('group', group);
+    if (cursor) qs.set('cursor', cursor);
+    const path = qs.toString() ? `/v1/customer/orders?${qs.toString()}` : '/v1/customer/orders';
+    return customerRequest<Page<CustomerOrder>>(path, { token });
+  },
   order: (token: string, id: string) => customerRequest<CustomerOrder>(`/v1/customer/orders/${encodeURIComponent(id)}`, { token }),
   tracking: (token: string, id: string) => customerRequest<components['schemas']['OrderTrackingView']>(`/v1/customer/orders/${encodeURIComponent(id)}/tracking`, { token }),
   deliveryCode: (token: string, id: string) => customerRequest<components['schemas']['DeliveryCodeView']>(`/v1/customer/orders/${encodeURIComponent(id)}/delivery-code`, { token }),
   cancel: (token: string, id: string, reason: string, key: string) => customerRequest<CustomerOrder>(`/v1/customer/orders/${encodeURIComponent(id)}/cancel`, { token, method: 'POST', body: { reason }, idempotencyKey: key }),
   reorder: (token: string, id: string, key: string) => customerRequest<{ cartId: string; issues: { code: string; variantId: string }[] }>(`/v1/customer/orders/${encodeURIComponent(id)}/reorder`, { token, method: 'POST', idempotencyKey: key }),
-  subscriptions: (token: string) => customerRequest<Page<CustomerSubscription>>('/v1/customer/subscriptions', { token }),
-  subscriptionOptions: (token: string, addressId: string, variantId: string) => customerRequest<SubscriptionOptions>(`/v1/customer/subscriptions/options?${new URLSearchParams({addressId,variantId})}`, {token}),
-  createSubscription: (token: string, body: SubscriptionCreateRequest, key: string) => customerRequest<{id:string; nextDeliveryDate:string; effectiveFrom:string}>('/v1/customer/subscriptions', {token, method:'POST', body, idempotencyKey:key}),
-  subscriptionAction: (token: string, id: string, action: 'cancel' | 'resume' | 'skip' | 'pause', body: object, key: string) => customerRequest<unknown>(`/v1/customer/subscriptions/${encodeURIComponent(id)}/${action}`, {token, method:'POST', body, idempotencyKey:key}),
+  // Subscription endpoints retired per plan3 §7 — no client remains. Retirement compat
+  // ({items:[],nextCursor:null}, 410 SUBSCRIPTIONS_RETIRED) is handled at the call site if needed.
   notifications: (token: string) => customerRequest<Page<Notification>>('/v1/customer/notifications', { token }),
   notificationPreferences: (token: string) => customerRequest<{ category: string; enabled: boolean }[]>('/v1/customer/notification-preferences', { token }),
   setAssistantNotifications: (token: string, enabled: boolean) => customerRequest<{ category: string; enabled: boolean }[]>('/v1/customer/notification-preferences', { token, method: 'PATCH', body: { updates: [{ category: 'ASSISTANT_UPDATES', enabled }] } }),
@@ -119,7 +130,9 @@ export const customerDetailsApi = {
   ticket: (token: string, id: string) => customerRequest<{ticket: SupportTicket; messages: SupportMessage[]; progress: SupportProgress[]; nextMessagesCursor: string | null}>(`/v1/customer/tickets/${encodeURIComponent(id)}`, { token }),
   createTicket: (token: string, body: string, key: string, signal?: AbortSignal) => customerRequest<{id: string}>('/v1/customer/tickets', {token, method: 'POST', body: { category: 'General', body }, idempotencyKey: key, signal}),
   ticketMessage: (token: string, id: string, body: string, key: string, signal?: AbortSignal) => customerRequest<{id: string}>(`/v1/customer/tickets/${encodeURIComponent(id)}/messages`, {token, method: 'POST', body: { body }, idempotencyKey: key, signal}),
-  referral: (token:string) => customerRequest<ReferralView>('/v1/customer/referrals',{token}),
+  referral: (token: string, signal?: AbortSignal) => customerRequest<ReferralView>('/v1/customer/referrals', { token, signal }),
+  unreadCount: (token: string, signal?: AbortSignal) => customerRequest<{ count: number }>('/v1/customer/notifications/unread-count', { token, signal }),
+  appContent: (token: string, locale?: string) => customerRequest<AppContentItem[]>(`/v1/customer/app-content${locale ? `?${new URLSearchParams({ locale })}` : ''}`, { token }),
 };
 
 export type PlaceSuggestion = components['schemas']['SuggestionView'];

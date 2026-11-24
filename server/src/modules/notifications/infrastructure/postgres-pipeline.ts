@@ -16,7 +16,7 @@ import type {
 import { dedupeKey } from '../domain/dedupe.js';
 import { planForEvent } from '../domain/matrix.js';
 import { nextRetryDelaySeconds, MAX_DELIVERY_ATTEMPTS } from '../domain/retry.js';
-import { resolveLocale } from '../domain/render.js';
+import { renderTemplate, resolveLocale, selectTemplate } from '../domain/render.js';
 import { ChannelSender, recordSendFailure, type DeliveryContext } from './channel-send.js';
 import { resolveRecipients, userLocale } from './recipients.js';
 import { loadTemplates, QuietHoursSettings } from './settings.js';
@@ -38,6 +38,8 @@ interface NotificationRow {
   payload: Json;
   status: string;
   error: string | null;
+  rendered_title: string | null;
+  rendered_body: string | null;
 }
 
 /**
@@ -255,8 +257,15 @@ export class PostgresNotificationPipeline implements NotificationPipeline {
       deepLink: input.deepLink,
       pushPriority: input.pushPriority,
     };
+    // customize2 §3E: resolve the winning copy (override > default, locale/
+    // channel fallback) once at creation and freeze it in rendered_* so a
+    // later edit never rewrites an already-composed notification.
+    const templates = await loadTemplates(tx, [input.templateKey]);
+    const winning = selectTemplate(templates, input.templateKey, input.channel, input.locale);
+    const renderedTitle = winning ? renderTemplate(winning.subject, input.data) : null;
+    const renderedBody = winning ? renderTemplate(winning.body, input.data) : null;
     const rows = await sql<{ id: string }>`WITH ins AS (
-        INSERT INTO notifications(id,user_id,channel,template_key,locale,category,class,payload,status,dedupe_key)
+        INSERT INTO notifications(id,user_id,channel,template_key,locale,category,class,payload,status,dedupe_key,rendered_title,rendered_body)
         VALUES (${uuidV7()}::uuid,${input.recipientId}::uuid,${input.channel},${input.templateKey},${input.locale},${input.category},${input.class},${JSON.stringify(payload)}::jsonb,'PENDING',
           ${dedupeKey({
             recipientId: input.recipientId,
@@ -264,7 +273,7 @@ export class PostgresNotificationPipeline implements NotificationPipeline {
             eventType: input.eventType,
             aggregateId: input.aggregateId,
             transitionVersion: input.transitionVersion,
-          })})
+          })},${renderedTitle},${renderedBody})
         ON CONFLICT (dedupe_key) DO NOTHING
         RETURNING id
       ) INSERT INTO notification_deliveries(id,notification_id,channel)
@@ -298,6 +307,8 @@ export class PostgresNotificationPipeline implements NotificationPipeline {
       data: (row.payload as { data?: Record<string, string> })?.data ?? {},
       deepLink: (row.payload as { deepLink?: string | null })?.deepLink ?? null,
       payload: (row.payload ?? {}) as Record<string, unknown>,
+      storedTitle: row.rendered_title ?? null,
+      storedBody: row.rendered_body ?? null,
     };
     try {
       const templates = await loadTemplates(this.db, [row.template_key]);
@@ -340,7 +351,7 @@ export class PostgresNotificationPipeline implements NotificationPipeline {
       if (!claim) return null;
       const rows = await sql<
         NotificationRow & { error: string | null }
-      >`SELECT id,user_id,channel,template_key,locale,category,class,payload,status,error FROM notifications WHERE id=${claim.notification_id}::uuid`.execute(
+      >`SELECT id,user_id,channel,template_key,locale,category,class,payload,status,error,rendered_title,rendered_body FROM notifications WHERE id=${claim.notification_id}::uuid`.execute(
         tx,
       );
       return rows.rows[0] ? { row: rows.rows[0], attempts: claim.attempts, leaseToken } : null;

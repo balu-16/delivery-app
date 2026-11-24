@@ -84,7 +84,34 @@ interface RequestOptions {
   raw401?: boolean
 }
 
-async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+// ── Session refresh (shared across concurrent callers) ──────────────────────
+// A stale CSRF token surfaces as 403 CSRF_TOKEN_INVALID before any mutation
+// runs. Refresh the session once, adopt the new token, and retry the
+// original request with its body and Idempotency-Key untouched.
+let refreshPromise: Promise<string> | null = null
+
+function refreshSession(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const res = await fetch('/v1/admin/auth/session', {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+      const body = (await parseBody(res)) as { csrfToken?: string; code?: string } | null
+      if (!res.ok || !body?.csrfToken) {
+        throw new ApiError(res.status, body as ProblemBody | null, null, 'Session refresh failed')
+      }
+      setCsrfToken(body.csrfToken)
+      return body.csrfToken
+    })().finally(() => {
+      refreshPromise = null
+    })
+  }
+  return refreshPromise
+}
+
+async function requestOnce<T>(path: string, opts: RequestOptions): Promise<T> {
   const method = opts.method ?? 'GET'
   const headers: Record<string, string> = { Accept: 'application/json', ...(opts.headers ?? {}) }
   if (method !== 'GET') {
@@ -104,6 +131,19 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     throw new ApiError(res.status, body, res.headers.get('Retry-After'))
   }
   return (await parseBody(res)) as T
+}
+
+async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+  const method = opts.method ?? 'GET'
+  try {
+    return await requestOnce<T>(path, opts)
+  } catch (error) {
+    const isStaleCsrf =
+      error instanceof ApiError && error.status === 403 && error.code === 'CSRF_TOKEN_INVALID'
+    if (!isStaleCsrf || method === 'GET') throw error
+    await refreshSession()
+    return requestOnce<T>(path, opts)
+  }
 }
 
 export const get = <T>(path: string): Promise<T> => request<T>(path, { method: 'GET' })

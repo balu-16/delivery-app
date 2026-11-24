@@ -114,9 +114,11 @@ export class CustomerSubscriptionsController {
     @Body() body: CreateDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'POST', '/subscriptions', body, (tx) =>
-      this.subscriptions.create(p.userId, body, tx),
-    );
+    void p;
+    void body;
+    void key;
+    // Compat phase: retired writes reject without claiming idempotency.
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
   @Get() @ApiOperation({ operationId: 'customerSubscriptionsList' }) list(
     @CurrentPrincipal() p: Principal,
@@ -178,9 +180,11 @@ export class CustomerSubscriptionsController {
     @Body() body: QuantityDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'PATCH', `/subscriptions/${id}`, body, (tx) =>
-      this.subscriptions.change(p.userId, id, body, tx),
-    );
+    void p;
+    void id;
+    void body;
+    void key;
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
   @Post(':id/pause') @ApiOperation({ operationId: 'customerSubscriptionPause' }) pause(
     @CurrentPrincipal() p: Principal,
@@ -188,18 +192,21 @@ export class CustomerSubscriptionsController {
     @Body() body: PauseDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'POST', `/subscriptions/${id}/pause`, body, (tx) =>
-      this.subscriptions.pause(p.userId, id, body.from, body.to, tx),
-    );
+    void p;
+    void id;
+    void body;
+    void key;
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
   @Post(':id/resume') @ApiOperation({ operationId: 'customerSubscriptionResume' }) resume(
     @CurrentPrincipal() p: Principal,
     @Param('id', ParseUUIDPipe) id: string,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'POST', `/subscriptions/${id}/resume`, {}, (tx) =>
-      this.subscriptions.resume(p.userId, id, tx),
-    );
+    void p;
+    void id;
+    void key;
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
   @Post(':id/skip') @ApiOperation({ operationId: 'customerSubscriptionSkip' }) skip(
     @CurrentPrincipal() p: Principal,
@@ -207,9 +214,11 @@ export class CustomerSubscriptionsController {
     @Body() body: DateDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'POST', `/subscriptions/${id}/skip`, body, (tx) =>
-      this.subscriptions.skip(p.userId, id, body.date, false, tx),
-    );
+    void p;
+    void id;
+    void body;
+    void key;
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
   @Delete(':id/skip/:date') @ApiOperation({ operationId: 'customerSubscriptionUnskip' }) unskip(
     @CurrentPrincipal() p: Principal,
@@ -217,10 +226,13 @@ export class CustomerSubscriptionsController {
     @Param('date') date: string,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'DELETE', `/subscriptions/${id}/skip/${date}`, {}, (tx) =>
-      this.subscriptions.skip(p.userId, id, date, true, tx),
-    );
+    void p;
+    void id;
+    void date;
+    void key;
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
+  // Cancel stays available: ends recurrence without scheduling deliveries.
   @Post(':id/cancel') @ApiOperation({ operationId: 'customerSubscriptionCancel' }) cancel(
     @CurrentPrincipal() p: Principal,
     @Param('id', ParseUUIDPipe) id: string,

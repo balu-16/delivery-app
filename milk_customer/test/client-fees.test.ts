@@ -10,7 +10,7 @@ jest.mock('expo-crypto', () => ({randomUUID: jest.fn(() => 'checkout-key'), Cryp
 jest.mock('../src/auth/session', () => ({accessToken: jest.fn(async () => 'token'), restoreSession: jest.fn(async () => true), signOut: jest.fn(async () => {})}));
 jest.mock('../src/api/customer', () => ({
   customerApi: {profile:jest.fn(), addresses:jest.fn(), cart:jest.fn(), catalog:jest.fn(), favorites:jest.fn(), setFavorite:jest.fn(), putItem:jest.fn(), quote:jest.fn(), place:jest.fn(), serviceability:jest.fn(), deliverySettings:jest.fn(), createAddress:jest.fn(), createPendingAddress:jest.fn(), confirmAddressLocation:jest.fn(), selectDefaultAddress:jest.fn()},
-  customerDetailsApi: {orders:jest.fn(), subscriptions:jest.fn(), ledger:jest.fn(), notifications:jest.fn(), createSubscription:jest.fn(), subscriptionAction:jest.fn()},
+  customerDetailsApi: {orders:jest.fn(), ledger:jest.fn(), notifications:jest.fn()},
 }));
 jest.mock('../src/utils/location-policy', () => ({requireLocationServices: jest.fn(async () => {})}));
 const api = jest.mocked(customerApi);
@@ -27,7 +27,7 @@ beforeEach(async () => {
   api.deliverySettings.mockResolvedValue({locationRequired:false});
   api.serviceability.mockResolvedValue({serviceable:true,storeId:'store',zone:{zoneId:'zone',zoneVersion:'1',cityZoneVersion:'1',storeId:'store'},etaRange:null,reasons:[]});
   api.favorites.mockResolvedValue({items:[],nextCursor:null});
-  useCustomer.setState({status:'signedIn', profile, addresses:[], selectedAddress:'address', locationRequired:false, cart, quote:null, pendingPlacement:null, pendingSubscription:null, pendingSubscriptionAction:null, feeEstimate:null, feeLoading:false, feeError:null, reviewSlow:false, error:null, busy:false, checkoutError:null});
+  useCustomer.setState({status:'signedIn', profile, addresses:[], selectedAddress:'address', locationRequired:false, cart, quote:null, pendingPlacement:null, feeEstimate:null, feeLoading:false, feeError:null, reviewSlow:false, error:null, busy:false, checkoutError:null});
 });
 
 test('applies a fresh cached estimate without a network round trip', async () => {

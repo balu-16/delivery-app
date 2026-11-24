@@ -242,8 +242,19 @@ export class SqsConcernStore {
     await sql`INSERT INTO sqs_concern_schedules(concern,scheduler_id,name,payload,schedule,next_run_at)
       VALUES (${concern},${schedulerId},${name},${JSON.stringify(payload)}::jsonb,${json}::jsonb,${next.toISOString()}::timestamptz)
       ON CONFLICT (concern,scheduler_id) DO UPDATE SET name=EXCLUDED.name,payload=EXCLUDED.payload,
-        next_run_at=CASE WHEN sqs_concern_schedules.schedule=EXCLUDED.schedule THEN sqs_concern_schedules.next_run_at ELSE EXCLUDED.next_run_at END,
+        next_run_at=CASE WHEN sqs_concern_schedules.schedule=EXCLUDED.schedule
+          AND isfinite(sqs_concern_schedules.next_run_at)
+          THEN sqs_concern_schedules.next_run_at ELSE EXCLUDED.next_run_at END,
         schedule=EXCLUDED.schedule,updated_at=clock_timestamp()`.execute(this.db);
+  }
+
+  async disableScheduler(concern: QueueConcern, schedulerId: string): Promise<void> {
+    if (!CONCERNS.includes(concern) || !/^[a-zA-Z0-9_-]{1,128}$/.test(schedulerId))
+      throw new Error('INVALID_SCHEDULER_ID');
+    await sql`UPDATE sqs_concern_schedules SET next_run_at='infinity',updated_at=clock_timestamp()
+      WHERE concern=${concern} AND scheduler_id=${schedulerId} AND isfinite(next_run_at)`.execute(
+      this.db,
+    );
   }
 
   async tickSchedules(limit = 50): Promise<number> {

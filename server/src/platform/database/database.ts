@@ -34,6 +34,9 @@ export interface PlatformSchema {
     response_status: number | null;
     response_body: Json;
     response_expires_at: Date | null;
+    rejection_code: string | null;
+    rejection_status: number | null;
+    rejected_at: Date | null;
     created_at: Generated<Date>;
     updated_at: Generated<Date>;
   };
@@ -74,8 +77,14 @@ export interface DatabaseHandle {
 }
 
 export interface DatabaseTimingObserver {
-  observeStage(stage: 'db_acquire' | 'db_query', milliseconds: number): void;
+  observeStage(stage: 'db_acquire' | 'db_query' | 'db_transaction', milliseconds: number): void;
+  observeTransactionOutcome?(
+    outcome: 'committed' | 'retry' | 'deadlock' | 'serialization' | 'failed',
+  ): void;
 }
+
+/** Observer bound to each `createDatabase` handle for retry instrumentation. */
+const timingByDb = new WeakMap<Database, DatabaseTimingObserver>();
 
 export function databaseIamRegion(env: NodeJS.ProcessEnv): string | undefined {
   if (env.DATABASE_AUTH !== 'iam') return undefined;
@@ -170,6 +179,7 @@ export function createDatabase(
       ? { log: (event) => timing.observeStage('db_query', event.queryDurationMillis) }
       : {}),
   });
+  if (timing) timingByDb.set(db, timing);
   return {
     db,
     stats: () => ({ total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount }),
@@ -198,13 +208,27 @@ export async function transactionWithRetry<T>(
 ): Promise<T> {
   if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10)
     throw new Error('Invalid retry bound');
+  const timing = timingByDb.get(db);
   for (let attempt = 1; ; attempt += 1) {
+    const attemptStarted = performance.now();
     try {
-      return await db.transaction().execute(work);
+      const result = await db.transaction().execute(work);
+      timing?.observeStage('db_transaction', performance.now() - attemptStarted);
+      timing?.observeTransactionOutcome?.('committed');
+      return result;
     } catch (error: unknown) {
+      timing?.observeStage('db_transaction', performance.now() - attemptStarted);
       const code =
         typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
-      if (attempt >= maxAttempts || (code !== '40001' && code !== '40P01')) throw error;
+      const retryable = code === '40001' || code === '40P01';
+      if (attempt >= maxAttempts || !retryable) {
+        if (retryable)
+          timing?.observeTransactionOutcome?.(code === '40P01' ? 'deadlock' : 'serialization');
+        timing?.observeTransactionOutcome?.('failed');
+        throw error;
+      }
+      timing?.observeTransactionOutcome?.('retry');
+      timing?.observeTransactionOutcome?.(code === '40P01' ? 'deadlock' : 'serialization');
       await new Promise<void>((resolve) =>
         setTimeout(resolve, Math.floor(Math.random() * 15 * attempt)),
       );

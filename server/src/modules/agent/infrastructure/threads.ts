@@ -253,7 +253,16 @@ export class AgentThreads {
               : choice.status === 'pending' && choice.expired
                 ? 'expired'
                 : choice.status;
-          return { ...card, payload: { ...card.payload, status } };
+          return {
+            ...card,
+            payload: {
+              ...card.payload,
+              status,
+              ...(status === 'committed' && choice?.selection
+                ? { selection: choice.selection }
+                : {}),
+            },
+          };
         }
         const draftId = card.payload?.draftId;
         return typeof draftId === 'string'

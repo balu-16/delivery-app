@@ -3,9 +3,11 @@ import { AdminAuthSurfaceModule } from './admin/auth/auth.module.js';
 import { CustomerAgentSurfaceModule } from './customer/agent/agent.module.js';
 import { AdminPortalSurfaceModule } from './admin/portal/p14.module.js';
 import { CustomerSubscriptionsModule } from './customer/subscriptions/p10.module.js';
+import { CustomerReferralsModule } from './customer/referrals/referrals.module.js';
 import { AdminSubscriptionsModule } from './admin/subscriptions/p10.module.js';
 import { CustomerP11Module } from './customer/p11/p11.module.js';
 import { RiderP11Module } from './rider/p11/p11.module.js';
+import { RiderOnboardingSupportModule } from './rider/identity/rider-onboarding-support.module.js';
 import { AdminP11Module } from './admin/p11/p11.module.js';
 import { AdminComplianceSurfaceModule } from './admin/compliance/p12.module.js';
 import { CustomerPrivacySurfaceModule } from './customer/privacy/p12.module.js';
@@ -60,6 +62,7 @@ import {
     CustomerWalletSurfaceModule,
     CustomerTrackingSurfaceModule,
     CustomerSubscriptionsModule,
+    CustomerReferralsModule,
     CustomerP11Module,
     CustomerPrivacySurfaceModule,
   ],
@@ -68,6 +71,7 @@ export class CustomerSurfaceModule {}
 @Module({
   imports: [
     RiderIdentitySurfaceModule,
+    RiderOnboardingSupportModule,
     RiderNotificationsSurfaceModule,
     RiderDispatchSurfaceModule,
     RiderP11Module,

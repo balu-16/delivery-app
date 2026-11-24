@@ -68,10 +68,28 @@ export class PostgresStorePortalReads implements StorePortalStoreReads {
       end_minute: number;
     }>`SELECT weekday,start_minute,end_minute FROM store_hours WHERE store_id=${storeId}::uuid
       ORDER BY weekday,start_minute`.execute(this.db);
+    const latestSource = await sql<{
+      source: string | null;
+    }>`SELECT source FROM store_status_history WHERE store_id=${storeId}::uuid
+      ORDER BY version DESC LIMIT 1`.execute(this.db);
+    const status = store.status as StoreDetailsView['status'];
+    const canPause = status === 'ONLINE';
+    const canResume = status === 'PAUSED' && latestSource.rows[0]?.source === 'MANAGER';
+    // The reason explains the disabled action: while online the resume
+    // control is disabled (store is not paused); while paused the pause
+    // control is disabled; an admin/system/legacy pause blocks both.
+    const restrictionReason: StoreDetailsView['restrictionReason'] =
+      canResume && !canPause
+        ? 'STORE_NOT_ONLINE'
+        : canPause
+          ? 'STORE_NOT_PAUSED'
+          : status === 'OFFLINE'
+            ? 'STORE_NOT_ONLINE'
+            : 'PAUSE_MANAGED_BY_ADMIN';
     return {
       storeId: store.id,
       name: store.name,
-      status: store.status as StoreDetailsView['status'],
+      status,
       pauseReason: store.pause_reason,
       version: store.version,
       location:
@@ -85,6 +103,9 @@ export class PostgresStorePortalReads implements StorePortalStoreReads {
         startMinute: row.start_minute,
         endMinute: row.end_minute,
       })),
+      canPause,
+      canResume,
+      restrictionReason,
     };
   }
 
@@ -107,7 +128,8 @@ export class PostgresStorePortalReads implements StorePortalStoreReads {
       reason: string | null;
       actor_id: string | null;
       occurred_at: Date;
-    }>`SELECT version::text,previous_status,status,reason,actor_id::text AS actor_id,occurred_at
+      source: 'ADMIN' | 'MANAGER' | 'SYSTEM' | null;
+    }>`SELECT version::text,previous_status,status,reason,actor_id::text AS actor_id,occurred_at,source
       FROM store_status_history WHERE store_id=${storeId}::uuid
       AND (${decoded ? sql`version < ${decoded.version}` : sql`true`})
       ORDER BY version DESC LIMIT ${page + 1}`.execute(this.db);
@@ -120,6 +142,7 @@ export class PostgresStorePortalReads implements StorePortalStoreReads {
         reason: row.reason,
         actorId: row.actor_id,
         occurredAt: row.occurred_at.toISOString(),
+        source: row.source,
       })),
       nextCursor:
         rows.rows.length > page && pageRows.length

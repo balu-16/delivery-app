@@ -1,4 +1,4 @@
-import type { AgentCard } from './types';
+import type { AgentCard, AgentMessage } from './types';
 
 /** One selectable catalog variant carried by a `cart_choice` card. */
 export interface CartChoiceVariant {
@@ -18,6 +18,7 @@ export interface PendingCartChoice {
 }
 
 export interface CartChoiceReference { choiceId: string; choiceVersion: number }
+export type CartChoiceSelection = Pick<PendingCartChoice, 'variantId' | 'quantity'>;
 
 const uuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
@@ -90,7 +91,7 @@ export function cartChoiceReference(card: AgentCard): CartChoiceReference | unde
     ? { choiceId, choiceVersion } : undefined;
 }
 
-export function cartChoiceSelection(card: AgentCard): { variantId?: string; quantity?: number } {
+export function cartChoiceSelection(card: AgentCard): Partial<CartChoiceSelection> {
   const selection = card.payload.selection;
   if (!selection || typeof selection !== 'object') return {};
   const { variantId, quantity } = selection as Record<string, unknown>;
@@ -98,6 +99,27 @@ export function cartChoiceSelection(card: AgentCard): { variantId?: string; quan
     ...(typeof variantId === 'string' ? { variantId } : {}),
     ...(typeof quantity === 'number' && Number.isSafeInteger(quantity) && quantity > 0 ? { quantity } : {}),
   };
+}
+
+export function cartChoiceAnsweredInMessage(card: AgentCard): boolean {
+  const selection = card.payload.selection;
+  return card.type === 'cart_choice' && cartChoiceSubmitted(card) &&
+    !!selection && typeof selection === 'object' &&
+    (selection as Record<string, unknown>).answeredInMessage === true;
+}
+
+/** The choice card owns the question. Keep any separate notice ahead of it. */
+export function cartChoiceMessageText(message: AgentMessage): string {
+  if (message.role !== 'assistant') return message.text;
+  const body = message.text.trimEnd();
+  for (const card of message.cards) {
+    if (card.type !== 'cart_choice') continue;
+    const question = cartChoiceQuestion(card).trim();
+    const start = body.length - question.length;
+    if (question && body.endsWith(question) && (start === 0 || /\s/.test(body[start - 1] ?? '')))
+      return body.slice(0, start).trimEnd();
+  }
+  return message.text;
 }
 
 export function cartChoiceExpiresAt(card: AgentCard): number | null {

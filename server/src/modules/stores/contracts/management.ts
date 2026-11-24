@@ -22,6 +22,12 @@ export interface StoreDetailsView {
   hourlyCapacity: number;
   lastOrderBufferMinutes: number;
   hours: { weekday: number; startMinute: number; endMinute: number }[];
+  /** Whether this actor may pause the store under the current status policy. */
+  canPause: boolean;
+  /** Whether this actor may resume the store (manager-controlled pauses only). */
+  canResume: boolean;
+  /** Stable reason explaining the disabled control. */
+  restrictionReason: 'STORE_NOT_ONLINE' | 'STORE_NOT_PAUSED' | 'PAUSE_MANAGED_BY_ADMIN';
 }
 
 export interface StoreStatusHistoryEntry {
@@ -31,6 +37,8 @@ export interface StoreStatusHistoryEntry {
   reason: string | null;
   actorId: string | null;
   occurredAt: string;
+  /** Control domain that wrote the row; NULL = legacy (treated as admin-controlled). */
+  source: 'ADMIN' | 'MANAGER' | 'SYSTEM' | null;
 }
 
 export interface Page<T> {

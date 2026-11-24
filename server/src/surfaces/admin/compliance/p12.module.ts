@@ -194,14 +194,14 @@ export class AdminComplianceController {
   @Get('approvals')
   @ApiOperation({ operationId: 'adminApprovals' })
   @ApiOkResponse({ type: ApprovalPageView })
-  approvals(@Query() q: PageDto) {
-    return this.operations.list('approval', q.cursor, q.limit ?? 50);
+  approvals(@CurrentPrincipal() p: Principal, @Query() q: PageDto) {
+    return this.operations.list('approval', q.cursor, q.limit ?? 50, p.userId);
   }
   @Get('approvals/:id')
   @ApiOperation({ operationId: 'adminApprovalDetail' })
   @ApiOkResponse({ type: ApprovalView })
-  approval(@Param('id', ParseUUIDPipe) id: string) {
-    return this.operations.detail('approval', id);
+  approval(@CurrentPrincipal() p: Principal, @Param('id', ParseUUIDPipe) id: string) {
+    return this.operations.detail('approval', id, p.userId);
   }
   @Post('approvals/:id/reject')
   @ApiOperation({ operationId: 'adminApprovalReject' })

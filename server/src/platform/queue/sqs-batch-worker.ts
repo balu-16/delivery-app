@@ -1,4 +1,5 @@
 import type { SqsJobPointer, SqsLane, SqsReceivedPointer, SqsTransport } from './sqs-transport.js';
+import { SqsOperationError } from './sqs-operation-error.js';
 
 export interface SqsBatchResult {
   completed: number;
@@ -37,12 +38,21 @@ export class SqsBatchWorker {
   private async process(lane: SqsLane, message: SqsReceivedPointer): Promise<boolean> {
     let heartbeat: Promise<void> | undefined;
     let stopped = false;
+    let handled = false;
     const timer = setInterval(() => {
       if (stopped || heartbeat) return;
       heartbeat = this.transport
         .extendVisibility(lane, message.receiptHandle, 120)
-        .catch(() => {
-          this.report('SQS_VISIBILITY_EXTENSION_FAILED');
+        .catch((cause) => {
+          this.report(
+            new SqsOperationError(
+              'SQS_VISIBILITY_EXTENSION_FAILED',
+              'sqs',
+              'extend-visibility',
+              lane,
+              cause,
+            ),
+          );
         })
         .finally(() => {
           heartbeat = undefined;
@@ -51,13 +61,18 @@ export class SqsBatchWorker {
     timer.unref();
     try {
       await this.handle(message.pointer, message.receiveCount);
+      handled = true;
       stopped = true;
       clearInterval(timer);
       await heartbeat;
       await this.transport.delete(lane, message.receiptHandle);
       return true;
-    } catch {
-      this.report('SQS_JOB_PROCESSING_FAILED');
+    } catch (cause) {
+      this.report(
+        handled
+          ? new SqsOperationError('SQS_ACKNOWLEDGEMENT_FAILED', 'sqs', 'delete', lane, cause)
+          : new SqsOperationError('SQS_JOB_PROCESSING_FAILED', 'handler', 'process', lane, cause),
+      );
       return false;
     } finally {
       stopped = true;
@@ -66,9 +81,9 @@ export class SqsBatchWorker {
     }
   }
 
-  private report(code: string): void {
+  private report(error: SqsOperationError): void {
     try {
-      this.onError(new Error(code));
+      this.onError(error);
     } catch {
       /* Reporting must not acknowledge a failed job. */
     }

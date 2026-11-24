@@ -24,7 +24,7 @@ export class CatalogMediaService implements CatalogMedia {
   ) {}
   async target(
     owner: string,
-    purpose: 'PRODUCT_IMAGE' | 'CATALOG_IMPORT',
+    purpose: 'PRODUCT_IMAGE' | 'CATALOG_IMPORT' | 'CONTENT_IMAGE',
     type: string,
     size: number,
   ) {
@@ -34,7 +34,7 @@ export class CatalogMediaService implements CatalogMedia {
       !Number.isSafeInteger(size) ||
       size < 1 ||
       size > max ||
-      !(purpose === 'PRODUCT_IMAGE'
+      !(purpose === 'PRODUCT_IMAGE' || purpose === 'CONTENT_IMAGE'
         ? ['image/jpeg', 'image/png', 'image/webp'].includes(type)
         : type === 'text/csv')
     )
@@ -60,18 +60,21 @@ export class CatalogMediaService implements CatalogMedia {
         this.db,
       );
     const media = found.rows[0];
+    // Product images require a product; content images never do (074).
     if (!media || (media.purpose === 'PRODUCT_IMAGE') !== Boolean(productId))
       throw new Error('MEDIA_NOT_FOUND');
+    if (media.purpose === 'CONTENT_IMAGE' && productId) throw new Error('MEDIA_NOT_FOUND');
     const meta = await this.storage.inspect(media.object_key);
     if (meta.size.toString() !== media.size_bytes || meta.type !== media.content_type)
       throw new Error('INVALID_MEDIA');
-    const final = `${media.purpose === 'PRODUCT_IMAGE' ? 'public' : 'private'}/${id}/${uuidV7()}`;
+    const isPublic = media.purpose === 'PRODUCT_IMAGE' || media.purpose === 'CONTENT_IMAGE';
+    const final = `${isPublic ? 'public' : 'private'}/${id}/${uuidV7()}`;
     await sql`INSERT INTO media_orphan_objects(object_key,remove_after) VALUES(${final},clock_timestamp()+interval '10 minutes')`.execute(
       this.db,
     );
     await this.storage.promote(media.object_key, final, meta.etag);
     try {
-      if (media.purpose === 'PRODUCT_IMAGE') {
+      if (media.purpose === 'PRODUCT_IMAGE' || media.purpose === 'CONTENT_IMAGE') {
         const stream = await this.storage.open(final);
         let first = Buffer.alloc(0);
         for await (const chunk of stream) {
@@ -100,10 +103,16 @@ export class CatalogMediaService implements CatalogMedia {
             tx,
           );
         if (!promotion.rows.length) throw new Error('MEDIA_NOT_FOUND');
-        if (productId)
-          await sql`INSERT INTO catalog_product_images(product_id,media_id) VALUES(${productId}::uuid,${id}::uuid)`.execute(
+        if (productId) {
+          // Append at end of the collection and bump the product image revision
+          // in the same product-locked transaction (customize2 §3B).
+          await sql`INSERT INTO catalog_product_images(product_id,media_id,position) SELECT ${productId}::uuid,${id}::uuid,COALESCE(MAX(position)+1,0) FROM catalog_product_images WHERE product_id=${productId}::uuid`.execute(
             tx,
           );
+          await sql`UPDATE catalog_products SET image_revision=image_revision+1 WHERE id=${productId}::uuid`.execute(
+            tx,
+          );
+        }
         await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id) VALUES(${uuidV7()}::uuid,${owner}::uuid,'MEDIA_REGISTERED','catalog_media',${id})`.execute(
           tx,
         );
@@ -124,7 +133,7 @@ export class CatalogMediaService implements CatalogMedia {
     const found = await sql<{
       object_key: string;
       content_type: string;
-    }>`SELECT object_key,content_type FROM catalog_media WHERE id=${id}::uuid AND purpose='PRODUCT_IMAGE' AND state='REGISTERED'`.execute(
+    }>`SELECT object_key,content_type FROM catalog_media WHERE id=${id}::uuid AND purpose IN ('PRODUCT_IMAGE','CONTENT_IMAGE') AND state='REGISTERED'`.execute(
       this.db,
     );
     if (!found.rows[0] || !found.rows[0].object_key.startsWith('public/'))

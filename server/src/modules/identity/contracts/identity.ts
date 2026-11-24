@@ -1,4 +1,5 @@
 import type { TransactionContext } from '../../../platform/database/database.js';
+import type { RiderApplicationView } from './rider-applications.js';
 
 export type Pool = 'CUSTOMER' | 'WORKFORCE';
 export type Role = 'CUSTOMER' | 'RIDER' | 'STORE_MANAGER' | 'SUPPORT_AGENT' | 'SUPER_ADMIN';
@@ -133,6 +134,6 @@ export interface IdentityAdministration {
 export const IDENTITY_ADMINISTRATION = Symbol('IDENTITY_ADMINISTRATION');
 
 export interface RiderProfileOnboarding {
-  profile(userId: string, vehicleType: string, vehicleNo: string): Promise<void>;
+  profile(userId: string, vehicleType: string, vehicleNo: string): Promise<RiderApplicationView>;
 }
 export const RIDER_PROFILE_ONBOARDING = Symbol('RIDER_PROFILE_ONBOARDING');

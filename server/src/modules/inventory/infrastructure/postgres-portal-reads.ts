@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
 import type { Database, TransactionContext } from '../../../platform/database/database.js';
+import type { AppConfig } from '../../app-config/contracts/config.js';
 import type { IdentityAccess } from '../../identity/contracts/identity.js';
 import type {
   InventoryAdjustmentItem,
@@ -156,6 +157,7 @@ export class PostgresInventoryPortalReads implements InventoryPortalReads {
   constructor(
     private readonly db: Database,
     private readonly identity: IdentityAccess,
+    private readonly config?: AppConfig,
   ) {}
   private size(limit?: number): number {
     const value = limit ?? 50;
@@ -470,9 +472,13 @@ export class PostgresInventoryPortalReads implements InventoryPortalReads {
       ORDER BY b.id LIMIT ${size + 1}`.execute(this.db);
     const items = rows.rows.slice(0, size);
     const last = items.at(-1);
+    const inventoryAdjustmentApprovalUnits = this.config
+      ? await this.config.get('inventoryAdjustmentApprovalUnits')
+      : 100;
     return {
       items,
       nextCursor: rows.rows.length > size && last ? stockCursor(last.batchId, scope) : null,
+      inventoryAdjustmentApprovalUnits,
     };
   }
 

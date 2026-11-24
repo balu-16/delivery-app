@@ -4,8 +4,13 @@ export interface AdminComplianceOperationsContract {
     kind: 'fraud' | 'reconciliation' | 'approval',
     cursor: string | undefined,
     limit: number,
+    actorId?: string,
   ): Promise<{ items: unknown[]; nextCursor: string | null }>;
-  detail(kind: 'fraud' | 'reconciliation' | 'approval', id: string): Promise<unknown>;
+  detail(
+    kind: 'fraud' | 'reconciliation' | 'approval',
+    id: string,
+    actorId?: string,
+  ): Promise<unknown>;
   review(
     kind: 'fraud' | 'reconciliation' | 'approval',
     id: string,

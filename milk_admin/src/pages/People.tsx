@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { motion } from 'framer-motion'
 import {
-  Ban, Eye, Info, KeyRound, MoreHorizontal, ShieldCheck, UserPlus, ChevronLeft, ChevronRight, FileText,
+  Ban, Check, Eye, Info, KeyRound, MoreHorizontal, ShieldCheck, UserPlus, ChevronLeft, ChevronRight, FileText, X,
 } from 'lucide-react'
 import { Badge, Button, Card, Input } from '@/components/ui/base'
 import {
@@ -20,7 +20,9 @@ import { InitialAvatar } from '@/illustrations/avatars'
 import { useStagger } from '@/hooks/misc'
 import { useUsers, useRiderApplications, useRiderApplication, useStoreOptions, useWorkforce } from '@/hooks/queries'
 import { usePeopleActions } from '@/hooks/mutations'
-import type { AdminUser, RiderApplicationDetail, RiderApplicationListItem, WorkforceAccount } from '@/types'
+import { ApiError } from '@/api/http'
+import { getRiderDocumentReadUrl } from '@/api/people'
+import type { AdminUser, RiderApplicationDetail, RiderApplicationDocument, RiderApplicationListItem, WorkforceAccount } from '@/types'
 
 const PEOPLE_TABS = [
   { value: 'customers', label: 'Customers' },
@@ -184,7 +186,48 @@ function RoleChangeDialog({ open, onOpenChange, member, serverError, onSubmit }:
 function RiderApplicationDrawer({ userId, onClose }: { userId: string | null; onClose: () => void }) {
   const appQ = useRiderApplication(userId)
   const app: RiderApplicationDetail | null = appQ.data ?? null
+  const actions = usePeopleActions()
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [viewingId, setViewingId] = useState<string | null>(null)
+  const [viewError, setViewError] = useState<string | null>(null)
+  const [rejectDoc, setRejectDoc] = useState<RiderApplicationDocument | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
+
+  const decide = (doc: RiderApplicationDocument, approved: boolean, reason: string) => {
+    setBusyId(doc.id)
+    actions.reviewRiderDocument(doc.id, approved, reason).mutate(undefined, {
+      onSuccess: () => { setBusyId(null); void appQ.refetch() },
+      onError: (e) => {
+        setBusyId(null)
+        // A stale or simultaneous decision conflicts: reload the current state.
+        if (e instanceof ApiError && e.status === 409) void appQ.refetch()
+      },
+    })
+  }
+
+  const view = (doc: RiderApplicationDocument) => {
+    setViewingId(doc.id)
+    setViewError(null)
+    void getRiderDocumentReadUrl(doc.id)
+      .then(({ url }) => {
+        // Short-lived link: opened in memory only — never logged or persisted.
+        window.open(url, '_blank', 'noopener,noreferrer')
+      })
+      .catch((e) => setViewError(e instanceof Error ? e.message : 'Could not open the document.'))
+      .finally(() => setViewingId(null))
+  }
+
+  const inReview = app?.status === 'under_review'
+  const checklist = app
+    ? app.requiredDocuments.map((req) => ({
+      req,
+      doc: app.documents.find((d) => d.type === req) ?? null,
+    }))
+    : []
+  const extraDocs = app ? app.documents.filter((d) => !app.requiredDocuments.includes(d.type)) : []
+
   return (
+    <>
     <Drawer open onOpenChange={(v) => { if (!v) onClose() }} width="md" title="Rider application" subtitle={userId ? shortId(userId) : ''}>
       {appQ.isLoading || appQ.isPlaceholderData ? (
         <div className="space-y-2" role="status" aria-label="Loading rider application">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-12 w-full rounded-xl" />)}</div>
@@ -193,7 +236,7 @@ function RiderApplicationDrawer({ userId, onClose }: { userId: string | null; on
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            <StatusPill status={app.status.replace(/_/g, '-')} dot />
+            {app.status === 'pending' ? <Badge tone="neutral">Incomplete</Badge> : <StatusPill status={app.status.replace(/_/g, '-')} dot />}
             {app.vehicleType && <Badge tone="blue">{app.vehicleType}</Badge>}
             {app.vehicleNo && <Badge tone="neutral">{app.vehicleNo}</Badge>}
           </div>
@@ -202,10 +245,39 @@ function RiderApplicationDrawer({ userId, onClose }: { userId: string | null; on
             <p className="text-muted-foreground">{app.homeStoreId ? shortId(app.homeStoreId) : 'Not assigned yet'}</p>
           </div>
           <section>
-            <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Documents</h4>
+            <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Document checklist</h4>
             <div className="space-y-1.5">
-              {app.documents.length === 0 && <p className="rounded-xl border border-dashed border-border px-3 py-3 text-center text-xs text-muted-foreground">No documents uploaded</p>}
-              {app.documents.map((d) => (
+              {checklist.length === 0 && extraDocs.length === 0 && (
+                <p className="rounded-xl border border-dashed border-border px-3 py-3 text-center text-xs text-muted-foreground">No documents required</p>
+              )}
+              {checklist.map(({ req, doc }) => (
+                <div key={req} className="flex items-center gap-3 rounded-xl border border-border/70 px-3 py-2.5">
+                  <FileText className="h-4 w-4 shrink-0 text-brand-600" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-semibold">{req}</p>
+                    <p className="text-[11px] text-muted-foreground">{doc ? (doc.reason ?? '—') : 'Not uploaded yet'}</p>
+                  </div>
+                  {doc ? <StatusPill status={doc.status} /> : <span className="text-[11px] font-semibold text-muted-foreground">Missing</span>}
+                  {doc && (
+                    <div className="flex items-center gap-1.5">
+                      <Button size="sm" variant="ghost" disabled={viewingId === doc.id} onClick={() => view(doc)}>
+                        <Eye className="h-3.5 w-3.5" /> View
+                      </Button>
+                      {inReview && doc.status === 'pending' && (
+                        <>
+                          <Button size="sm" variant="primary" disabled={busyId === doc.id} onClick={() => decide(doc, true, '')}>
+                            <Check className="h-3.5 w-3.5" /> Approve
+                          </Button>
+                          <Button size="sm" variant="destructive" disabled={busyId === doc.id} onClick={() => { setRejectDoc(doc); setRejectReason('') }}>
+                            <X className="h-3.5 w-3.5" /> Reject
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {extraDocs.map((d) => (
                 <div key={d.id} className="flex items-center gap-3 rounded-xl border border-border/70 px-3 py-2.5">
                   <FileText className="h-4 w-4 shrink-0 text-brand-600" />
                   <div className="min-w-0 flex-1">
@@ -213,24 +285,47 @@ function RiderApplicationDrawer({ userId, onClose }: { userId: string | null; on
                     <p className="text-[11px] text-muted-foreground">{d.reason ?? '—'}</p>
                   </div>
                   <StatusPill status={d.status} />
+                  <Button size="sm" variant="ghost" disabled={viewingId === d.id} onClick={() => view(d)}>
+                    <Eye className="h-3.5 w-3.5" /> View
+                  </Button>
                 </div>
               ))}
             </div>
+            {viewError && <p role="alert" className="mt-2 text-xs font-semibold text-destructive">{viewError}</p>}
             <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-              Document review and approval happen in the store-manager flow for the assigned store — the admin portal shows the state only.
+              Decide documents here or from the assigned store's portal — both act on the same application.
             </p>
           </section>
-          {app.requiredDocuments.length > 0 && (
-            <section>
-              <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-muted-foreground">Required documents</h4>
-              <div className="flex flex-wrap gap-1.5">
-                {app.requiredDocuments.map((r) => <Badge key={r} tone="neutral">{r}</Badge>)}
-              </div>
-            </section>
-          )}
         </div>
       )}
+      <Dialog open={!!rejectDoc} onOpenChange={(v) => { if (!v) setRejectDoc(null) }}>
+        <DialogContent title={`Reject ${rejectDoc?.type ?? 'document'}`} description="Rejecting a document rejects the application. The rider can resubmit.">
+          <div className="space-y-3">
+            <Field label="Rejection reason" required>
+              <Input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} maxLength={500} placeholder="Why is this document being rejected?" />
+            </Field>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="secondary" size="md" onClick={() => setRejectDoc(null)}>Cancel</Button>
+              <Button
+                variant="destructive"
+                size="md"
+                disabled={!rejectReason.trim() || (rejectDoc ? busyId === rejectDoc.id : false)}
+                onClick={() => {
+                  if (!rejectDoc || !rejectReason.trim()) return
+                  const doc = rejectDoc
+                  const reason = rejectReason.trim()
+                  setRejectDoc(null)
+                  decide(doc, false, reason)
+                }}
+              >
+                <X className="h-4 w-4" /> Reject document
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Drawer>
+    </>
   )
 }
 
@@ -260,7 +355,7 @@ export function People() {
   // rider applications tab
   const [appCursor, setAppCursor] = useState<string | null>(null)
   const [appStack, setAppStack] = useState<Array<string | null>>([null])
-  const [appStatus, setAppStatus] = useState<string>('PENDING')
+  const [appStatus, setAppStatus] = useState<string>('UNDER_REVIEW')
   const appsQ = useRiderApplications({ status: appStatus, cursor: appCursor ?? undefined })
   const [detailAppId, setDetailAppId] = useState<string | null>(null)
 
@@ -371,15 +466,14 @@ export function People() {
           <motion.section variants={container.item} className="space-y-3">
             <div className="flex flex-wrap items-center gap-2.5">
               <div className="w-52">
-                <Select value={appStatus} onValueChange={setAppStatus} options={[
-                  { value: 'PENDING', label: 'Pending review' },
+                <Select value={appStatus} onValueChange={(status) => { setAppStatus(status); setAppCursor(null); setAppStack([null]) }} options={[
+                  { value: 'PENDING', label: 'Incomplete' },
                   { value: 'UNDER_REVIEW', label: 'Under review' },
                   { value: 'APPROVED', label: 'Approved' },
                   { value: 'REJECTED', label: 'Rejected' },
                   { value: 'SUSPENDED', label: 'Suspended' },
                 ]} />
               </div>
-              <p className="text-xs text-muted-foreground">Document review happens in the store-manager flow.</p>
             </div>
             <Card className="overflow-hidden">
               <DataTable
@@ -403,7 +497,7 @@ export function People() {
                     ),
                   },
                   { key: 'id', header: 'Id', render: (a: RiderApplicationListItem) => <span className="font-mono text-xs text-muted-foreground">{shortId(a.userId)}</span> },
-                  { key: 'status', header: 'Status', render: (a: RiderApplicationListItem) => <StatusPill status={a.status.replace(/_/g, '-')} dot /> },
+                  { key: 'status', header: 'Status', render: (a: RiderApplicationListItem) => a.status === 'pending' ? <Badge tone="neutral">Incomplete</Badge> : <StatusPill status={a.status.replace(/_/g, '-')} dot /> },
                   {
                     key: 'actions', header: '', align: 'right' as const,
                     render: (a: RiderApplicationListItem) => (

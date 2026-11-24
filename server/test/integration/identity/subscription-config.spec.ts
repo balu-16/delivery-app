@@ -32,20 +32,20 @@ afterAll(async () => {
   await services?.stop();
 });
 
-it('serializes feature toggles so subscriptions can never outlive an enabled wallet', async () => {
+it('retires subscription re-enablement and decouples the wallet flag', async () => {
   await expect(config.setFlag(admin, 'subscriptions_enabled', true)).rejects.toThrow(
-    'WALLET_REQUIRED_FOR_SUBSCRIPTIONS',
+    'SUBSCRIPTIONS_RETIRED',
   );
   await config.setFlag(admin, 'wallet_enabled', true);
-  const results = await Promise.allSettled([
-    config.setFlag(admin, 'subscriptions_enabled', true),
-    config.setFlag(admin, 'wallet_enabled', false),
-  ]);
-  expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-  const snapshot = await config.snapshot();
-  expect(snapshot.flags.subscriptions_enabled && !snapshot.flags.wallet_enabled).toBe(false);
-  await config.setFlag(admin, 'subscriptions_enabled', false);
+  expect(await config.flag('wallet_enabled')).toBe(true);
+  // Wallet changes no longer depend on the retired flag: disabling the wallet
+  // succeeds even though the retired flag row exists.
+  await sql`INSERT INTO feature_flags(key,enabled) VALUES('subscriptions_enabled',true) ON CONFLICT(key) DO UPDATE SET enabled=true`.execute(
+    handle.db,
+  );
   await config.setFlag(admin, 'wallet_enabled', false);
+  expect(await config.flag('wallet_enabled')).toBe(false);
+  await config.setFlag(admin, 'subscriptions_enabled', false);
 });
 
 it('validates related phase policies atomically before writing history or config', async () => {

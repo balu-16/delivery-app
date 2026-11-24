@@ -1,5 +1,14 @@
 # Subscriptions
 
+> Retired (plan3 section 7, compatibility phase). Customer list/calendar read as
+> empty (`{ items: [], nextCursor: null }`), purchase options render disabled in
+> the existing shape, schedule-changing writes return `410 SUBSCRIPTIONS_RETIRED`,
+> and generation/recovery/forecast are fenced so leftover jobs drain with a
+> deterministic `SUBSCRIPTIONS_RETIRED` outcome plus audit evidence. Cancel stays
+> available as the audited disposition path for historical agreements. Already-
+> placed orders, balances, invoices, refunds and compliance history are preserved;
+> compat routes remain registered until older clients and workers move off them.
+
 A subscription stores a calendar-date anchor in Asia/Kolkata and effective-dated quantity, frequency, slot and address versions. The generation worker records one occurrence per subscription and delivery date. A single database transaction locks the customer and subscription, records the occurrence, prices through checkout, claims capacity, debits the wallet, reserves stock and confirms the order. A retry cannot create a second debit. Occurrences that lack wallet funds remain retryable until the configured grace deadline; terminal failures are recorded and repeated low balance pauses the subscription.
 
 Both customer and admin write surfaces require an idempotency key. Their mutation and replay result commit in the same database transaction. Customer changes take the account and subscription locks before reading the database clock. A named skip or unskip after cutoff is rejected; quantity, pause, resume and cancellation report their first effective date. Subscription orders whose delivery date has reached cutoff cannot be cancelled through the customer order endpoint.

@@ -59,10 +59,10 @@ loadTest(
       }
       const result = await sql<{
         n: string;
-      }>`SELECT count(*)::text AS n FROM subscription_occurrences o JOIN subscriptions s ON s.id=o.subscription_id WHERE s.plan_id=${plan}::uuid AND o.state='SKIPPED' AND o.reason='SKIPPED_HOLIDAY'`.execute(
+      }>`SELECT count(*)::text AS n FROM subscription_occurrences o JOIN subscriptions s ON s.id=o.subscription_id WHERE s.plan_id=${plan}::uuid AND o.state='SKIPPED' AND o.reason='SUBSCRIPTIONS_RETIRED'`.execute(
         world.db.db,
       );
-      expect(result.rows[0]?.n).toBe('10000');
+      expect(result.rows[0]?.n).toBe('0');
     } finally {
       await app.close();
       await closeP5World(world);
@@ -140,11 +140,11 @@ loadTest(
         world.db.db,
       );
       expect(result.rows[0]).toEqual({
-        occurrences: '10000',
-        orders: '10000',
-        debits: '10000',
-        reserved: '10000',
-        capacity: '10000',
+        occurrences: '0',
+        orders: '0',
+        debits: '0',
+        reserved: '0',
+        capacity: '0',
       });
     } finally {
       await app.close();

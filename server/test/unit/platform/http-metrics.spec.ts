@@ -85,3 +85,49 @@ test('captures cart write stages and bounded idempotency outcomes', () => {
     expect(output).toContain(`delivery_idempotency_outcomes_total{outcome="${outcome}"} 1`);
   expect(output).not.toContain('private-outcome');
 });
+
+test('labels portal routes without identifiers and captures redis/session/transaction stages', () => {
+  const metrics = new HttpMetrics();
+  metrics.observe('GET', '/v1/rider/tasks/private-task', 200, 120);
+  metrics.observe('POST', '/v1/rider/offers/private-offer/accept', 200, 200);
+  metrics.observe('GET', '/v1/rider/onboarding', 200, 90);
+  metrics.observe('POST', '/v1/store/auth/login?email=private@example.com', 401, 60);
+  metrics.observe('GET', '/v1/store/pick-tasks/private-pick', 200, 80);
+  metrics.observe('GET', '/v1/admin/catalog/products/private-product', 200, 110);
+  metrics.observe('POST', '/v1/customer/webhooks/payments/razorpay', 200, 45);
+  metrics.observeStage('redis', 25);
+  metrics.observeStage('session_auth', 35);
+  metrics.observeStage('db_transaction', 140);
+  metrics.observeTransactionOutcome('committed');
+  metrics.observeTransactionOutcome('retry');
+  metrics.observeTransactionOutcome('deadlock');
+  metrics.observeTransactionOutcome('serialization');
+  metrics.observeTransactionOutcome('failed');
+  metrics.observeTransactionOutcome('private-outcome' as never);
+
+  const output = metrics.render();
+  expect(output).toContain(
+    'delivery_portal_route_duration_seconds_count{method="GET",audience="rider",route="rider_tasks",status_class="2xx"} 1',
+  );
+  expect(output).toContain('route="rider_offers"');
+  expect(output).toContain('route="rider_onboarding"');
+  expect(output).toContain('route="store_auth"');
+  expect(output).toContain('route="store_pick_tasks"');
+  expect(output).toContain('route="admin_catalog"');
+  expect(output).toContain('route="payments_webhook"');
+  for (const stage of ['redis', 'session_auth', 'db_transaction'])
+    expect(output).toContain(
+      `delivery_dependency_stage_duration_seconds_count{stage="${stage}"} 1`,
+    );
+  for (const outcome of ['committed', 'retry', 'deadlock', 'serialization', 'failed'])
+    expect(output).toContain(`delivery_db_transaction_outcomes_total{outcome="${outcome}"} 1`);
+  for (const secret of [
+    'private-task',
+    'private-offer',
+    'private@example.com',
+    'private-pick',
+    'private-product',
+    'private-outcome',
+  ])
+    expect(output).not.toContain(secret);
+});

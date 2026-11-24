@@ -74,3 +74,22 @@ export function appendCartOperation(confirmed:ServerCart | null, actions:CartOpe
   if (!merged) return earlier;
   return [...earlier,{...previous,delta:merged,product:previous.product ?? next.product}];
 }
+
+/**
+ * Undo the most recent never-sent operation for a variant. Returns the new
+ * action list, or null when nothing is undoable. Sent or uncertain operations
+ * (those with a request) are immutable: undoing those needs an opposite tap,
+ * which the stepper still provides.
+ */
+export function undoCartOperation(actions:CartOperation[], variantId:string):CartOperation[] | null {
+  let index = -1;
+  for (let i = actions.length - 1; i >= 0; i--) {
+    if (actions[i].variantId === variantId && !actions[i].request) { index = i; break; }
+  }
+  if (index < 0) return null;
+  const target = actions[index];
+  const unit = target.delta === 0 ? 0 : target.delta > 0 ? 1 : -1;
+  const delta = target.delta - unit;
+  if (!delta) return [...actions.slice(0, index), ...actions.slice(index + 1)];
+  return [...actions.slice(0, index), { ...target, delta }, ...actions.slice(index + 1)];
+}

@@ -83,6 +83,18 @@ export function StoreStoreStatus() {
     !store ? 'loading' : store.status === 'ONLINE' ? 'online' : store.status === 'PAUSED' ? 'paused' : 'offline'
   const latest = statusChanges[0] ?? null
   const composedReason = pauseDetails.trim() ? `${pauseReason} — ${pauseDetails.trim()}` : pauseReason
+  // Server capabilities are authoritative; status is only the legacy fallback.
+  const canPause = store?.canPause ?? (store?.status === 'ONLINE')
+  const canResume = store?.canResume ?? (store?.status === 'PAUSED')
+  const restrictionReason = store?.restrictionReason ?? null
+  const restrictionText =
+    restrictionReason === 'STORE_NOT_ONLINE'
+      ? 'The store is not online, so it cannot be paused.'
+      : restrictionReason === 'STORE_NOT_PAUSED'
+        ? 'The store is not paused, so there is nothing to resume.'
+        : restrictionReason === 'PAUSE_MANAGED_BY_ADMIN'
+          ? 'This pause is managed by the admin or the system and cannot be resumed here.'
+          : null
 
   const columns: Column<StoreStatusChange>[] = [
     { key: 'at', header: 'When', render: (c) => <span className="whitespace-nowrap text-muted-foreground">{fmtDateTime(c.at)}</span> },
@@ -148,11 +160,18 @@ export function StoreStoreStatus() {
           <div className="mt-5">
             {status === 'online' ? (
               <Button variant="success" disabled aria-label="Store is already online">Online now</Button>
-            ) : (
+            ) : canResume ? (
               // one-click resume — no dialog per spec
               <Button variant="success" onClick={() => storeId && statusActions.resume(storeId)} aria-label="Resume store operations">
                 <Play className="h-4 w-4" /> Resume
               </Button>
+            ) : (
+              <div className="space-y-2">
+                <Button variant="success" disabled aria-label="Resume unavailable">
+                  <Play className="h-4 w-4" /> Resume
+                </Button>
+                {restrictionText && <p className="text-[11.5px] text-muted-foreground">{restrictionText}</p>}
+              </div>
             )}
           </div>
         </Card>
@@ -170,10 +189,17 @@ export function StoreStoreStatus() {
           <div className="mt-5">
             {status === 'paused' ? (
               <Button variant="secondary" disabled aria-label="Store is already paused">Currently paused</Button>
-            ) : (
+            ) : canPause ? (
               <Button variant="destructive" onClick={() => { setPauseOpen(true); setPauseReason(''); setPauseDetails('') }} aria-label="Pause store">
                 <PauseCircle className="h-4 w-4" /> Pause Operations
               </Button>
+            ) : (
+              <div className="space-y-2">
+                <Button variant="destructive" disabled aria-label="Pause unavailable">
+                  <PauseCircle className="h-4 w-4" /> Pause Operations
+                </Button>
+                {restrictionText && <p className="text-[11.5px] text-muted-foreground">{restrictionText}</p>}
+              </div>
             )}
           </div>
         </Card>

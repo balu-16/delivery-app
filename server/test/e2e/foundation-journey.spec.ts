@@ -415,6 +415,133 @@ it('enrolls a rider through document rejection, resubmission and store-manager a
   }
 });
 
+it('finishes a rider enrollment from the admin portal over HTTP', async () => {
+  const http = app.getHttpAdapter().getInstance();
+  const client = new Client({ connectionString: services.databaseUrl });
+  await client.connect();
+  try {
+    const sub = uuidV7();
+    await client.query(
+      "INSERT INTO local_identity_directory(pool,username,sub,email,name,email_verified) VALUES('WORKFORCE',$1,$1,$2,'Admin Rider',true)",
+      [sub, `${sub}@example.test`],
+    );
+    const idToken = await token('WORKFORCE', sub, 'rider', 'id');
+    const bootstrap = await http.inject({
+      method: 'POST',
+      url: '/v1/rider/auth/bootstrap',
+      headers: { authorization: `Bearer ${idToken}` },
+    });
+    expect(bootstrap.statusCode).toBe(201);
+    const userId = bootstrap.json().userId as string;
+    const accessToken = await token('WORKFORCE', sub, 'rider');
+    const headers = { authorization: `Bearer ${accessToken}` };
+    const storeId = '01800000-0000-7000-8000-000000000011';
+    expect(
+      (
+        await http.inject({
+          method: 'POST',
+          url: '/v1/rider/onboarding/store',
+          headers,
+          payload: { storeId },
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await http.inject({
+          method: 'POST',
+          url: '/v1/rider/onboarding/profile',
+          headers,
+          payload: { vehicleType: 'bike', vehicleNo: 'ADMIN-456' },
+        })
+      ).statusCode,
+    ).toBe(201);
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
+    async function upload(type: string) {
+      const target = await http.inject({
+        method: 'POST',
+        url: '/v1/rider/onboarding/documents/upload-url',
+        headers,
+        payload: { contentType: 'image/png', size: png.length },
+      });
+      expect(target.statusCode).toBe(201);
+      const destination = target.json() as {
+        mediaId: string;
+        url: string;
+        fields: { authorization: string };
+      };
+      const bytes = await http.inject({
+        method: 'PUT',
+        url: destination.url,
+        headers: {
+          authorization: destination.fields.authorization,
+          'content-type': 'application/octet-stream',
+        },
+        payload: png,
+      });
+      expect(bytes.statusCode).toBe(200);
+      const registered = await http.inject({
+        method: 'POST',
+        url: '/v1/rider/onboarding/documents',
+        headers,
+        payload: { documentType: type, mediaId: destination.mediaId },
+      });
+      expect(registered.statusCode).toBe(201);
+    }
+    for (const type of ['licence', 'vehicle_rc', 'id_proof', 'bank_proof']) await upload(type);
+    const adminToken = await token('WORKFORCE', 'super-admin-1', 'admin');
+    const adminHeaders = { authorization: `Bearer ${adminToken}` };
+    const detail = await http.inject({
+      method: 'GET',
+      url: `/v1/admin/rider-applications/${userId}`,
+      headers: adminHeaders,
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().status).toBe('UNDER_REVIEW');
+    expect(detail.json().requiredDocuments).toEqual([
+      'licence',
+      'vehicle_rc',
+      'id_proof',
+      'bank_proof',
+    ]);
+    const documents = detail.json().documents as { id: string; type: string; status: string }[];
+    expect(documents).toHaveLength(4);
+    for (const document of documents) {
+      const read = await http.inject({
+        method: 'GET',
+        url: `/v1/admin/rider-documents/${document.id}/read-url`,
+        headers: adminHeaders,
+      });
+      expect(read.statusCode).toBe(200);
+      expect(typeof read.json().url).toBe('string');
+      const review = await http.inject({
+        method: 'POST',
+        url: `/v1/admin/rider-documents/${document.id}/review`,
+        headers: adminHeaders,
+        payload: { approved: true, reason: '' },
+      });
+      expect(review.statusCode).toBe(201);
+      expect(review.json()).toEqual({ reviewed: true });
+    }
+    expect(
+      (await http.inject({ method: 'GET', url: '/v1/rider/onboarding', headers })).json().status,
+    ).toBe('APPROVED');
+    // The snapshot persisted on the profile matches the reviewed checklist.
+    const profile = await client.query(
+      'SELECT review_required_documents FROM rider_profiles WHERE user_id=$1::uuid',
+      [userId],
+    );
+    expect(profile.rows[0].review_required_documents).toEqual([
+      'licence',
+      'vehicle_rc',
+      'id_proof',
+      'bank_proof',
+    ]);
+  } finally {
+    await client.end();
+  }
+});
+
 it('rejects missing, expired, wrong-audience and wrong-role credentials for every guarded operation', async () => {
   const http = app.getHttpAdapter().getInstance();
   let operationCount = 0;

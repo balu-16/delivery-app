@@ -10,6 +10,7 @@ import type {
 interface ApprovalApiRow {
   id: string; action: string; maker_id: string; checker_id: string | null
   required_role: string; status: string; expires_at: string; created_at: string
+  canApprove?: boolean; canReject?: boolean; cannotApproveReason?: string | null
 }
 
 function mapApproval(r: ApprovalApiRow): Approval {
@@ -22,6 +23,9 @@ function mapApproval(r: ApprovalApiRow): Approval {
     status: lowerStatus(r.status) as Approval['status'],
     expiresAt: r.expires_at,
     createdAt: r.created_at,
+    canApprove: r.canApprove,
+    canReject: r.canReject,
+    cannotApproveReason: r.cannotApproveReason ?? null,
   }
 }
 

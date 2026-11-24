@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   ForbiddenException,
@@ -40,6 +41,9 @@ import {
   type Principal,
   type UserProfiles,
 } from '../../../modules/identity/contracts/identity.js';
+class CustomerProfileResponseDto extends ProfileResponseDto {
+  @ApiPropertyOptional() emailVerified?: boolean;
+}
 class ProfileDto {
   @ApiProperty({ minLength: 1, maxLength: 100 }) @IsString() @Length(1, 100) name!: string;
   @ApiPropertyOptional({ enum: ['en', 'hi', 'te'] })
@@ -54,17 +58,20 @@ class ConsentDto {
   @ApiProperty({ minLength: 1, maxLength: 40 }) @IsString() @Length(1, 40) version!: string;
 }
 class BootstrapDto {
-  @ApiPropertyOptional({ pattern: '^[A-Fa-f0-9]{16}$' })
+  @ApiPropertyOptional({ pattern: '^(?:[A-Fa-f0-9]{16}|INV-[A-Fa-f0-9]{32})$' })
   @IsOptional()
   @IsString()
-  @Matches(/^[A-Fa-f0-9]{16}$/)
+  @Matches(/^(?:[A-Fa-f0-9]{16}|INV-[A-Fa-f0-9]{32})$/)
   referralCode?: string;
 }
 class ReferralViewDto {
   @ApiProperty() enabled!: boolean;
   @ApiProperty({ type: String, nullable: true }) code!: string | null;
   @ApiProperty() successfulReferrals!: number;
+  @ApiProperty() pendingReferrals!: number;
   @ApiProperty() rewardPaise!: string;
+  @ApiProperty({ description: 'Calendar months the current reward stays valid' })
+  rewardExpiryMonths!: number;
   @ApiProperty() freeDeliveryAvailable!: boolean;
 }
 async function customerCommand<T>(work: () => Promise<T>): Promise<T> {
@@ -85,6 +92,7 @@ async function customerCommand<T>(work: () => Promise<T>): Promise<T> {
       throw new BadRequestException({ code });
     if (code === 'ACCOUNT_DISABLED' || code === 'EMAIL_NOT_VERIFIED' || code === 'ROLE_CONFLICT')
       throw new ForbiddenException({ code });
+    if (code === 'REFERRAL_INVITE_USED') throw new ConflictException({ code });
     if (code === 'REFERRALS_UNAVAILABLE') throw new ServiceUnavailableException({ code });
     throw error;
   }
@@ -117,10 +125,13 @@ export class CustomerIdentityController {
   async referral(@CurrentPrincipal() principal: Principal) {
     return customerCommand(() => this.referrals.view(principal.userId));
   }
-  @Get('me') @ApiResponse({ status: 200, type: ProfileResponseDto }) async me(
+  @Get('me') @ApiResponse({ status: 200, type: CustomerProfileResponseDto }) async me(
     @CurrentPrincipal() principal: Principal,
   ) {
-    return this.profiles.get(principal.userId);
+    return {
+      ...(await this.profiles.get(principal.userId)),
+      emailVerified: principal.emailVerified,
+    };
   }
   @Patch('me')
   @ApiResponse({ status: 200, description: 'Profile updated; empty response' })

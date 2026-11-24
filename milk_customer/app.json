@@ -52,6 +52,14 @@
       "expo-secure-store",
       "expo-notifications",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "DairyDirect uses the photo you choose for your profile cover.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "DairyDirect uses your location to set your delivery address."

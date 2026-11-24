@@ -10,6 +10,7 @@ import {
   NotFoundException,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   ServiceUnavailableException,
@@ -21,18 +22,31 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiProperty,
+  ApiPropertyOptional,
   ApiQuery,
   ApiResponse,
 } from '@nestjs/swagger';
 import {
+  ConfigBatchResultDto,
   ConfigSnapshotResponseDto,
   ProblemDto,
   RequestIdResponseDto,
   WorkforceResponseDto,
   RiderApplicationDto,
   RiderApplicationPageDto,
+  UrlResponseDto,
 } from '../../../modules/identity/contracts/swagger.js';
-import { IsBoolean, IsDefined, IsEmail, IsIn, IsString, Length } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsDefined,
+  IsEmail,
+  IsIn,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+} from 'class-validator';
 import {
   ADMIN_CONFIG,
   FEATURE_FLAG_KEYS,
@@ -45,6 +59,10 @@ import {
   RIDER_APPLICATIONS,
   type RiderApplications,
 } from '../../../modules/identity/contracts/rider-applications.js';
+import {
+  RIDER_DOCUMENTS,
+  type RiderDocuments,
+} from '../../../modules/identity/contracts/uploads.js';
 import { AuthPolicy, CurrentPrincipal } from '../../../modules/identity/contracts/http.js';
 import { IdentityGuard } from '../../../modules/identity/contracts/identity-guard.js';
 import {
@@ -84,6 +102,7 @@ async function identityCommand<T>(work: () => Promise<T>): Promise<T> {
         'DOCUMENT_STATE_INVALID',
         'WALLET_REQUIRED_FOR_SUBSCRIPTIONS',
         'INVALID_SLOT_TIMING',
+        'CONCURRENT_MODIFICATION',
       ].includes(code)
     )
       throw new ConflictException({ code });
@@ -94,6 +113,7 @@ async function identityCommand<T>(work: () => Promise<T>): Promise<T> {
         'ROLE_NOT_MANAGED',
         'INVALID_SEARCH',
         'INVALID_CONFIG_KEY',
+        'DUPLICATE_CONFIG_KEY',
         'INVALID_FLAG',
         'INVALID_APPLICATION_FILTER',
         'REVIEW_REASON_REQUIRED',
@@ -134,9 +154,37 @@ class ConfigUpdateDto {
   @ApiProperty({ description: 'Typed value for the selected configuration key' })
   @IsDefined()
   value!: unknown;
+  @ApiPropertyOptional({ description: 'Current revision as a decimal string' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d+$/)
+  expectedVersion?: string;
+}
+class ConfigBatchChangeDto {
+  @ApiProperty({ description: 'Configuration key' })
+  @IsString()
+  key!: string;
+  @ApiProperty({ description: 'Typed value for the configuration key' })
+  @IsDefined()
+  value!: unknown;
+  @ApiPropertyOptional({ description: 'Current revision as a decimal string' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d+$/)
+  expectedVersion?: string;
+}
+class ConfigBatchUpdateDto {
+  @ApiProperty({ type: [ConfigBatchChangeDto] })
+  @IsArray()
+  changes!: ConfigBatchChangeDto[];
 }
 class FlagUpdateDto {
   @ApiProperty() @IsBoolean() enabled!: boolean;
+  @ApiPropertyOptional({ description: 'Current revision as a decimal string' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d+$/)
+  expectedVersion?: string;
 }
 class AdminUserDto {
   @ApiProperty({ format: 'uuid' }) userId!: string;
@@ -149,6 +197,11 @@ class AdminUserDto {
 class AdminUserPageDto {
   @ApiProperty({ type: [AdminUserDto] }) users!: AdminUserDto[];
   @ApiProperty({ type: String, nullable: true }) nextCursor!: string | null;
+}
+/** Same shape as the store review DTO; admin reviews share the service. */
+class ReviewDto {
+  @ApiProperty() @IsBoolean() approved!: boolean;
+  @ApiProperty({ maxLength: 500 }) @IsString() @Length(0, 500) reason!: string;
 }
 @ApiBearerAuth()
 @ApiResponse({ status: 400, type: ProblemDto, description: 'Invalid request' })
@@ -166,6 +219,7 @@ export class AdminIdentityController {
     @Inject(IDENTITY_ADMINISTRATION) private readonly administration: IdentityAdministration,
     @Inject(ADMIN_CONFIG) private readonly config: AdminConfig,
     @Inject(RIDER_APPLICATIONS) private readonly applications: RiderApplications,
+    @Inject(RIDER_DOCUMENTS) private readonly documents: RiderDocuments | null,
   ) {}
   @Get('config')
   @ApiResponse({ status: 200, type: ConfigSnapshotResponseDto })
@@ -181,7 +235,31 @@ export class AdminIdentityController {
     @Param('key') key: string,
     @Body() body: ConfigUpdateDto,
   ): Promise<void> {
-    await identityCommand(() => this.config.update(principal.userId, key as ConfigKey, body.value));
+    await identityCommand(() =>
+      this.config.update(principal.userId, key as ConfigKey, body.value, body.expectedVersion),
+    );
+  }
+  @Patch('config')
+  @ApiResponse({ status: 200, type: ConfigBatchResultDto })
+  @AuthPolicy({ audience: 'admin', roles: ['SUPER_ADMIN'] })
+  async updateConfigBatch(
+    @CurrentPrincipal() principal: Principal,
+    @Body() body: ConfigBatchUpdateDto,
+  ): Promise<{ updated: Array<{ key: string; value: unknown; version: string }> }> {
+    const keys = body.changes.map((change) => change.key);
+    if (new Set(keys).size !== keys.length)
+      throw new BadRequestException({ code: 'DUPLICATE_CONFIG_KEY' });
+    const updated = await identityCommand(() =>
+      this.config.updateBatch(
+        principal.userId,
+        body.changes.map((change) => ({
+          key: change.key as ConfigKey,
+          value: change.value,
+          expectedVersion: change.expectedVersion,
+        })),
+      ),
+    );
+    return { updated };
   }
   @Post('feature-flags/:key')
   @ApiResponse({ status: 201, description: 'Flag updated; empty response' })
@@ -194,7 +272,12 @@ export class AdminIdentityController {
     if (!(FEATURE_FLAG_KEYS as readonly string[]).includes(key))
       throw new BadRequestException({ code: 'INVALID_FLAG' });
     await identityCommand(() =>
-      this.config.setFlag(principal.userId, key as FeatureFlagKey, body.enabled),
+      this.config.setFlag(
+        principal.userId,
+        key as FeatureFlagKey,
+        body.enabled,
+        body.expectedVersion,
+      ),
     );
   }
   @Get('users')
@@ -237,6 +320,38 @@ export class AdminIdentityController {
     @Param('userId', ParseUUIDPipe) userId: string,
   ) {
     return identityCommand(() => this.applications.getForAdmin(principal.userId, userId));
+  }
+  @Get('rider-documents/:documentId/read-url')
+  @ApiOperation({ operationId: 'adminReadRiderDocument' })
+  @ApiResponse({ status: 200, type: UrlResponseDto })
+  async adminReadRiderDocument(
+    @CurrentPrincipal() principal: Principal,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+  ) {
+    return identityCommand(async () => {
+      if (!this.documents) throw new ServiceUnavailableException();
+      return {
+        url: await this.documents.reviewUrl(principal.userId, documentId, {
+          role: 'SUPER_ADMIN',
+        }),
+      };
+    });
+  }
+  @Post('rider-documents/:documentId/review')
+  @ApiOperation({ operationId: 'adminReviewRiderDocument' })
+  @ApiResponse({ status: 201, description: 'Document reviewed' })
+  async adminReviewRiderDocument(
+    @CurrentPrincipal() principal: Principal,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Body() body: ReviewDto,
+  ) {
+    return identityCommand(async () => {
+      if (!this.documents) throw new ServiceUnavailableException();
+      await this.documents.review(principal.userId, documentId, body.approved, body.reason, {
+        role: 'SUPER_ADMIN',
+      });
+      return { reviewed: true };
+    });
   }
   @Post('users/workforce') @ApiResponse({ status: 201, type: WorkforceResponseDto }) async create(
     @CurrentPrincipal() principal: Principal,

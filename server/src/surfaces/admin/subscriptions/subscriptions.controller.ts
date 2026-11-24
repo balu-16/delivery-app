@@ -93,9 +93,10 @@ export class AdminSubscriptionsController {
     @Body() d: PlanDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'PUT', '/subscriptions/plans', d, (tx) =>
-      this.admin.savePlan(p.userId, d.variantId, d.active, tx),
-    );
+    void p;
+    void d;
+    void key;
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
   @Get('slots') @ApiOperation({ operationId: 'adminSubscriptionSlots' }) slots(
     @Query('storeId', ParseUUIDPipe) id: string,
@@ -109,9 +110,10 @@ export class AdminSubscriptionsController {
     @Body() d: SlotDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'PUT', '/subscriptions/slots', d, (tx) =>
-      this.admin.saveSlot(p.userId, d, tx),
-    );
+    void p;
+    void d;
+    void key;
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
   @Get('holidays') @ApiOperation({ operationId: 'adminSubscriptionHolidays' }) holidays(
     @Query('storeId', ParseUUIDPipe) id: string,
@@ -125,9 +127,10 @@ export class AdminSubscriptionsController {
     @Body() d: HolidayDto,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'PUT', '/subscriptions/holidays', d, (tx) =>
-      this.admin.saveHoliday(p.userId, d.storeId, d.date, d.reason ?? null, false, tx),
-    );
+    void p;
+    void d;
+    void key;
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
   @Delete('holidays/:storeId/:date')
   @ApiOperation({ operationId: 'adminSubscriptionHolidayDelete' })
@@ -137,9 +140,11 @@ export class AdminSubscriptionsController {
     @Param('date') date: string,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'DELETE', `/subscriptions/holidays/${id}/${date}`, {}, (tx) =>
-      this.admin.saveHoliday(p.userId, id, date, null, true, tx),
-    );
+    void p;
+    void id;
+    void date;
+    void key;
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
   @Get('runs') @ApiOperation({ operationId: 'adminSubscriptionRuns' }) runs(
     @Query('storeId') id?: string,
@@ -154,8 +159,9 @@ export class AdminSubscriptionsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Headers('idempotency-key') key?: string,
   ) {
-    return this.keyed(p, key, 'POST', `/subscriptions/runs/${id}/retry`, {}, (tx) =>
-      this.admin.retryRun(p.userId, id, tx),
-    );
+    void p;
+    void id;
+    void key;
+    throw new HttpException({ code: 'SUBSCRIPTIONS_RETIRED' }, 410);
   }
 }

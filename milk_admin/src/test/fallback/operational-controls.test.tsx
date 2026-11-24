@@ -41,7 +41,8 @@ describe('FALLBACK: admin operational controls', () => {
     await user.clear(minimum)
     await user.type(minimum,'99.99')
     await user.click(within(row).getByRole('button',{name:'Save'}))
-    await waitFor(() => expect(requests.find(request => request.method === 'POST' && request.path.includes('minOrderPaise'))?.body).toEqual({value:'9999'}))
+    await waitFor(() => expect(requests.find(request => request.method === 'PATCH' && request.path === '/v1/admin/config')?.body)
+      .toEqual({changes:[{key:'minOrderPaise',value:'9999'},{key:'maxOrderPaise',value:'10000'}]}))
   })
 
   it('starts a fresh wallet request only after the server reports the previous confirmation expired', async () => {

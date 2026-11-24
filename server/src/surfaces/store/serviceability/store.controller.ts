@@ -29,6 +29,11 @@ class StoreStatusDto {
 @ApiResponse({ status: 400, description: 'Invalid status or missing pause reason' })
 @ApiResponse({ status: 401, description: 'Invalid token' })
 @ApiResponse({ status: 403, description: 'Store role required' })
+@ApiResponse({
+  status: 403,
+  description:
+    'Out-of-policy status change: STORE_PAUSE_NOT_ALLOWED (pause requires ONLINE) or STORE_RESUME_NOT_MANAGER_OWNED (resume requires a manager-controlled pause).',
+})
 @ApiResponse({ status: 404, description: 'Store not assigned' })
 @AuthPolicy({ audience: 'store', roles: ['STORE_MANAGER'] })
 @UseGuards(IdentityGuard)
@@ -52,7 +57,9 @@ export class StoreStatusController {
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
       const status =
-        code === 'FORBIDDEN'
+        code === 'FORBIDDEN' ||
+        code === 'STORE_PAUSE_NOT_ALLOWED' ||
+        code === 'STORE_RESUME_NOT_MANAGER_OWNED'
           ? 403
           : code === 'STORE_NOT_FOUND'
             ? 404

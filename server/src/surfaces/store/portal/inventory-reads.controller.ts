@@ -88,6 +88,8 @@ class BatchViewDto {
 class BatchPageDto {
   @ApiProperty({ type: [BatchViewDto] }) items!: BatchViewDto[];
   @ApiProperty({ type: String, nullable: true }) nextCursor!: string | null;
+  @ApiProperty({ type: Number })
+  inventoryAdjustmentApprovalUnits!: number;
 }
 class InventoryExportViewDto {
   @ApiProperty({ type: [StockItemView] }) items!: StockItemView[];

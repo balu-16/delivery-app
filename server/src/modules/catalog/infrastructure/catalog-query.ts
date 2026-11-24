@@ -64,7 +64,7 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
       LEFT JOIN catalog_brands b ON b.id=p.brand_id
       JOIN catalog_variants v ON v.product_id=p.id AND v.deleted_at IS NULL
       JOIN catalog_global_prices price ON price.variant_id=v.id
-      WHERE EXISTS (SELECT 1 FROM store_inventory i WHERE i.variant_id=v.id)
+      WHERE EXISTS (SELECT 1 FROM store_inventory i WHERE i.variant_id=v.id AND i.listed)
       AND p.published AND p.deleted_at IS NULL AND (p.brand_id IS NULL OR b.deleted_at IS NULL)
       ORDER BY p.normalized_name,p.id,v.id LIMIT 500`.execute(this.db);
     return {
@@ -140,7 +140,7 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
       FROM catalog_categories c JOIN catalog_products p ON p.category_id=c.id
       LEFT JOIN catalog_brands b ON b.id=p.brand_id
       JOIN catalog_variants v ON v.product_id=p.id AND v.deleted_at IS NULL
-      JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${store}::uuid
+      JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${store}::uuid AND i.listed
       JOIN catalog_global_prices cp ON cp.variant_id=i.variant_id
       WHERE c.deleted_at IS NULL AND p.published AND p.deleted_at IS NULL AND (p.brand_id IS NULL OR b.deleted_at IS NULL)
       ORDER BY c.name,id`.execute(this.db);
@@ -288,7 +288,7 @@ export class PostgresCatalogQuery implements CatalogQuery, SearchPort {
       FROM catalog_products p JOIN catalog_categories c ON c.id=p.category_id AND c.deleted_at IS NULL
       LEFT JOIN catalog_brands b ON b.id=p.brand_id
       JOIN catalog_variants v ON v.product_id=p.id AND v.deleted_at IS NULL
-      JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${store}::uuid
+      JOIN store_inventory i ON i.variant_id=v.id AND i.store_id=${store}::uuid AND i.listed
       LEFT JOIN inventory_saleable_availability a ON a.store_id=i.store_id AND a.variant_id=i.variant_id
       JOIN catalog_global_prices price ON price.variant_id=i.variant_id
       WHERE p.published AND p.deleted_at IS NULL AND (p.brand_id IS NULL OR b.deleted_at IS NULL)

@@ -24,6 +24,7 @@ export type ClaimResult =
   | { kind: 'claimed'; owner: IdempotencyOwner }
   | { kind: 'in_progress'; operationId: string }
   | { kind: 'replay'; operationId: string; status: number; body: Json }
+  | { kind: 'rejected'; operationId: string; status: number; code: string }
   | { kind: 'response_expired'; operationId: string }
   | { kind: 'key_reused' };
 interface Row {
@@ -35,6 +36,8 @@ interface Row {
   lease_until: Date | null;
   response_status: number | null;
   response_body: Json;
+  rejection_code: string | null;
+  rejection_status: number | null;
 }
 
 /** Hash already validated and canonically normalized request data; include path parameters. */
@@ -112,7 +115,7 @@ export class IdempotencyStore {
     }
     return this.db.transaction().execute(async (tx) => {
       const result =
-        await sql<Row>`SELECT request_hash, canonical_request_hash, operation_id, state, owner_token, lease_until, response_status, response_body
+        await sql<Row>`SELECT request_hash, canonical_request_hash, operation_id, state, owner_token, lease_until, response_status, response_body, rejection_code, rejection_status
         FROM idempotency_keys WHERE actor=${scope.actor} AND audience=${scope.audience} AND method=${scope.method} AND resource=${scope.resource} AND key=${scope.key} FOR UPDATE`.execute(
           tx,
         );
@@ -129,6 +132,15 @@ export class IdempotencyStore {
           AND audience=${scope.audience} AND method=${scope.method} AND resource=${scope.resource} AND key=${scope.key}`.execute(
           tx,
         );
+      // A proven terminal rejection survives response-cache pruning: the
+      // rejection columns are permanent while response_status/body expire.
+      if (row.state === 'COMPLETED' && row.rejection_code)
+        return {
+          kind: 'rejected',
+          operationId: row.operation_id,
+          status: row.rejection_status ?? 409,
+          code: row.rejection_code,
+        };
       if (row.state === 'COMPLETED')
         return row.response_status === null
           ? { kind: 'response_expired', operationId: row.operation_id }
@@ -251,7 +263,68 @@ export class IdempotencyStore {
     });
   }
 
-  /** Keep the key, request hash and operation reference permanently; only discard cached response. */
+  /**
+   * Record a proven terminal rejection for a fenced owner. The caller proves
+   * non-commit through `proveAbsent` (e.g. no order exists for the operation)
+   * inside the same row-locked transaction as the write, so a concurrent
+   * commit under this key cannot slip between the check and the record.
+   * Returns false when the lease was lost, the row raced, or the absence
+   * proof failed; the caller then treats the outcome as unknown. Only
+   * terminal-for-body failures may be recorded; timeouts and absence of an
+   * order on their own must never produce a rejection.
+   */
+  async recordRejection(
+    owner: IdempotencyOwner,
+    rejection: { status: number; code: string },
+    proveAbsent: (tx: TransactionContext) => Promise<boolean>,
+    responseRetentionSeconds = 86400,
+  ): Promise<boolean> {
+    if (
+      !Number.isInteger(rejection.status) ||
+      rejection.status < 400 ||
+      rejection.status > 599 ||
+      !/^[A-Z][A-Z0-9_]{2,63}$/.test(rejection.code) ||
+      !Number.isSafeInteger(responseRetentionSeconds) ||
+      responseRetentionSeconds < 1
+    )
+      throw new Error('INVALID_REJECTION');
+    const s = owner.scope;
+    return this.db.transaction().execute(async (tx) => {
+      const result =
+        await sql<Row>`SELECT request_hash, canonical_request_hash, operation_id, state, owner_token, lease_until, response_status, response_body, rejection_code, rejection_status
+        FROM idempotency_keys WHERE actor=${s.actor} AND audience=${s.audience} AND method=${s.method}
+        AND resource=${s.resource} AND key=${s.key} FOR UPDATE`.execute(tx);
+      const row = result.rows[0];
+      const now = await databaseTimeAfterLock(tx);
+      if (
+        !row ||
+        row.state !== 'PROCESSING' ||
+        row.owner_token !== owner.token ||
+        row.operation_id !== owner.operationId ||
+        !row.lease_until ||
+        row.lease_until <= now
+      )
+        return false;
+      if (!(await proveAbsent(tx))) return false;
+      const updated =
+        await sql`UPDATE idempotency_keys SET state='COMPLETED', owner_token=NULL, lease_until=NULL,
+        response_status=${rejection.status}, response_body=${JSON.stringify({ code: rejection.code })}::jsonb,
+        response_expires_at=clock_timestamp() + ${responseRetentionSeconds} * interval '1 second',
+        rejection_code=${rejection.code}, rejection_status=${rejection.status}, rejected_at=clock_timestamp(),
+        updated_at=clock_timestamp()
+        WHERE actor=${s.actor} AND audience=${s.audience} AND method=${s.method} AND resource=${s.resource} AND key=${s.key}
+        AND state='PROCESSING' AND owner_token=${owner.token}::uuid AND operation_id=${owner.operationId}::uuid`.execute(
+          tx,
+        );
+      return Number(updated.numAffectedRows ?? 0) === 1;
+    });
+  }
+
+  /**
+   * Keep the key, request hash and operation reference permanently; only
+   * discard cached response. Rejection columns are permanent on purpose and
+   * are never cleared here, so pruned rejections still report REJECTED.
+   */
   async pruneResponses(): Promise<void> {
     await sql`UPDATE idempotency_keys SET response_status=NULL, response_body=NULL, response_expires_at=NULL, updated_at=clock_timestamp()
       WHERE state='COMPLETED' AND response_expires_at <= clock_timestamp()`.execute(this.db);

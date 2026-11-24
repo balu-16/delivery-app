@@ -95,17 +95,25 @@ export interface CampaignTargetInput {
 
 export interface CampaignPreviewResult {
   estimatedRecipients: number | null
+  devices: number | null
+  users: number | null
   target: CampaignTargetInput
   kind: 'PROMOTIONAL' | 'OPERATIONAL'
 }
 
-/** Server-side audience count before any campaign is created. */
+/** Server-side audience count before any campaign is created (§3E C1). */
 export function previewCampaign(input: { target: CampaignTargetInput; kind: 'PROMOTIONAL' | 'OPERATIONAL' }): Promise<CampaignPreviewResult> {
-  return post<{ estimatedRecipients?: number } & Record<string, unknown>>('/v1/admin/push-campaigns/preview', input).then((res) => ({
-    estimatedRecipients: typeof res.estimatedRecipients === 'number' ? res.estimatedRecipients : null,
-    target: input.target,
-    kind: input.kind,
-  }))
+  return post<{ devices?: number; users?: number; estimatedRecipients?: number } & Record<string, unknown>>('/v1/admin/push-campaigns/preview', input).then((res) => {
+    const devices = typeof res.devices === 'number' ? res.devices : typeof res.estimatedRecipients === 'number' ? res.estimatedRecipients : null
+    const users = typeof res.users === 'number' ? res.users : devices
+    return {
+      estimatedRecipients: devices,
+      devices,
+      users,
+      target: input.target,
+      kind: input.kind,
+    }
+  })
 }
 
 export interface CampaignCreateInput {
@@ -115,8 +123,23 @@ export interface CampaignCreateInput {
   body: string
   clickAction?: string
   imageUrl?: string
+  imageMediaId?: string
   data?: Record<string, string>
 }
+
+/** Approved click-action destinations (customize2 §3E); anything else falls
+ * back to the app's notifications screen on the device. */
+export const CAMPAIGN_DESTINATIONS = [
+  '/offers',
+  '/products',
+  '/cart',
+  '/support',
+  '/notifications',
+  '/orders',
+  '/wallet',
+  '/agent',
+] as const
+export type CampaignDestination = (typeof CAMPAIGN_DESTINATIONS)[number]
 
 export const createCampaign = (idempotencyKey: string, input: CampaignCreateInput) =>
   sendIdempotent<{ id: string }>('POST', '/v1/admin/push-campaigns', input, idempotencyKey)
@@ -125,7 +148,7 @@ interface CampaignRow {
   id: string; title?: string; body?: string; kind?: string
   target?: { mode?: string; apps?: string[] }
   estimated_recipients?: number | null; recipients?: number | null
-  created_at?: string
+  created_by?: string; created_at?: string
 }
 
 function mapCampaign(r: CampaignRow): PushCampaign {
@@ -147,9 +170,43 @@ export function listCampaigns(cursor?: string): Promise<CursorPage<PushCampaign>
   }))
 }
 
-export function getCampaign(id: string, cursor?: string): Promise<PushCampaign & { deliveries?: unknown[]; nextCursor: string | null }> {
-  return get<CampaignRow & { deliveries?: unknown[]; nextCursor?: string | null }>(`/v1/admin/push-campaigns/${id}${buildQuery({ cursor })}`).then((r) => ({
+export interface CampaignDeliveryCounts {
+  pending: number
+  delivered: number
+  skipped: number
+  failed: number
+  other: number
+}
+
+export interface CampaignDetail extends PushCampaign {
+  counts: CampaignDeliveryCounts
+  deliveries: unknown[]
+  nextCursor: string | null
+}
+
+function toCounts(results: Array<{ status: string; devices: number }> = []): CampaignDeliveryCounts {
+  const normalized = {
+    PENDING: 0, SENT: 0, DELIVERED: 0, SKIPPED: 0, FAILED: 0,
+    RETRY: 0, INVALID: 0, HELD: 0, CLAIMED: 0,
+  } as Record<string, number>
+  for (const row of results) {
+    const key = String(row.status ?? '').toUpperCase()
+    normalized[key] = (normalized[key] ?? 0) + (Number(row.devices) || 0)
+  }
+  return {
+    pending: normalized['PENDING'] + normalized['RETRY'] + normalized['CLAIMED'] + normalized['HELD'],
+    delivered: normalized['SENT'] + normalized['DELIVERED'],
+    skipped: normalized['SKIPPED'],
+    failed: normalized['FAILED'] + normalized['INVALID'],
+    other: Math.max(0, Object.entries(normalized).reduce((sum, [key, value]) =>
+      ['PENDING', 'SENT', 'DELIVERED', 'SKIPPED', 'FAILED', 'RETRY', 'INVALID', 'HELD', 'CLAIMED'].includes(key) ? sum : sum + value, 0)),
+  }
+}
+
+export function getCampaign(id: string, cursor?: string): Promise<CampaignDetail> {
+  return get<CampaignRow & { deliveries?: unknown[]; results?: Array<{ status: string; devices: number }>; nextCursor?: string | null }>(`/v1/admin/push-campaigns/${id}${buildQuery({ cursor })}`).then((r) => ({
     ...mapCampaign(r),
+    counts: toCounts(r.results ?? []),
     deliveries: r.deliveries ?? [],
     nextCursor: r.nextCursor ?? null,
   }))

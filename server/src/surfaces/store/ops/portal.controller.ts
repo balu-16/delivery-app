@@ -130,7 +130,14 @@ export interface StoreDashboardView {
   workload: { staff: StoreStaffMember[]; breaches: SlaTask[] };
   upcomingTasks: Awaited<ReturnType<PickTasks['queue']>>['items'];
   alerts: { unreadNotifications: number };
-  store: { status: StoreDetailsView['status']; pauseReason: string | null; version: string };
+  store: {
+    status: StoreDetailsView['status'];
+    pauseReason: string | null;
+    version: string;
+    canPause: boolean;
+    canResume: boolean;
+    restrictionReason: StoreDetailsView['restrictionReason'];
+  };
 }
 
 /**
@@ -174,7 +181,14 @@ export class StoreOpsController {
       workload: { staff: staff.items, breaches: breaches.items },
       upcomingTasks: upcoming.items,
       alerts: { unreadNotifications: unread },
-      store: { status: store.status, pauseReason: store.pauseReason, version: store.version },
+      store: {
+        status: store.status,
+        pauseReason: store.pauseReason,
+        version: store.version,
+        canPause: store.canPause,
+        canResume: store.canResume,
+        restrictionReason: store.restrictionReason,
+      },
     };
   }
 

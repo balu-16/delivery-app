@@ -8,7 +8,7 @@ import { riderApi, type Application, type RiderStatus } from '../src/api';
 
 jest.mock('../src/api', () => ({
   ApiError: class ApiError extends Error {}, UploadError: class UploadError extends Error {},
-  riderApi:{onboardingStores:jest.fn(),status:jest.fn(),offers:jest.fn(),activeTasks:jest.fn(),history:jest.fn(),dashboard:jest.fn(),earnings:jest.fn(),cash:jest.fn(),notifications:jest.fn(),accept:jest.fn(),decline:jest.fn()},
+  riderApi:{application:jest.fn(),onboardingStores:jest.fn(),status:jest.fn(),offers:jest.fn(),activeTasks:jest.fn(),history:jest.fn(),dashboard:jest.fn(),earnings:jest.fn(),cash:jest.fn(),notifications:jest.fn(),accept:jest.fn(),decline:jest.fn()},
 }));
 jest.mock('../src/components/Brand', () => ({ Brand:() => null }));
 jest.mock('../src/actions', () => ({performAction:jest.fn()}));
@@ -20,7 +20,7 @@ jest.mock('../src/components/Ui', () => {
     PageTitle:({title}:{title:string}) => React.createElement(native.Text,null,title), IconBox:() => null, IconButton:() => null,
   };
 });
-jest.mock('../src/files', () => ({uploadDocument:jest.fn()}));
+jest.mock('../src/files', () => ({uploadDocument:jest.fn(),restoreDocumentUploads:jest.fn().mockResolvedValue([])}));
 jest.mock('../src/push', () => ({usePush:() => ({status:'unsupported',message:''}),startPush:() => () => {},enablePush:jest.fn(),unregisterPush:jest.fn()}));
 const realtimeCallbacks: { onChange?: (event?: string) => void } = {};
 jest.mock('../src/realtime', () => ({startRiderRealtime:(_onConnection:unknown, onChange:(event?:string)=>void) => { realtimeCallbacks.onChange = onChange; return () => {}; }}));
@@ -34,7 +34,7 @@ jest.mock('expo-linear-gradient', () => { const React=require('react'), {View}=r
 jest.mock('react-native-safe-area-context', () => ({useSafeAreaInsets:() => ({top:0,bottom:0})}));
 jest.mock('react-native/Libraries/Components/Switch/Switch', () => ({__esModule:true,default:'Switch'}));
 
-const application = {userId:'rider',status:'APPROVED',vehicleType:null,vehicleNo:null,homeStoreId:null,requiredDocuments:[],documents:[]} as Application;
+const application = {userId:'rider',status:'APPROVED',vehicleType:null,vehicleNo:null,homeStoreId:null,homeStore:null,requiredDocuments:[],documents:[]} as Application;
 const offline: RiderStatus = {status:{online:false,onBreak:false}} as RiderStatus;
 beforeEach(() => {
   jest.clearAllMocks();
@@ -70,21 +70,21 @@ test('pulling on the routes tab revalidates tasks without refetching earnings', 
   expect(jest.mocked(riderApi.activeTasks)).toHaveBeenCalledTimes(1);
   await act(async () => { await refreshControlProp().onRefresh?.(); });
   expect(jest.mocked(riderApi.activeTasks)).toHaveBeenCalledTimes(2);
-  expect(jest.mocked(riderApi.earnings)).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(riderApi.earnings)).not.toHaveBeenCalled();
   expect(refreshControlProp().refreshing).toBe(false);
 });
 
-test('a snapshot event refetches every resource', async () => {
+test('a snapshot event refetches operational resources and the Home dashboard', async () => {
   await render(<LivePartner identity={{subject:'rider',name:'Rider',email:'rider@example.invalid'}} application={application} onSignOut={async () => {}} onAuthorizationChange={async () => {}} />);
   await act(async () => { realtimeCallbacks.onChange?.('snapshot'); });
   expect(jest.mocked(riderApi.status)).toHaveBeenCalledTimes(2);
   expect(jest.mocked(riderApi.offers)).toHaveBeenCalledTimes(2);
   expect(jest.mocked(riderApi.activeTasks)).toHaveBeenCalledTimes(2);
-  expect(jest.mocked(riderApi.history)).toHaveBeenCalledTimes(2);
+  expect(jest.mocked(riderApi.history)).not.toHaveBeenCalled();
   expect(jest.mocked(riderApi.dashboard)).toHaveBeenCalledTimes(2);
-  expect(jest.mocked(riderApi.earnings)).toHaveBeenCalledTimes(2);
-  expect(jest.mocked(riderApi.cash)).toHaveBeenCalledTimes(2);
-  expect(jest.mocked(riderApi.notifications)).toHaveBeenCalledTimes(2);
+  expect(jest.mocked(riderApi.earnings)).not.toHaveBeenCalled();
+  expect(jest.mocked(riderApi.cash)).not.toHaveBeenCalled();
+  expect(jest.mocked(riderApi.notifications)).not.toHaveBeenCalled();
 });
 
 function offer(offerId: string, taskId: string) {
@@ -95,6 +95,8 @@ test('accepting an offer hydrates tasks only and opens the task page', async () 
   jest.mocked(riderApi.offers).mockResolvedValue({ items: [offer('off-1', 'task-1')] });
   jest.mocked(performAction).mockImplementation(async (_subject: string, _id: string, _action: string, run: (key: string) => Promise<unknown>) => run('key-1'));
   jest.mocked(riderApi.accept).mockResolvedValue(undefined);
+  const { router } = require('expo-router');
+  jest.mocked(router.push).mockClear();
   await render(<LivePartner identity={{subject:'rider',name:'Rider',email:'rider@example.invalid'}} application={application} onSignOut={async () => {}} onAuthorizationChange={async () => {}} />);
   let hydrate!: (page: Awaited<ReturnType<typeof riderApi.activeTasks>>) => void;
   jest.mocked(riderApi.activeTasks).mockImplementationOnce(() => new Promise(resolve => { hydrate = resolve; }));
@@ -102,12 +104,11 @@ test('accepting an offer hydrates tasks only and opens the task page', async () 
   expect(jest.mocked(riderApi.accept)).toHaveBeenCalledTimes(1);
   expect(jest.mocked(riderApi.offers)).toHaveBeenCalledTimes(2);
   expect(jest.mocked(riderApi.activeTasks)).toHaveBeenCalledTimes(2);
-  expect(jest.mocked(riderApi.earnings)).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(riderApi.earnings)).not.toHaveBeenCalled();
   expect(jest.mocked(riderApi.dashboard)).toHaveBeenCalledTimes(1);
-  expect(screen.getByLabelText('Loading delivery details')).toBeTruthy();
-  expect(screen.queryByText('Delivery unavailable')).toBeNull();
+  // Navigates to the assigned task via the expo-router route (plan3 section 5).
+  expect(jest.mocked(router.push)).toHaveBeenCalledWith({ pathname: '/tasks/[taskId]', params: { taskId: 'task-1' } });
   await act(async () => { hydrate({ items: [], nextCursor: null }); });
-  expect(screen.getByText('Delivery unavailable')).toBeTruthy();
 });
 
 test('offer locks are scoped per offer: another offer still proceeds, the same one waits', async () => {
@@ -128,8 +129,9 @@ test('offer locks are scoped per offer: another offer still proceeds, the same o
 
 test('application status pulls to reload without a Refresh status button', async () => {
   jest.mocked(riderApi.onboardingStores).mockResolvedValue([]);
-  const reload = jest.fn().mockResolvedValue(undefined);
-  await render(<ApplicationScreen application={{...application, status: 'PENDING', requiredDocuments: [], documents: []}} reload={reload} signOut={async () => {}} />);
+  jest.mocked(riderApi.application).mockResolvedValue(application);
+  const publish = jest.fn();
+  await render(<ApplicationScreen application={{...application, status: 'PENDING', requiredDocuments: [], documents: []}} onApplicationChange={publish} signOut={async () => {}} />);
   expect(screen.queryByText('Refresh status')).toBeNull();
   type Node = { props?: Record<string, unknown>; children?: Node[] };
   let element: Record<string, unknown> | undefined;
@@ -142,5 +144,6 @@ test('application status pulls to reload without a Refresh status button', async
   const control = (element?.props ?? {}) as Record<string, unknown>;
   expect(control.refreshing).toBe(false);
   await act(async () => { await (control.onRefresh as () => unknown)(); });
-  expect(reload).toHaveBeenCalledTimes(1);
+  expect(publish).toHaveBeenCalledTimes(1);
+  expect(riderApi.application).toHaveBeenCalledTimes(1);
 });

@@ -38,7 +38,8 @@ function approvalExecutorLabel(action: string): { label: string; hint: string } 
   if (a.includes('role')) return { label: 'Approve role change', hint: 'Grants or revokes the workforce role' }
   if (a.includes('erasure')) return { label: 'Approve erasure', hint: 'Starts the erasure workflow' }
   if (a.includes('order')) return { label: 'Execute order approval', hint: 'Runs the order approval (refund/repair)' }
-  if (a.includes('catalog') || a.includes('price') || a.includes('import')) return { label: 'Approve catalog change', hint: 'Applies the pending catalog change' }
+  if (a === 'catalog_import' || a === 'catalog_import_super') return { label: 'Approve catalog import', hint: 'Applies the pending CSV import via the import executor' }
+  if (a === 'catalog_price_change' || a === 'catalog_price_change_super') return { label: 'Approve catalog price change', hint: 'Applies the pending shared price via the price executor' }
   if (a.includes('ticket')) return { label: 'Execute ticket refund', hint: 'Executes the ticket refund approval' }
   return { label: 'Reject / resolve via review', hint: 'This action type is handled via review decisions' }
 }
@@ -122,7 +123,9 @@ export function Approvals() {
         peopleActions.approveRoleChange(a.id).mutate(undefined, { onError: (e) => setMessage(e.message) })
       } else if (action.includes('erasure')) {
         approvalActions.approveErasure(a.id).mutate(undefined, { onError: (e) => setMessage(e.message) })
-      } else if (action.includes('catalog')) {
+      } else if (action === 'catalog_import' || action === 'catalog_import_super') {
+        productActions.approveCatalogImport(a.id).mutate(undefined, { onError: (e) => setMessage(e.message) })
+      } else if (action === 'catalog_price_change' || action === 'catalog_price_change_super') {
         productActions.approveCatalogChange(a.id).mutate(undefined, { onError: (e) => setMessage(e.message) })
       } else {
         setMessage(`No direct executor for "${a.action}" — use the domain page for this change.`)
@@ -179,15 +182,19 @@ export function Approvals() {
                 {approvals.map((a) => {
                   const meta = approvalExecutorLabel(a.action)
                   const pendingA = a.status === 'pending'
-                  const isMaker = a.makerId && a.makerId.length > 0
+                  // Server capabilities are authoritative; the client falls
+                  // back to "pending" only when an older server omits them.
+                  const canApprove = a.canApprove ?? pendingA
+                  const canReject = a.canReject ?? pendingA
+                  const reason = a.cannotApproveReason ?? (pendingA ? undefined : `Already ${a.status}`)
                   return (
                     <ApprovalCard
                       key={a.id}
                       approval={{
                         id: a.id,
                         status: a.status,
-                        canApprove: pendingA,
-                        cannotApproveReason: pendingA ? undefined : `Already ${a.status}`,
+                        canApprove,
+                        cannotApproveReason: reason ?? undefined,
                       }}
                       onDecide={(id, decision) => {
                         if (decision === 'completed') execute(approvals.find((x) => x.id === id) ?? a)
@@ -210,21 +217,44 @@ export function Approvals() {
                         </dl>
                         {pendingA && (
                           <div className="flex justify-end gap-2 pt-1">
-                            <Tooltip content="Reject with a reason (audit-logged)">
-                              <span>
-                                <Button size="sm" variant="outline" className="text-destructive" onClick={() => setRejectTarget(a)}>
-                                  <XCircle className="h-3.5 w-3.5" /> Reject
-                                </Button>
-                              </span>
-                            </Tooltip>
-                            <Tooltip content={meta.hint}>
-                              <span>
-                                <Button size="sm" variant="primary" onClick={() => execute(a)}>
-                                  <CheckCircle2 className="h-3.5 w-3.5" /> {meta.label}
-                                </Button>
-                              </span>
-                            </Tooltip>
+                            {canReject ? (
+                              <Tooltip content="Reject with a reason (audit-logged)">
+                                <span>
+                                  <Button size="sm" variant="outline" className="text-destructive" onClick={() => setRejectTarget(a)}>
+                                    <XCircle className="h-3.5 w-3.5" /> Reject
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            ) : (
+                              <Tooltip content={reason ?? 'You cannot decide this item'}>
+                                <span className="cursor-not-allowed">
+                                  <Button size="sm" variant="outline" className="text-destructive" disabled>
+                                    <XCircle className="h-3.5 w-3.5" /> Reject
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            )}
+                            {canApprove ? (
+                              <Tooltip content={meta.hint}>
+                                <span>
+                                  <Button size="sm" variant="primary" onClick={() => execute(a)}>
+                                    <CheckCircle2 className="h-3.5 w-3.5" /> {meta.label}
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            ) : (
+                              <Tooltip content={reason ?? 'You cannot decide this item'}>
+                                <span className="cursor-not-allowed">
+                                  <Button size="sm" variant="primary" disabled>
+                                    <CheckCircle2 className="h-3.5 w-3.5" /> {meta.label}
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            )}
                           </div>
+                        )}
+                        {pendingA && !canApprove && !canReject && reason && (
+                          <p className="text-right text-[11px] font-medium text-muted-foreground">{reason}</p>
                         )}
                       </div>
                     </ApprovalCard>

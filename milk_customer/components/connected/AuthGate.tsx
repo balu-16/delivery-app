@@ -80,7 +80,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (stage === 'newPassword' && !newPassword) next.newPassword = 'Enter a new password.';
     if (stage === 'newPassword' && required.includes('phone_number') && !indianPhoneE164(phone)) next.phone = 'Enter a valid 10-digit Indian phone number.';
     if (['verify', 'reset'].includes(stage) && !code.trim()) next.code = 'Enter the code sent to your email.';
-    if (!withoutReferral && (stage === 'login' || stage === 'signup') && referral.trim() && !/^[A-F0-9]{16}$/i.test(referral.trim())) next.referral = 'Enter a valid 16-character referral code.';
+    if (!withoutReferral && (stage === 'login' || stage === 'signup') && referral.trim() && !/^(?:[A-F0-9]{16}|INV-[A-F0-9]{32})$/i.test(referral.trim())) next.referral = 'Enter a valid referral code.';
     setFields(next);
     if (Object.keys(next).length) return;
     setPending(true); setNotice(null); setSkipReferral(false);
@@ -176,7 +176,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               <Pressable onPress={() => setShowReferral(value => !value)} accessibilityRole="button" accessibilityLabel={showReferral ? 'Hide referral code' : 'Add referral code'} hitSlop={6}><AppText style={styles.link}>{showReferral ? 'Hide referral code' : 'Add referral code'}</AppText></Pressable>
               {stage === 'login' && <Pressable onPress={() => goTo('forgot')} accessibilityRole="button" accessibilityLabel="Forgot password?" hitSlop={6}><AppText style={styles.link}>Forgot password?</AppText></Pressable>}
             </View>}
-            {(stage === 'login' || stage === 'signup') && showReferral && <><View style={[styles.field, fields.referral && styles.invalid]}><Ionicons name="ticket-outline" size={20} color={colors.textSecondary} /><TextInput style={styles.inputText} value={referral} onChangeText={value => { setReferral(value); clear('referral'); }} placeholder="Referral code (optional)" autoCapitalize="characters" maxLength={16} accessibilityLabel="Referral code" /></View>{fieldError('referral')}</>}
+            {(stage === 'login' || stage === 'signup') && showReferral && <><View style={[styles.field, fields.referral && styles.invalid]}><Ionicons name="ticket-outline" size={20} color={colors.textSecondary} /><TextInput style={styles.inputText} value={referral} onChangeText={value => { setReferral(value); clear('referral'); }} placeholder="Referral code (optional)" autoCapitalize="characters" maxLength={36} accessibilityLabel="Referral code" /></View>{fieldError('referral')}</>}
             {(stage === 'verify' || stage === 'reset') && <><View style={[styles.field, fields.code && styles.invalid]}><Ionicons name="key-outline" size={20} color={colors.textSecondary} /><TextInput style={styles.inputText} value={code} onChangeText={value => { setCode(value); clear('code'); }} placeholder={stage === 'reset' ? 'Password reset code' : 'Email verification code'} keyboardType="number-pad" accessibilityLabel={stage === 'reset' ? 'Password reset code' : 'Verification code'} /></View>{fieldError('code')}</>}
             {notice && <View accessibilityLiveRegion="polite" style={[styles.notice, notice.error ? styles.errorNotice : styles.infoNotice]}><AppText style={[styles.body, notice.error && styles.errorText]}>{notice.text}</AppText></View>}
             <Button label={label} fullWidth onPress={() => void submit()} loading={pending} disabled={pending} style={styles.primaryBtn} />

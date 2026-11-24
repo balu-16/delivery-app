@@ -1,112 +1,202 @@
-import { useEffect, useRef, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ApiError, riderApi, UploadError, type Application, type OnboardingStore } from '../api';
+import { useRouter } from 'expo-router';
+import { ApiError, type Application } from '../api';
 import { Brand } from '../components/Brand';
-import { CardListSkeleton } from '../components/Skeleton';
 import { Button, Card, IconBox, PageTitle, Text } from '../components/Ui';
-import { uploadDocument } from '../files';
 import { useRefresh } from '../useRefresh';
 import { colors, fonts } from '../theme';
+import { useOnboardingState } from '../onboarding/useOnboardingState';
+import { StorePicker } from '../onboarding/StorePicker';
+import { VehicleForm } from '../onboarding/VehicleForm';
+import { DocumentRows } from '../onboarding/DocumentRows';
+import { clearStoreCache } from '../onboarding/storeCache';
+import type { HomeStore } from '../onboarding/onboardingTypes';
 
-const names: Record<string, string> = { licence: 'Driving licence', vehicle_rc: 'Vehicle registration', id_proof: 'Identity proof', bank_proof: 'Bank proof' };
-export function ApplicationScreen({ application, reload, signOut }: { application: Application; reload: () => Promise<void>; signOut: () => Promise<void> }) {
+const applicationStatusLabels = {
+  PENDING: 'Incomplete',
+  UNDER_REVIEW: 'Under review',
+  REJECTED: 'Changes requested',
+  SUSPENDED: 'Suspended',
+  APPROVED: 'Approved',
+} satisfies Record<Application['status'], string>;
+
+/**
+ * Rider onboarding application screen (plan.md §3).
+ *
+ * One account-scoped state holds the confirmed snapshot, per-section drafts
+ * and statuses, and one write queue. Store saves, vehicle saves, and document
+ * attachment commits enter the queue; picking, transfer, and reads stay
+ * outside it. A successful write applies the returned snapshot with zero
+ * follow-up GETs; a legacy void response reconciles via one scoped read.
+ */
+export function ApplicationScreen({ application, onApplicationChange, signOut, accountId }: {
+  application: Application;
+  onApplicationChange?: (application: Application) => void;
+  signOut: () => Promise<void>;
+  accountId?: string;
+}) {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [vehicle, setVehicle] = useState(application.vehicleType ?? '');
-  const [number, setNumber] = useState(application.vehicleNo ?? '');
-  const [busy, setBusy] = useState(false);
-  const busyRef = useRef(false);
+  const resolvedAccountId = accountId ?? application.userId;
+  const onboarding = useOnboardingState(resolvedAccountId, application, onApplicationChange);
+  const {
+    confirmed,
+    store,
+    vehicle,
+    documents,
+    refreshApplication,
+    saveStore,
+    setVehicleDraft,
+    markVehicleDirty,
+    saveVehicle,
+    retryVehicle,
+    setDocumentRow,
+    commitDocument,
+    confirmedStore,
+    displayedStore,
+  } = onboarding;
   const [error, setError] = useState('');
-  const [errorType, setErrorType] = useState<string | null>(null);
-  const [uploadingType, setUploadingType] = useState<string | null>(null);
-  const [stores, setStores] = useState<OnboardingStore[]>([]);
-  const [storeError, setStoreError] = useState('');
-  const [storesLoading, setStoresLoading] = useState(true);
-  const [storeRetry, setStoreRetry] = useState(0);
-  const editable = application.status === 'PENDING' || application.status === 'REJECTED';
-  const pull = useRefresh(() => reload());
-  useEffect(() => {
-    let active = true;
-    riderApi.onboardingStores().then((items) => { if (active) { setStores(items); setStoreError(''); } })
-      .catch(() => { if (active) setStoreError('Could not load stores. Please try again.'); })
-      .finally(() => { if (active) setStoresLoading(false); });
-    return () => { active = false; };
-  }, [storeRetry]);
-  async function perform(work: () => Promise<unknown>, documentType: string | null = null, refreshAfter = true) {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true); setError(''); setErrorType(null); setUploadingType(documentType);
-    try { await work(); if (refreshAfter) await reload(); }
-    catch (failure) {
-      setErrorType(documentType);
-      setError(failure instanceof ApiError || failure instanceof UploadError ? failure.message : 'Could not complete the request. Please try again.');
+  const [refreshError, setRefreshError] = useState('');
+  const [lastAttemptedStore, setLastAttemptedStore] = useState<HomeStore | null>(null);
+
+  // Pull-to-refresh the application while keeping the form, selection, and
+  // uploaded rows visible. Skeletons never clear already-loaded content.
+  const pull = useRefresh(async () => {
+    setRefreshError('');
+    try { await refreshApplication(); }
+    catch { setRefreshError('Couldn’t refresh your application. Pull to try again.'); }
+  });
+
+  const editable = confirmed.status === 'PENDING' || confirmed.status === 'REJECTED';
+  const helpAllowed = confirmed.status === 'PENDING' || confirmed.status === 'REJECTED' || confirmed.status === 'UNDER_REVIEW';
+
+  const handleSelectStore = useCallback((next: HomeStore) => {
+    setLastAttemptedStore(next);
+    saveStore(next);
+  }, [saveStore]);
+
+  const handleVehicleTypeChange = useCallback((value: string) => {
+    markVehicleDirty('vehicleType');
+    setVehicleDraft({ vehicleType: value });
+  }, [markVehicleDirty, setVehicleDraft]);
+
+  const handleVehicleNumberChange = useCallback((value: string) => {
+    markVehicleDirty('vehicleNo');
+    // Normalize registration letters to uppercase on the wire; the draft
+    // keeps what the rider typed until confirmation.
+    setVehicleDraft({ vehicleNo: value });
+  }, [markVehicleDirty, setVehicleDraft]);
+
+  const canSaveVehicle = vehicle.status !== 'saving' && onboarding.isVehicleDirty
+    && onboarding.isVehicleDraftValid(vehicle.draft)
+    && (!vehicle.error || onboarding.vehicleEditedAfterFailure);
+
+  const openHelp = useCallback((operation: string, reference?: string) => {
+    if (!helpAllowed) return;
+    const suffix = reference ? ` Reference: ${reference}.` : '';
+    router.push({ pathname: '/support/index', params: { category: 'ONBOARDING', onboarding: '1', prefill: `I need help with my partner application. Operation: ${operation}.${suffix}\nDetails: ` } } as never);
+  }, [helpAllowed, router]);
+
+  const handleSignOut = useCallback(async () => {
+    setError('');
+    try {
+      clearStoreCache(resolvedAccountId);
+      await signOut();
+    } catch (failure: unknown) {
+      setError(failure instanceof ApiError ? failure.message : 'Could not sign out. Please try again.');
     }
-    finally { busyRef.current = false; setBusy(false); setUploadingType(null); }
-  }
+  }, [resolvedAccountId, signOut]);
+
   return <View style={[styles.root, { paddingTop: insets.top }]}>
-    <View style={styles.header}><Brand /><Button label="Sign out" secondary compact onPress={() => {
-      setErrorType(null); setError('');
-      void signOut().catch((failure: unknown) => setError(failure instanceof ApiError ? failure.message : 'Could not sign out. Please try again.'));
-    }} /></View>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { flexGrow: 1, paddingBottom: insets.bottom + 30 }]}
-      refreshControl={<RefreshControl testID="application-pull-refresh" refreshing={pull.refreshing} onRefresh={() => { void pull.onRefresh(); }} tintColor={colors.greenDark} />}>
-      <PageTitle title={application.status === 'APPROVED' ? 'Application approved' : application.status === 'SUSPENDED' ? 'Account suspended' : 'Your partner application'}
-        subtitle={application.status === 'UNDER_REVIEW' ? 'Your documents are being reviewed. You can check back here for updates.'
-          : application.status === 'REJECTED' ? 'Please update the documents that need attention and resubmit them.'
-          : application.status === 'SUSPENDED' ? 'Contact support for help with your account.'
-          : 'Add your vehicle details and documents to get started.'} />
+    <View style={styles.header}><Brand /><View style={{ flexDirection: 'row', gap: 8 }}><Button label="Help" secondary compact onPress={() => router.push({ pathname: '/support/index', params: { onboarding: '1' } } as never)} /><Button label="Sign out" secondary compact onPress={() => { void handleSignOut(); }} /></View></View>
+    <ScrollView testID="application-scroll" keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { flexGrow: 1, paddingBottom: insets.bottom + 30 }]}
+      refreshControl={<RefreshControl refreshing={pull.refreshing} onRefresh={() => { void pull.onRefresh(); }} tintColor={colors.greenDark} />}>
+      <PageTitle title={confirmed.status === 'APPROVED' ? 'Application approved' : confirmed.status === 'SUSPENDED' ? 'Account suspended' : 'Your partner application'}
+        subtitle={confirmed.status === 'UNDER_REVIEW' ? 'Your application has been submitted. The decision will appear here.'
+          : confirmed.status === 'REJECTED' ? 'Review the requested changes. Saving the required updates sends your application back for review.'
+          : confirmed.status === 'SUSPENDED' ? 'Contact support for help with your account.'
+          : confirmed.status === 'APPROVED' ? undefined
+          : 'Choose a store, save your vehicle details, and upload the required documents. Your application is submitted when all three are complete.'} />
+      {refreshError ? <Text accessibilityRole="alert" style={styles.danger}>{refreshError}</Text> : null}
       <Card><View style={styles.row}><IconBox name="shield-checkmark-outline" /><View style={{ flex: 1 }}>
-        <Text style={styles.strong}>Application status</Text><Text style={styles.sub}>{application.status.replaceAll('_', ' ')}</Text>
+        <Text style={styles.strong}>Application status</Text><Text accessibilityLiveRegion="polite" style={styles.sub}>{applicationStatusLabels[confirmed.status]}</Text>
       </View></View></Card>
-      <Card><View style={styles.row}><IconBox name="storefront-outline" /><View style={{ flex: 1 }}>
-        <Text style={styles.strong}>Your store</Text>
-        <Text style={styles.sub}>A manager at this store will review your application.</Text>
-      </View></View>
-        {stores.map((store) => {
-          const selected = store.id === application.homeStoreId;
-          if (!editable && !selected) return null;
-          return <Pressable key={store.id} accessibilityRole="radio" accessibilityState={{ selected, disabled: busy || !editable }}
-            disabled={busy || !editable || selected} onPress={() => void perform(() => riderApi.selectOnboardingStore(store.id))}
-            style={[styles.storeChoice, selected && styles.storeSelected]}>
-            <View style={{ flex: 1 }}><Text style={styles.strong}>{store.name}</Text><Text style={styles.sub}>{store.city}</Text></View>
-            <Text style={styles.storeMarker}>{selected ? 'Selected' : 'Choose'}</Text>
-          </Pressable>;
-        })}
-        {storesLoading && !stores.length ? <CardListSkeleton label="Loading stores" count={2} /> : !storesLoading && !stores.length && !storeError ? <Text style={styles.sub}>No stores are available right now.</Text> : null}
-        {storeError ? <><Text accessibilityRole="alert" style={styles.danger}>{storeError}</Text>
-          <Button label="Try again" secondary compact onPress={() => { setStoresLoading(true); setStoreError(''); setStoreRetry((value) => value + 1); }} /></> : null}
-      </Card>
-      {editable && <Card><Text style={styles.strong}>Vehicle details</Text>
-        <Text style={styles.label}>Vehicle type</Text><TextInput accessibilityLabel="Vehicle type" value={vehicle} onChangeText={setVehicle} placeholder="Bike or scooter" placeholderTextColor={colors.muted} style={styles.input} />
-        <Text style={styles.label}>Registration number</Text><TextInput accessibilityLabel="Registration number" value={number} onChangeText={setNumber} autoCapitalize="characters" placeholder="Vehicle number" placeholderTextColor={colors.muted} style={styles.input} />
-        <Button label="Save vehicle" disabled={busy || !vehicle.trim() || !number.trim()} onPress={() => void perform(() => riderApi.profile(vehicle.trim(), number.trim()))} />
-      </Card>}
-      <Text style={styles.section}>Required documents</Text>
-      <Text style={styles.documentHint}>Choose a clear JPEG, PNG or PDF file, up to 5 MB each.</Text>
-      {application.requiredDocuments.map((type) => {
-        const document = application.documents.find((item) => item.type === type);
-        return <Card key={type}><View style={styles.row}><IconBox name="document-text-outline" /><View style={{ flex: 1 }}>
-          <Text style={styles.strong}>{names[type] ?? type.replaceAll('_', ' ')}</Text>
-          <Text style={styles.sub}>{document?.status === 'APPROVED' ? 'Approved' : document?.status === 'REJECTED' ? 'Needs a new document' : document ? 'Submitted' : 'Not uploaded'}</Text>
-          {document?.reason ? <Text style={styles.danger}>{document.reason}</Text> : null}
-        </View></View>
-        {editable && document?.status !== 'APPROVED' && <Button label={uploadingType === type ? 'Uploading…' : document ? 'Upload replacement' : 'Upload document'} secondary compact disabled={busy} onPress={() => void perform(() => uploadDocument(type), type)} />}
-        {error && errorType === type ? <Text accessibilityRole="alert" style={styles.danger}>{error}</Text> : null}
-        </Card>;
-      })}
-      {error && !errorType ? <Text accessibilityRole="alert" style={styles.danger}>{error}</Text> : null}
+
+      <StorePicker
+        key={`store:${resolvedAccountId}`}
+        accountId={resolvedAccountId}
+        confirmedStore={confirmedStore}
+        displayedStore={displayedStore}
+        saveStatus={store.status}
+        error={store.error}
+        editable={editable}
+        onSelect={handleSelectStore}
+        onRetrySelect={handleSelectStore}
+        lastAttemptedId={lastAttemptedStore?.id ?? null}
+      />
+      {helpAllowed && editable && (store.status === 'error' || store.status === 'unknown') ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="Get help with store selection" onPress={() => openHelp('select store', store.reference)}>
+          <Text style={styles.helpLink}>Get help</Text>
+        </Pressable>
+      ) : null}
+
+      {editable ? (
+        <>
+          <VehicleForm
+            vehicleType={vehicle.draft.vehicleType}
+            vehicleNo={vehicle.draft.vehicleNo}
+            saving={vehicle.status === 'saving'}
+            saved={vehicle.status === 'saved'}
+            error={vehicle.error}
+            canSave={canSaveVehicle}
+            onTypeChange={handleVehicleTypeChange}
+            onNumberChange={handleVehicleNumberChange}
+            onSave={saveVehicle}
+            onRetry={retryVehicle}
+          />
+          {helpAllowed && (vehicle.status === 'error' || vehicle.status === 'unknown') ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Get help with vehicle details" onPress={() => openHelp('save vehicle', vehicle.reference)}>
+              <Text style={styles.helpLink}>Get help</Text>
+            </Pressable>
+          ) : null}
+        </>
+      ) : confirmed.vehicleType || confirmed.vehicleNo ? (
+        <Card>
+          <Text style={styles.strong}>Vehicle details</Text>
+          <Text style={styles.sub}>{confirmed.vehicleType ?? ''}</Text>
+          <Text style={styles.sub}>{confirmed.vehicleNo ?? ''}</Text>
+        </Card>
+      ) : null}
+
+      <DocumentRows
+        key={`documents:${resolvedAccountId}`}
+        application={confirmed}
+        maxDocumentBytes={confirmed.maxDocumentBytes ?? 5 * 1024 * 1024}
+        editable={editable}
+        rowStates={documents}
+        onRowState={setDocumentRow}
+        onCommit={commitDocument}
+        accountId={resolvedAccountId}
+        onHelp={openHelp}
+      />
+
+      {helpAllowed ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="Get help with onboarding" onPress={() => openHelp('onboarding')}>
+          <Text style={styles.helpLink}>Get help</Text>
+        </Pressable>
+      ) : null}
+
+      {error ? <Text accessibilityRole="alert" style={styles.danger}>{error}</Text> : null}
     </ScrollView>
   </View>;
 }
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background }, header: { paddingHorizontal: 18, minHeight: 58, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   content: { padding: 18, maxWidth: 560, width: '100%', alignSelf: 'center' }, row: { flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 10 },
   strong: { fontFamily: fonts.semibold, fontSize: 14 }, sub: { fontSize: 11, color: colors.secondary, marginTop: 2 },
-  section: { fontSize: 16, fontFamily: fonts.semibold, marginVertical: 12 }, label: { fontSize: 11, color: colors.secondary, marginTop: 12 },
-  documentHint: { fontSize: 11, color: colors.secondary, marginBottom: 12, lineHeight: 18 },
-  input: { borderWidth: 1, borderColor: colors.lineStrong, backgroundColor: colors.backgroundTop, color: colors.text, paddingHorizontal: 12, minHeight: 48, borderRadius: 12, marginVertical: 7, fontFamily: fonts.regular },
   danger: { color: colors.danger, marginVertical: 8, fontSize: 12 },
-  storeChoice: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 12, padding: 12, marginTop: 8 },
-  storeSelected: { borderColor: colors.green, backgroundColor: colors.greenSoft },
-  storeMarker: { color: colors.greenDark, fontSize: 11, fontFamily: fonts.semibold },
+  helpLink: { color: colors.green, fontFamily: fonts.semibold, fontSize: 12, marginVertical: 8 },
 });

@@ -104,6 +104,9 @@ export async function getStoreDashboardSummary(storeId: string): Promise<StoreDa
     storeStatus: status.store.status === 'PAUSED' ? 'paused' : status.store.status === 'OFFLINE' ? 'offline' : 'online',
     storeName: status.store.name,
     storeCode: status.store.storeId.slice(-6),
+    storeCanPause: status.store.canPause ?? status.store.status === 'ONLINE',
+    storeCanResume: status.store.canResume ?? status.store.status === 'PAUSED',
+    storeRestrictionReason: status.store.restrictionReason ?? null,
     lowStock: lowStock.items.map((row) => ({ variantName: row.variantName ?? row.productName ?? row.variantId, qty: num(row.available), reorderLevel: num(row.reorderLevel) })),
     expiringStock: expiring.items.map((row) => ({ variantName: row.variantName ?? row.productName ?? row.variantId, qty: num(row.available), expiryDate: row.expiresAt, daysLeft: Math.max(0, Math.round((new Date(row.expiresAt).getTime() - now) / 86400000)) })),
     hourly: dash.board.hourly,
@@ -190,6 +193,16 @@ export interface StockRow {
   onHand: number
   available: number
 }
+/** Server approval threshold for manual adjustments (authoritative at submit). */
+export async function getInventoryApprovalUnits(storeId: string): Promise<number> {
+  const page = await apiGet<{ inventoryAdjustmentApprovalUnits?: number }>(
+    `/v1/store/inventory/batches?storeId=${storeId}&limit=1`,
+  )
+  const threshold = page.inventoryAdjustmentApprovalUnits
+  if (threshold === undefined || threshold === null) throw new Error('Approval threshold missing')
+  return threshold
+}
+
 export async function listStoreStock(storeId: string, filters: { search?: string; status?: string } = {}): Promise<StockRow[]> {
   const rows = await collect<BackendBatchRow>((cursor) =>
     apiGet<Page<BackendBatchRow>>(`/v1/store/inventory/batches?storeId=${storeId}${filters.search ? `&search=${encodeURIComponent(filters.search)}` : ''}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}&limit=100`))

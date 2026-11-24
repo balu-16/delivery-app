@@ -3,7 +3,7 @@ import type { CursorPage, ExportJob, ReportKind, ReportPreviewRow } from '@/type
 
 // ── Reports: previews per kind + server-side exports (no client-side files) ──
 
-export const REPORT_KINDS: ReportKind[] = ['catalog', 'stock', 'financial', 'picking', 'rider', 'subscription', 'support']
+export const REPORT_KINDS: ReportKind[] = ['catalog', 'stock', 'financial', 'picking', 'rider', 'support']
 
 // Snapshot kinds describe current state — the backend rejects date windows for
 // them (report-data.ts). Only flow kinds accept from/to.

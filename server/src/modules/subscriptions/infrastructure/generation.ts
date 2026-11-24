@@ -7,6 +7,7 @@ import {
   type TransactionContext,
 } from '../../../platform/database/database.js';
 import { lockActiveCustomer } from '../../identity/contracts/account-lock.js';
+import { subscriptionsRetired } from '../retirement.js';
 import type { CheckoutOperations } from '../../checkout/contracts/checkout.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import { addDays, nextOccurrence, type FrequencyRule } from '../domain/schedule.js';
@@ -54,8 +55,68 @@ export class SubscriptionGeneration {
     private readonly checkout: CheckoutOperations,
     private readonly config: AppConfig,
   ) {}
+  /**
+   * Retirement reconciliation: leftover PENDING/RETRYABLE occurrences drain to
+   * SKIPPED with a deterministic reason, claims clear, and live runs complete,
+   * each batch leaving one audit row. Never creates orders, reserves stock or
+   * debits a wallet. Already-placed ORDERED occurrences stay untouched.
+   */
+  private async reconcileRetired(limit: number, storeId?: string): Promise<number> {
+    const batch = Math.max(1, Math.min(Math.floor(limit) || 1, 500));
+    return transactionWithRetry(this.db, async (tx) => {
+      const retired = await sql<{
+        id: string;
+      }>`UPDATE subscription_occurrences SET state='SKIPPED',reason='SUBSCRIPTIONS_RETIRED',updated_at=clock_timestamp() WHERE id IN (SELECT o.id FROM subscription_occurrences o JOIN subscriptions s ON s.id=o.subscription_id WHERE o.state IN ('PENDING','RETRYABLE') AND (${storeId ?? null}::uuid IS NULL OR s.store_id=${storeId ?? null}::uuid) ORDER BY o.id LIMIT ${batch}) RETURNING id`.execute(
+        tx,
+      );
+      if (retired.rows.length) {
+        await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,NULL,'SUBSCRIPTIONS_RETIRED','subscription',${storeId ?? 'all'},${JSON.stringify({ count: retired.rows.length, reason: 'SUBSCRIPTIONS_RETIRED' })}::jsonb)`.execute(
+          tx,
+        );
+      }
+      await sql`UPDATE subscriptions SET generation_claim_token=NULL,generation_claim_until=NULL WHERE generation_claim_until IS NOT NULL AND (${storeId ?? null}::uuid IS NULL OR store_id=${storeId ?? null}::uuid)`.execute(
+        tx,
+      );
+      await sql`UPDATE subscription_generation_runs SET status='COMPLETE',updated_at=clock_timestamp() WHERE status IN ('PENDING','RUNNING','INCOMPLETE') AND (${storeId ?? null}::uuid IS NULL OR store_id=${storeId ?? null}::uuid)`.execute(
+        tx,
+      );
+      return retired.rows.length;
+    });
+  }
+  /** Deterministic retired outcome for one leftover queued job. */
+  private async retireOccurrence(due: Due): Promise<void> {
+    await transactionWithRetry(this.db, async (tx) => {
+      const sub =
+        await sql`SELECT id FROM subscriptions WHERE id=${due.id}::uuid FOR UPDATE`.execute(tx);
+      if (!sub.rows.length) return;
+      await sql`INSERT INTO subscription_occurrences(id,subscription_id,delivery_date) VALUES(${uuidV7()}::uuid,${due.id}::uuid,${due.delivery_date}::date) ON CONFLICT(subscription_id,delivery_date) DO NOTHING`.execute(
+        tx,
+      );
+      const retired = await sql<{
+        id: string;
+      }>`UPDATE subscription_occurrences SET state='SKIPPED',reason='SUBSCRIPTIONS_RETIRED',updated_at=clock_timestamp() WHERE subscription_id=${due.id}::uuid AND delivery_date=${due.delivery_date}::date AND state IN ('PENDING','RETRYABLE') RETURNING id`.execute(
+        tx,
+      );
+      if (retired.rows.length) {
+        await sql`INSERT INTO audit_log(id,actor_id,action,subject_type,subject_id,details) VALUES(${uuidV7()}::uuid,NULL,'SUBSCRIPTIONS_RETIRED','subscription',${due.id},${JSON.stringify({ deliveryDate: due.delivery_date, reason: 'SUBSCRIPTIONS_RETIRED' })}::jsonb)`.execute(
+          tx,
+        );
+      }
+      if (due.claim_token) {
+        await sql`UPDATE subscriptions SET generation_claim_token=NULL,generation_claim_until=NULL WHERE id=${due.id}::uuid AND generation_claim_token=${due.claim_token}::uuid`.execute(
+          tx,
+        );
+      }
+    });
+  }
   async scan(limit = 100, storeId?: string): Promise<number> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 10000) throw new Error('INVALID_INPUT');
+    // Retirement fences both enqueue and execution: no new order is created;
+    // leftover work drains through reconcileRetired instead.
+    if (subscriptionsRetired()) {
+      await this.reconcileRetired(limit, storeId);
+      return 0;
+    }
     await this.pauseDisabledAccounts(limit);
     const time = await this.config.get('subscriptionGenerationTime');
     let total = 0;
@@ -110,6 +171,10 @@ export class SubscriptionGeneration {
       perStoreLimit > 10000
     )
       throw new Error('INVALID_INPUT');
+    if (subscriptionsRetired()) {
+      await this.reconcileRetired(perStoreLimit * storeLimit);
+      return 0;
+    }
     await this.pauseDisabledAccounts(perStoreLimit);
     const generationTime = await this.config.get('subscriptionGenerationTime');
     const stores = await sql<{
@@ -208,6 +273,8 @@ export class SubscriptionGeneration {
     );
   }
   async forecast(limit = 100) {
+    // Retirement retires forecast alerts; no recurring notices are created.
+    if (subscriptionsRetired()) return;
     const candidates =
       await sql<Due>`SELECT s.id::text,s.user_id::text,s.store_id::text,s.next_delivery_date::text AS delivery_date FROM subscriptions s WHERE s.status='ACTIVE' AND s.next_delivery_date BETWEEN (clock_timestamp() AT TIME ZONE 'Asia/Kolkata')::date AND (clock_timestamp() AT TIME ZONE 'Asia/Kolkata')::date+2 AND (s.forecast_checked_at IS NULL OR s.forecast_checked_at < clock_timestamp() - interval '1 hour') AND NOT EXISTS(SELECT 1 FROM subscription_alerts a WHERE a.subscription_id=s.id AND a.delivery_date=s.next_delivery_date AND a.kind='LOW_BALANCE') ORDER BY s.forecast_checked_at NULLS FIRST,s.next_delivery_date,s.id LIMIT ${limit}`.execute(
         this.db,
@@ -276,6 +343,12 @@ export class SubscriptionGeneration {
     return result.rows[0];
   }
   private async process(due: Due): Promise<void> {
+    // Retirement fences execution at the transactional order-creation point:
+    // leftover jobs never reach checkout.placeScheduled.
+    if (subscriptionsRetired()) {
+      await this.retireOccurrence(due);
+      return;
+    }
     try {
       await transactionWithRetry(this.db, async (tx) => {
         const s = await this.locked(tx, due);

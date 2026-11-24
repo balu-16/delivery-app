@@ -15,6 +15,8 @@ let world: P5World;
 let app: Awaited<ReturnType<typeof createApplication>>;
 let carts: CartService;
 let checkout: CheckoutOperations;
+// Remote Aurora fixtures migrate slower than local containers.
+const HOOK_TIMEOUT = process.env.AWS_P13_INTEGRATION === 'yes' ? 300000 : 120000;
 beforeAll(async () => {
   world = await createP5World();
   for (const [key, value] of [
@@ -28,6 +30,10 @@ beforeAll(async () => {
     await sql`INSERT INTO app_config(key,value) VALUES(${key},${JSON.stringify(value)}::jsonb)`.execute(
       world.db.db,
     );
+  // GATEWAY placement requires the online-payments flag; these tests exercise
+  // rollback and idempotency behavior, not the payment gate.
+  await sql`INSERT INTO feature_flags(key,enabled) VALUES ('online_payments_enabled',true)
+    ON CONFLICT(key) DO UPDATE SET enabled=true`.execute(world.db.db);
   const env = readEnv({
     NODE_ENV: 'test',
     APP_ROLE: 'all',
@@ -38,11 +44,11 @@ beforeAll(async () => {
   app = await createApplication(env, [{ name: 'test', async check() {} }]);
   carts = app.get<CartService>(CART_SERVICE);
   checkout = app.get<CheckoutOperations>(CHECKOUT);
-}, 120000);
+}, HOOK_TIMEOUT);
 afterAll(async () => {
   await app?.close();
   await closeP5World(world);
-}, 120000);
+}, HOOK_TIMEOUT);
 beforeEach(async () => {
   const existing = await carts.get(world.customer);
   if (existing) await carts.deleteCart(world.customer, { expectedVersion: existing.version });

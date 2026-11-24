@@ -91,6 +91,13 @@ export interface InventoryBatchItem {
 export interface InventoryBatchPage {
   items: InventoryBatchItem[];
   nextCursor: string | null;
+  /**
+   * Server-side approval threshold (`inventoryAdjustmentApprovalUnits`):
+   * absolute deltas up to and including this value apply immediately, larger
+   * ones wait for admin approval. The server re-reads it at submit time, so
+   * this value explains the rule without being the submit authority.
+   */
+  inventoryAdjustmentApprovalUnits: number;
 }
 
 /** Same row shape as InventoryManagement.list, unpaginated with a hard cap. */

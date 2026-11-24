@@ -71,7 +71,41 @@ export type CheckoutPlacementStatus =
       state: 'ORDER_FOUND';
       order: Pick<OrderView, 'orderId' | 'orderNumber' | 'status' | 'paymentStatus'>;
     }
+  | { state: 'REJECTED'; code: string }
   | { state: 'PROCESSING' | 'UNKNOWN' };
+
+/**
+ * Placement failures that are terminal for the exact request body: retrying
+ * the same quote and intent can never succeed (expired/consumed quote, frozen
+ * commercial mismatch, unsatisfiable policy). Mirrors the client's
+ * isDefinitivePlacementError. The fence additionally resolves same-user
+ * intent orders before recording, so cross-key commits recover instead of
+ * recording. Everything else (lease loss, timeouts, 5xx, gateway ambiguity,
+ * ONLINE_PAYMENTS_NOT_READY, RESOURCE_CONFLICT) stays unknown so the
+ * original key keeps retrying safely.
+ */
+const DEFINITIVE_PLACEMENT_ERRORS = new Set([
+  'COD_NOT_ELIGIBLE',
+  'COD_LIMIT_EXCEEDED',
+  'PRICE_CHANGED',
+  'QUOTE_EXPIRED',
+  'QUOTE_CONSUMED',
+  'CART_INTENT_CONSUMED',
+  'CONCURRENT_MODIFICATION',
+  'INVENTORY_INSUFFICIENT',
+  'ITEM_UNAVAILABLE',
+  'ADDRESS_NOT_SERVICEABLE',
+  'ADDRESS_LOCATION_REQUIRED',
+  'CART_NOT_FOUND',
+  'WALLET_INSUFFICIENT',
+  'WALLET_DISABLED',
+  'COUPON_INVALID',
+  'MIN_ORDER_NOT_MET',
+  'MAX_ORDER_EXCEEDED',
+]);
+export function isDefinitivePlacementError(error: unknown): boolean {
+  return error instanceof Error && DEFINITIVE_PLACEMENT_ERRORS.has(error.message);
+}
 
 /** Internal callers may fence and record an approval in the placement transaction. */
 export interface CheckoutPlacementGuard {
@@ -115,6 +149,20 @@ export interface CheckoutOperations {
   placementStatus(userId: string, key: string): Promise<CheckoutPlacementStatus>;
   /** Read an already committed order without placing it or initializing payment. */
   recoverCommitted(userId: string, operationId: string): Promise<CheckoutPlaceResult | null>;
+  /**
+   * Settle a placement whose business transaction failed: recover the
+   * committed order when one exists (own operation, or own intent for
+   * consumed intents), otherwise record a proven terminal rejection for
+   * definitive failures. Returns the recovered result, or null when the
+   * caller must rethrow the original error (recorded rejections surface
+   * through it and through status checks).
+   */
+  settleFailedPlacement(
+    userId: string,
+    owner: IdempotencyOwner,
+    input: Pick<CheckoutPlaceRequest, 'intentId'>,
+    error: unknown,
+  ): Promise<CheckoutPlaceResult | null>;
   /**
    * Consumes the cart intent and places the order in ONE transaction:
    * capacity/coupon/stock/wallet obligations, frozen order + history +

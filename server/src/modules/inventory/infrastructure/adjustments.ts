@@ -43,14 +43,16 @@ export class PostgresAdjustments implements InventoryAdjustments, InventoryAdmin
   ) {
     this.approvals = factory.create({
       INVENTORY_COUNT: {
-        version: 1,
+        version: 2,
         makerRole: 'STORE_MANAGER',
-        checkerRole: 'STORE_MANAGER',
+        checkerRole: 'SUPER_ADMIN',
         ttlSeconds: 86400,
         validate: validPayload,
         execute: async (tx, payload, _execution, checker) => {
           if (!validPayload(payload)) throw new Error('INVALID_APPROVAL');
           const input = payload as unknown as CountInput & { maker: string };
+          // The maker must hold a current assignment at the affected store;
+          // the checker is an active SUPER_ADMIN, independent of assignment.
           if (
             !(await this.identity.hasStoreRole(
               input.maker,
@@ -58,7 +60,7 @@ export class PostgresAdjustments implements InventoryAdjustments, InventoryAdmin
               ['STORE_MANAGER'],
               tx,
             )) ||
-            !(await this.identity.hasStoreRole(checker, input.storeId, ['STORE_MANAGER'], tx))
+            !(await this.identity.hasRole(checker, ['SUPER_ADMIN'], tx))
           )
             throw new Error('FORBIDDEN');
           await this.apply(tx, input.maker, input, checker);
@@ -156,9 +158,7 @@ export class PostgresAdjustments implements InventoryAdjustments, InventoryAdmin
         tx,
       );
       if (!row.rows[0] || !validPayload(row.rows[0].payload)) throw new Error('APPROVAL_INVALID');
-      const payload = row.rows[0].payload;
-      if (!(await this.identity.hasStoreRole(actor, payload.storeId!, ['STORE_MANAGER'], tx)))
-        throw new Error('FORBIDDEN');
+      if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const claim =
         await sql`INSERT INTO inventory_approval_keys(actor_id,reference,approval_id) VALUES(${actor}::uuid,${reference},${id}::uuid) ON CONFLICT DO NOTHING RETURNING approval_id`.execute(
           tx,
@@ -204,19 +204,17 @@ export class PostgresAdjustments implements InventoryAdjustments, InventoryAdmin
       WHERE b.store_id=${storeId}::uuid AND (${cursor ?? null}::uuid IS NULL OR b.id>${cursor ?? null}::uuid) ORDER BY b.id LIMIT 101`.execute(
       this.db,
     );
-    const items = rows.rows
-      .slice(0, 100)
-      .map((row) => ({
-        batchId: row.batch_id,
-        variantId: row.variant_id,
-        productName: row.product_name,
-        variantName: row.variant_name,
-        batchCode: row.batch_code,
-        state: row.state,
-        onHand: row.on_hand,
-        reserved: row.reserved,
-        version: row.version,
-      }));
+    const items = rows.rows.slice(0, 100).map((row) => ({
+      batchId: row.batch_id,
+      variantId: row.variant_id,
+      productName: row.product_name,
+      variantName: row.variant_name,
+      batchCode: row.batch_code,
+      state: row.state,
+      onHand: row.on_hand,
+      reserved: row.reserved,
+      version: row.version,
+    }));
     return { items, nextCursor: rows.rows.length > 100 ? (items.at(-1)?.batchId ?? null) : null };
   }
   async correct(actorId: string, input: CountInput): Promise<void> {

@@ -16,13 +16,15 @@ export class QuietHoursSettings {
   }
 }
 
-/** Loads template rows for rendering (small table; read per send batch). */
+/** Loads template rows for rendering (small table; read per send batch).
+ * Versioned overrides (customize2 §3E) win over notification_templates
+ * defaults; defaults are retained for keys without an override. */
 export async function loadTemplates(
   client: Database | TransactionContext,
   keys: readonly string[],
 ): Promise<TemplateRow[]> {
   if (!keys.length) return [];
-  const rows = await sql<{
+  const defaults = await sql<{
     template_key: string;
     locale: string;
     channel: string;
@@ -31,11 +33,33 @@ export async function loadTemplates(
   }>`SELECT template_key,locale,channel,subject,body FROM notification_templates WHERE template_key = ANY(${keys}::text[])`.execute(
     client,
   );
-  return rows.rows.map((row) => ({
-    templateKey: row.template_key,
-    locale: row.locale as TemplateRow['locale'],
-    channel: row.channel,
-    subject: row.subject,
-    body: row.body,
-  }));
+  const overrides = await sql<{
+    template_key: string;
+    locale: string;
+    channel: string;
+    subject: string;
+    body: string;
+  }>`SELECT template_key,locale,channel,subject,body FROM notification_template_overrides WHERE template_key = ANY(${keys}::text[])`.execute(
+    client,
+  );
+  const byKey = new Map<string, TemplateRow>();
+  for (const row of defaults.rows) {
+    byKey.set(`${row.template_key}|${row.locale}|${row.channel}`, {
+      templateKey: row.template_key,
+      locale: row.locale as TemplateRow['locale'],
+      channel: row.channel,
+      subject: row.subject,
+      body: row.body,
+    });
+  }
+  for (const row of overrides.rows) {
+    byKey.set(`${row.template_key}|${row.locale}|${row.channel}`, {
+      templateKey: row.template_key,
+      locale: row.locale as TemplateRow['locale'],
+      channel: row.channel,
+      subject: row.subject,
+      body: row.body,
+    });
+  }
+  return [...byKey.values()];
 }

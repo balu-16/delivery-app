@@ -5,10 +5,10 @@ import type { FeatureFlags } from '@/types'
 
 /**
  * Feature flags come from the server config snapshot (GET /v1/admin/config →
- * flags.cod_enabled / wallet_enabled / subscriptions_enabled). Unknown flags
+ * flags.cod_enabled / wallet_enabled). Unknown flags
  * are not presented as enabled while the server state is unavailable.
  */
-const DEFAULT_FLAGS: FeatureFlags = { cod: false, wallets: false, subscriptions: false }
+const DEFAULT_FLAGS: FeatureFlags = { cod: false, wallets: false }
 
 export function useFeatureFlags(): FeatureFlags {
   const scope = useScope()
@@ -23,10 +23,9 @@ export function useFeatureFlags(): FeatureFlags {
   return {
     cod: f.cod_enabled === true,
     wallets: f.wallet_enabled === true,
-    subscriptions: f.subscriptions_enabled === true,
   }
 }
 
-export function useFeature(flag: 'cod' | 'wallets' | 'subscriptions'): boolean {
+export function useFeature(flag: 'cod' | 'wallets'): boolean {
   return useFeatureFlags()[flag]
 }

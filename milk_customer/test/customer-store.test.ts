@@ -10,8 +10,8 @@ jest.mock('@react-native-async-storage/async-storage', () => require('@react-nat
 jest.mock('expo-crypto', () => ({randomUUID: jest.fn(() => 'checkout-key'), CryptoDigestAlgorithm:{SHA256:'SHA256'}, digestStringAsync:jest.fn(async (_algorithm:string, value:string) => `hash:${value}`)}));
 jest.mock('../src/auth/session', () => ({accessToken: jest.fn(async () => 'token'), restoreSession: jest.fn(async () => true), signOut: jest.fn(async () => {})}));
 jest.mock('../src/api/customer', () => ({
-  customerApi: {profile:jest.fn(), addresses:jest.fn(), cart:jest.fn(), catalog:jest.fn(), favorites:jest.fn(), setFavorite:jest.fn(), putItem:jest.fn(), quote:jest.fn(), place:jest.fn(), serviceability:jest.fn(), deliverySettings:jest.fn(), createAddress:jest.fn(), createPendingAddress:jest.fn(), confirmAddressLocation:jest.fn(), selectDefaultAddress:jest.fn()},
-  customerDetailsApi: {orders:jest.fn(), subscriptions:jest.fn(), ledger:jest.fn(), notifications:jest.fn(), createSubscription:jest.fn(), subscriptionAction:jest.fn()},
+  customerApi: {profile:jest.fn(), addresses:jest.fn(), cart:jest.fn(), catalog:jest.fn(), favorites:jest.fn(), setFavorite:jest.fn(), putItem:jest.fn(), quote:jest.fn(), place:jest.fn(), placementStatus:jest.fn(), serviceability:jest.fn(), deliverySettings:jest.fn(), createAddress:jest.fn(), createPendingAddress:jest.fn(), confirmAddressLocation:jest.fn(), selectDefaultAddress:jest.fn()},
+  customerDetailsApi: {orders:jest.fn(), ledger:jest.fn(), notifications:jest.fn()},
 }));
 const api = jest.mocked(customerApi);
 const profile = {userId:'user-1', name:'Customer', email:'test@example.invalid', locale:null};
@@ -24,7 +24,7 @@ beforeEach(async () => {
   api.deliverySettings.mockResolvedValue({locationRequired:false});
   api.serviceability.mockResolvedValue({serviceable:true,storeId:'store',zone:{zoneId:'zone',zoneVersion:'1',cityZoneVersion:'1',storeId:'store'},etaRange:null,reasons:[]});
   api.favorites.mockResolvedValue({items:[],nextCursor:null});
-  useCustomer.setState({status:'signedIn', profile, selectedAddress:'address', locationRequired:false, cart, quote, pendingPlacement:null, pendingSubscription:null, pendingSubscriptionAction:null, error:null, busy:false});
+  useCustomer.setState({status:'signedIn', profile, selectedAddress:'address', locationRequired:false, cart, quote, pendingPlacement:null, error:null, busy:false});
 });
 test('persists and reuses the same checkout request after an ambiguous failure', async () => {
   api.place.mockRejectedValueOnce(new TypeError('network')).mockResolvedValueOnce({order:{orderId:'order',status:'CONFIRMED',paymentStatus:'COD_PENDING'},confirmation:'CONFIRMED',payment:null});
@@ -73,6 +73,27 @@ test('a wallet balance change releases the rejected checkout for a fresh quote',
   expect(useCustomer.getState().pendingPlacement).toBeNull();
   expect(useCustomer.getState().checkoutError).toMatch(/wallet availability changed/);
 });
+test('a consumed checkout releases immediately with My Dairy guidance', async () => {
+  api.place.mockRejectedValue(new ApiError(409, 'QUOTE_CONSUMED'));
+  expect(await useCustomer.getState().placeOrder()).toBe(false);
+  expect(useCustomer.getState().pendingPlacement).toBeNull();
+  expect(useCustomer.getState().checkoutError).toBe('This checkout was already used. Check My Dairy for your order.');
+});
+test('a proven rejection from status check releases the saved key and quote', async () => {
+  const pending = {userId:'user-1',key:'same-key',body:{quoteId:'quote',intentId:'intent',method:'COD' as const}};
+  await AsyncStorage.setItem('@dairydirect/pending-checkout-v1:user-1', JSON.stringify(pending));
+  useCustomer.setState({pendingPlacement:pending, checkoutPhase:'uncertain'});
+  api.placementStatus.mockResolvedValueOnce({state:'REJECTED', code:'QUOTE_EXPIRED'});
+  jest.mocked(customerDetailsApi.orders).mockResolvedValueOnce({items:[],nextCursor:null});
+  await useCustomer.getState().checkPendingPlacement();
+  expect(api.placementStatus).toHaveBeenCalledWith('token', 'same-key');
+  expect(useCustomer.getState().pendingPlacement).toBeNull();
+  expect(useCustomer.getState().quote).toBeNull();
+  expect(useCustomer.getState().checkoutPhase).toBe('idle');
+  expect(useCustomer.getState().checkoutError).toBe('Your order summary expired. Review it again.');
+  expect(await AsyncStorage.getItem('@dairydirect/pending-checkout-v1:user-1')).toBeNull();
+  expect(api.place).not.toHaveBeenCalled();
+});
 test('allows editing a cart even when the selected address has changed', async () => {
   await useCustomer.getState().load();
   useCustomer.setState({selectedAddress:'another-address'});
@@ -101,6 +122,43 @@ test('updates the quantity immediately while the server request is still pending
   await pending;
   expect(useCustomer.getState().cartBusy).toBe(false);
   expect(useCustomer.getState().cart?.lines[0].quantity).toBe('2');
+});
+test('undo removes a never-sent tap without contacting the server', async () => {
+  await useCustomer.getState().load();
+  const pending=useCustomer.getState().updateCart('variant',1);
+  expect(useCustomer.getState().cart?.lines[0].quantity).toBe('2');
+  expect(useCustomer.getState().undoVariantIds).toEqual(['variant']);
+  await useCustomer.getState().undoCart('variant');
+  await pending;
+  expect(api.putItem).not.toHaveBeenCalled();
+  expect(useCustomer.getState().cart?.lines[0].quantity).toBe('1');
+  expect(useCustomer.getState().undoVariantIds).toEqual([]);
+  expect(useCustomer.getState().cartBusy).toBe(false);
+  expect(useCustomer.getState().quote).toBeNull();
+});
+test('undo leaves an in-flight request alone', async () => {
+  await useCustomer.getState().load();
+  let finish!: (value:{cart:typeof cart;clamped:boolean}) => void;
+  api.putItem.mockImplementationOnce(() => new Promise(resolve => {finish=resolve;}));
+  const pending=useCustomer.getState().updateCart('variant',1);
+  for (let n=0;n<30 && api.putItem.mock.calls.length<1;n++) await new Promise(resolve => setTimeout(resolve,0));
+  expect(api.putItem).toHaveBeenCalledTimes(1);
+  expect(useCustomer.getState().undoVariantIds).toEqual([]);
+  await useCustomer.getState().undoCart('variant');
+  expect(useCustomer.getState().cart?.lines[0].quantity).toBe('2');
+  finish({cart:{...cart,version:3,lines:[{...cart.lines[0],quantity:'2',lineSubtotalPaise:'2000'}]},clamped:false});
+  await pending;
+  expect(api.putItem).toHaveBeenCalledTimes(1);
+  expect(useCustomer.getState().cart?.lines[0].quantity).toBe('2');
+});
+test('undo while confirming an order keeps the saved request untouched', async () => {
+  await useCustomer.getState().load();
+  const pending=useCustomer.getState().updateCart('variant',1);
+  useCustomer.setState({pendingPlacement:{userId:'user-1',key:'same-key',body:{quoteId:'quote',intentId:'intent',method:'COD'}}});
+  await useCustomer.getState().undoCart('variant');
+  await pending;
+  expect(useCustomer.getState().checkoutError).toBe('Please wait while we confirm your order.');
+  expect(api.putItem).toHaveBeenCalledTimes(1);
 });
 test('rapid taps stay visible and are serialized with the current server version', async () => {
   const now = jest.spyOn(Date,'now').mockReturnValue(1000);
@@ -185,28 +243,13 @@ test('blocks cart edits while an order outcome is uncertain', async () => {
   await useCustomer.getState().updateCart('variant', 1);
   expect(api.putItem).not.toHaveBeenCalled();
 });
-test('recovers a subscription creation with the original idempotency key', async () => {
-  const create = jest.mocked(customerDetailsApi.createSubscription);
-  create.mockRejectedValueOnce(new TypeError('network')).mockResolvedValueOnce({id:'subscription', nextDeliveryDate:'2099-01-02', effectiveFrom:'2099-01-01'});
-  const body = {variantId:'variant',quantity:'1',frequencyRule:{type:'DAILY' as const},startDate:'2099-01-01',slotId:'slot',addressId:'address'};
-  expect(await useCustomer.getState().createSubscription(body)).toBe(false);
-  const first = create.mock.calls[0];
+// Subscription retirement (§7): pending-subscription keys are cleared on upgrade, not restored.
+test('obsolete subscription keys are cleared on load while checkout keys are preserved', async () => {
+  await AsyncStorage.setItem('@dairydirect/pending-subscription-v1:user-1', JSON.stringify({ userId: 'user-1', key: 'sub-key', body: {} }));
+  await AsyncStorage.setItem('@dairydirect/pending-checkout-v1:user-1', JSON.stringify({ userId: 'user-1', key: 'checkout-key', body: { quoteId: 'q', intentId: 'i', method: 'COD' } }));
   await useCustomer.getState().load();
-  expect(useCustomer.getState().pendingSubscription?.key).toBe('checkout-key');
-  expect(await useCustomer.getState().createSubscription()).toBe(true);
-  expect(create.mock.calls[1]).toEqual(first);
   expect(await AsyncStorage.getItem('@dairydirect/pending-subscription-v1:user-1')).toBeNull();
-});
-test('recovers a pending subscription change with the original request after restart', async () => {
-  const change = jest.mocked(customerDetailsApi.subscriptionAction);
-  change.mockRejectedValueOnce(new TypeError('network')).mockResolvedValueOnce({});
-  expect(await useCustomer.getState().runSubscriptionAction({id:'subscription',action:'pause',body:{from:'2099-01-01',to:'2099-01-04'}})).toBe(false);
-  const first = change.mock.calls[0];
-  await useCustomer.getState().load();
-  expect(useCustomer.getState().pendingSubscriptionAction?.key).toBe('checkout-key');
-  expect(await useCustomer.getState().runSubscriptionAction()).toBe(true);
-  expect(change.mock.calls[1]).toEqual(first);
-  expect(await AsyncStorage.getItem('@dairydirect/pending-subscription-action-v1:user-1')).toBeNull();
+  expect(await AsyncStorage.getItem('@dairydirect/pending-checkout-v1:user-1')).toBeTruthy();
 });
 test('fills the heart immediately and merges rapid taps into the latest intent', async () => {
   const finishes: (() => void)[] = [];

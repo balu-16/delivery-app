@@ -176,7 +176,7 @@ describe('policy text', () => {
     expect(text).not.toMatch(/instant(ly)? (refund|approval)/i);
   });
   test('unavailable capabilities answer honestly', async () => {
-    expect(await policyText('subscriptions', config)).toMatch(/not available/i);
+    expect(await policyText('subscriptions', config)).toBe('DairyDirect offers one-time orders.');
     const wallet = await policyText('wallet', config);
     expect(wallet).toMatch(/unavailable/i);
     expect(wallet).not.toMatch(/wallet screen|website|top-up/i);

@@ -148,6 +148,12 @@ export class ConcernQueues {
       opts: this.jobOptions,
     });
   }
+  async disableScheduler(concern: QueueConcern, schedulerId: string): Promise<void> {
+    if (!CONCERNS.includes(concern) || !/^[a-zA-Z0-9_-]{1,128}$/.test(schedulerId))
+      throw new Error('INVALID_SCHEDULER_ID');
+    await this.queue(concern).removeJobScheduler(schedulerId);
+  }
+
   async listFailed(concern: QueueConcern, limit = 50): Promise<FailedConcernJob[]> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
       throw new Error('INVALID_FAILED_JOB_LIMIT');

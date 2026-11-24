@@ -524,4 +524,253 @@ describe('admin push campaigns', () => {
       }),
     ).toEqual({ devices: 0, users: 0 });
   });
+  test('preview reports devices and users per mode and rejects empty/oversized audiences', async () => {
+    const { PostgresPushCampaigns } =
+      await import('../../../src/modules/notifications/infrastructure/postgres-campaigns.js');
+    const customer = uuid(993);
+    await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${customer}::uuid,'CUSTOMER','campaign-modes','campaign-modes@example.test','Modes Test')`.execute(
+      db.db,
+    );
+    await tokens.register(customer, {
+      token: 'campaign-modes-android-0123456',
+      platform: 'ANDROID',
+      app: 'CUSTOMER',
+    });
+    await tokens.register(customer, {
+      token: 'campaign-modes-web-fid-0123456',
+      platform: 'WEB',
+      app: 'CUSTOMER',
+      identifierType: 'FID',
+    });
+    const campaigns = new PostgresPushCampaigns(db.db);
+    // USERS mode counts devices+users for the selected accounts only.
+    expect(
+      await campaigns.preview({
+        target: { mode: 'USERS', apps: ['CUSTOMER'], userIds: [customer] },
+        kind: 'OPERATIONAL',
+      }),
+    ).toEqual({ devices: 2, users: 1 });
+    // PLATFORM mode restricts to the chosen device platform.
+    expect(
+      await campaigns.preview({
+        target: { mode: 'PLATFORM', apps: ['CUSTOMER'], platform: 'WEB' },
+        kind: 'OPERATIONAL',
+      }),
+    ).toMatchObject({ devices: 1 });
+    // No-recipient create is rejected; oversized user selection is rejected.
+    await expect(
+      campaigns.create(world.admin, 'campaign-empty', {
+        target: { mode: 'USERS', apps: ['CUSTOMER'], userIds: [uuid(995)] },
+        kind: 'OPERATIONAL',
+        title: 'T',
+        body: 'B',
+      }),
+    ).rejects.toThrow('INVALID_INPUT');
+    await expect(
+      campaigns.create(world.admin, 'campaign-too-many', {
+        target: {
+          mode: 'USERS',
+          apps: ['CUSTOMER'],
+          userIds: Array.from({ length: 1001 }, () => uuid(996)),
+        },
+        kind: 'OPERATIONAL',
+        title: 'T',
+        body: 'B',
+      }),
+    ).rejects.toThrow('INVALID_INPUT');
+  });
+  test('list projects real title/kind/recipients and detail returns delivery counts', async () => {
+    const { PostgresPushCampaigns } =
+      await import('../../../src/modules/notifications/infrastructure/postgres-campaigns.js');
+    const customer = uuid(994);
+    await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES(${customer}::uuid,'CUSTOMER','campaign-detail','campaign-detail@example.test','Detail Test')`.execute(
+      db.db,
+    );
+    await tokens.register(customer, {
+      token: 'campaign-detail-token-012345678',
+      platform: 'ANDROID',
+      app: 'CUSTOMER',
+    });
+    const campaigns = new PostgresPushCampaigns(db.db);
+    const input = {
+      target: { mode: 'USERS' as const, apps: ['CUSTOMER' as const], userIds: [customer] },
+      kind: 'PROMOTIONAL' as const,
+      title: 'Detail title',
+      body: 'Detail body',
+    };
+    const created = (await campaigns.create(world.admin, 'campaign-detail-key', input)) as {
+      id: string;
+    };
+    const listed = (await campaigns.list()) as {
+      items: Array<{ id: string; title: string; kind: string; recipients: number }>;
+    };
+    const found = listed.items.find((item) => item.id === created.id);
+    expect(found).toMatchObject({ title: 'Detail title', kind: 'PROMOTIONAL', recipients: 1 });
+    const detail = (await campaigns.detail(created.id)) as {
+      results: Array<{ status: string; devices: number }>;
+    };
+    expect(detail.results.length).toBeGreaterThan(0);
+    expect(detail.results.some((row) => row.status === 'PENDING')).toBe(true);
+  });
+  test('template overrides win at creation and stored text survives a later edit in inbox and retry', async () => {
+    const { PostgresTemplateOverrides } =
+      await import('../../../src/modules/notifications/infrastructure/postgres-template-overrides.js');
+    const overrides = new PostgresTemplateOverrides(db.db);
+    const customer = world.customer;
+    const orderId = uuid(997);
+    const emit = await emitNotificationEvent(db, {
+      eventType: 'ORDER_CONFIRMED',
+      aggregateId: uuid(998),
+      aggregateVersion: '1',
+      payload: { orderId, orderNumber: 'ORD-STORED', userId: customer },
+    });
+    expect(await consumeEvent(db, pipeline, emit)).toBe(true);
+    const [stored] = (
+      await sql<{
+        rendered_title: string;
+        rendered_body: string;
+      }>`SELECT rendered_title,rendered_body FROM notifications WHERE user_id=${customer}::uuid AND template_key='order.confirmed' ORDER BY created_at DESC LIMIT 1`.execute(
+        db.db,
+      )
+    ).rows;
+    // Stored text was frozen at creation from the winning (default) template.
+    expect(stored!.rendered_title).toContain('ORD-STORED');
+    const beforeInbox = await views.inbox(customer);
+    const beforeTitle = beforeInbox.items.find(
+      (item) => item.templateKey === 'order.confirmed' && item.status === 'SENT',
+    )?.title;
+    // Publishing an override must not rewrite the already-composed row.
+    const current = (await overrides.list()).find(
+      (entry) =>
+        entry.templateKey === 'order.confirmed' &&
+        entry.locale === 'en' &&
+        entry.channel === 'PUSH',
+    )!;
+    await overrides.write(world.admin, 'order.confirmed', 'en', 'PUSH', {
+      subject: 'Edited {{orderNumber}}',
+      body: 'Edited body {{orderNumber}}',
+      expectedVersion: current.version,
+    });
+    const afterInbox = await views.inbox(customer);
+    const afterTitle = afterInbox.items.find(
+      (item) => item.templateKey === 'order.confirmed' && item.status === 'SENT',
+    )?.title;
+    if (beforeTitle !== undefined) expect(afterTitle).toBe(beforeTitle);
+    // A new event composes from the override (override precedence).
+    const emit2 = await emitNotificationEvent(db, {
+      eventType: 'ORDER_CONFIRMED',
+      aggregateId: uuid(999),
+      aggregateVersion: '1',
+      payload: { orderId: uuid(1000), orderNumber: 'ORD-OVERRIDE', userId: customer },
+    });
+    expect(await consumeEvent(db, pipeline, emit2)).toBe(true);
+    const [overridden] = (
+      await sql<{
+        rendered_title: string;
+      }>`SELECT rendered_title FROM notifications WHERE user_id=${customer}::uuid AND template_key='order.confirmed' ORDER BY created_at DESC LIMIT 1`.execute(
+        db.db,
+      )
+    ).rows;
+    expect(overridden!.rendered_title).toBe('Edited ORD-OVERRIDE');
+  });
+});
+
+describe('app content slots (customize2 §3E)', () => {
+  test('slot publish, locale fallback, unset-vs-disabled, expired and history restore', async () => {
+    const { PostgresAppContent } =
+      await import('../../../src/modules/app-content/infrastructure/postgres-app-content.js');
+    const content = new PostgresAppContent(db.db);
+    const now = new Date('2026-06-01T12:00:00Z');
+    // Unset: no row -> UNSET (apps use bundled defaults).
+    let audience = await content.audience('CUSTOMER', 'hi', now);
+    expect(audience.find((item) => item.slot === 'CUSTOMER_HOME_BANNER')?.state).toBe('UNSET');
+    // Publish English banner.
+    const written = await content.write(world.admin, 'CUSTOMER_HOME_BANNER', 'en', {
+      enabled: true,
+      title: 'Monsoon offer',
+      body: 'Fresh packs at home',
+      destination: '/cart',
+      expectedVersion: 0,
+    });
+    expect(written.version).toBe(1);
+    expect(written.imageUrl).toBeNull();
+    // Locale fallback: hi request resolves the en row.
+    audience = await content.audience('CUSTOMER', 'hi', now);
+    const banner = audience.find((item) => item.slot === 'CUSTOMER_HOME_BANNER')!;
+    expect(banner.state).toBe('VISIBLE');
+    expect(banner.title).toBe('Monsoon offer');
+    expect(banner.locale).toBe('en');
+    // Stale version is a conflict.
+    await expect(
+      content.write(world.admin, 'CUSTOMER_HOME_BANNER', 'en', {
+        enabled: true,
+        title: 'Other',
+        body: 'Other body',
+        expectedVersion: 0,
+      }),
+    ).rejects.toThrow('CONCURRENT_MODIFICATION');
+    // Disable -> DISABLED (deliberately hidden, not bundled).
+    await content.write(world.admin, 'CUSTOMER_HOME_BANNER', 'en', {
+      enabled: false,
+      title: 'Monsoon offer',
+      body: 'Fresh packs at home',
+      expectedVersion: 1,
+    });
+    audience = await content.audience('CUSTOMER', 'en', now);
+    expect(audience.find((item) => item.slot === 'CUSTOMER_HOME_BANNER')?.state).toBe('DISABLED');
+    // History holds the pre-disable enabled version for restore.
+    const history = await content.history('CUSTOMER_HOME_BANNER', 'en');
+    expect(history[0]!.version).toBe(1);
+    expect(history[0]!.enabled).toBe(true);
+    // Restore through a new validated write.
+    const restored = await content.write(world.admin, 'CUSTOMER_HOME_BANNER', 'en', {
+      enabled: history[0]!.enabled,
+      title: history[0]!.title,
+      body: history[0]!.body,
+      destination: '/cart',
+      expectedVersion: 2,
+    });
+    expect(restored.version).toBe(3);
+    audience = await content.audience('CUSTOMER', 'en', now);
+    expect(audience.find((item) => item.slot === 'CUSTOMER_HOME_BANNER')?.state).toBe('VISIBLE');
+    // Expired window -> INACTIVE.
+    await content.write(world.admin, 'CUSTOMER_OFFERS_CARD', 'en', {
+      enabled: true,
+      title: 'Short offer',
+      body: 'Only this week',
+      startAt: '2026-01-01T00:00:00Z',
+      endAt: '2026-02-01T00:00:00Z',
+      expectedVersion: 0,
+    });
+    audience = await content.audience('CUSTOMER', 'en', now);
+    expect(audience.find((item) => item.slot === 'CUSTOMER_OFFERS_CARD')?.state).toBe('INACTIVE');
+    // Rider audience only sees rider slots.
+    const riderAudience = await content.audience('RIDER', 'en', now);
+    expect(riderAudience.map((item) => item.slot)).toEqual([
+      'RIDER_HOME_ANNOUNCEMENT',
+      'RIDER_HELP',
+    ]);
+  });
+  test('slot writes enforce destination allowlist and text limits', async () => {
+    const { PostgresAppContent } =
+      await import('../../../src/modules/app-content/infrastructure/postgres-app-content.js');
+    const content = new PostgresAppContent(db.db);
+    await expect(
+      content.write(world.admin, 'CUSTOMER_HOME_BANNER', 'en', {
+        enabled: true,
+        title: 'T',
+        body: 'B',
+        destination: '/notifications',
+        expectedVersion: 99,
+      }),
+    ).rejects.toThrow('INVALID_INPUT');
+    await expect(
+      content.write(world.admin, 'CUSTOMER_HOME_BANNER', 'en', {
+        enabled: true,
+        title: 'x'.repeat(201),
+        body: 'B',
+        expectedVersion: 0,
+      }),
+    ).rejects.toThrow('INVALID_INPUT');
+  });
 });

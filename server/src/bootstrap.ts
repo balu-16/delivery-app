@@ -153,6 +153,7 @@ export async function createApplication(
           });
       } finally {
         metrics.observeStage('ip_rate_limit', performance.now() - started);
+        metrics.observeStage('redis', performance.now() - started);
       }
     });
   }

@@ -70,6 +70,37 @@ export class PriceDto {
 export class AssortmentDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() storeId!: string;
   @ApiProperty({ format: 'uuid' }) @IsUUID() variantId!: string;
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+export class ProductImagesPutDto {
+  @ApiProperty({ type: [String], format: 'uuid' })
+  @IsUUID('4', { each: true })
+  mediaIds!: string[];
+  @ApiProperty({ pattern: '^\\d{1,18}$' })
+  @IsString()
+  @Matches(/^\d{1,18}$/)
+  expectedRevision!: string;
+}
+export class ProductImageView {
+  @ApiProperty({ format: 'uuid' }) mediaId!: string;
+  @ApiProperty() url!: string;
+  @ApiProperty() position!: number;
+}
+export class ProductImagesView {
+  @ApiProperty({ type: ProductImageView, isArray: true }) items!: ProductImageView[];
+  @ApiProperty({ pattern: '^\\d{1,18}$' }) revision!: string;
+}
+export class AssortmentView {
+  @ApiProperty({ format: 'uuid' }) storeId!: string;
+  @ApiProperty() storeName!: string;
+  @ApiProperty() listed!: boolean;
+}
+export class AssortmentPageView {
+  @ApiProperty({ type: AssortmentView, isArray: true }) items!: AssortmentView[];
+  @ApiProperty({ type: String, nullable: true }) nextCursor!: string | null;
 }
 export class SynonymDto {
   @ApiProperty({ maxLength: 64 }) @IsString() @Length(1, 64) term!: string;
@@ -91,6 +122,9 @@ export class PageDto {
   @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() cursor?: string;
 }
 
+export class AssortmentPageDto extends PageDto {
+  @ApiProperty({ format: 'uuid' }) @IsUUID() variantId!: string;
+}
 /** Variant listing filtered to one product (portal product-detail view). */
 export class VariantsPageDto extends PageDto {
   @ApiPropertyOptional({ format: 'uuid' }) @IsOptional() @IsUUID() productId?: string;

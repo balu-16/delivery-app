@@ -224,7 +224,9 @@ export function planForEvent(event: MatrixEvent): NotificationPlan | null {
           subscriptionId: stringAt(payload, 'subscriptionId') ?? '',
           amount: paiseToRupees(stringAt(payload, 'amountPaise')),
         },
-        event.eventType.startsWith('subscription.') ? '/subscriptions' : '/wallet',
+        // Legacy recurring links route to the inbox (safe current page);
+        // no new recurring notices are created after retirement.
+        event.eventType.startsWith('subscription.') ? null : '/wallet',
       );
     }
     case 'delivery.wrong_address_flagged': {

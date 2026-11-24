@@ -73,6 +73,7 @@ class CreateDto extends PreviewDto {
   @ApiProperty() @IsString() @Length(1, 500) body!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2048) clickAction?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2048) imageUrl?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(64) imageMediaId?: string;
   @ApiPropertyOptional({ type: 'object', additionalProperties: { type: 'string' } })
   @IsOptional()
   @IsObject()

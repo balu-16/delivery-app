@@ -113,14 +113,17 @@ it('upgrades existing carts and prices through migrations 060–062', async () =
   );
 
   await runner(options);
+  // Newer migrations above must not move this assertion: 060–062 applied in order.
   expect(
-    (await client.query('SELECT name FROM pgmigrations ORDER BY id DESC LIMIT 3')).rows.map(
-      (r) => r.name,
-    ),
+    (
+      await client.query(
+        "SELECT name FROM pgmigrations WHERE name LIKE '060\\_%' OR name LIKE '061\\_%' OR name LIKE '062\\_%' ORDER BY id",
+      )
+    ).rows.map((r) => r.name),
   ).toEqual([
-    '062_global_price_lookup_index',
-    '061_dairy_shared_prices',
     '060_address_free_cart_and_prices',
+    '061_dairy_shared_prices',
+    '062_global_price_lookup_index',
   ]);
   expect(
     (await client.query('SELECT address_id,store_id FROM carts WHERE id=$1', [cart])).rows[0],

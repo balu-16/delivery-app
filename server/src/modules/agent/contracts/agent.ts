@@ -15,6 +15,7 @@ export type AgentCardType =
   | 'cancel_confirm'
   | 'refund_confirm'
   | 'cart_choice'
+  // Legacy recurring card: kept so stored chats decode and render read-only.
   | 'subscription_confirm'
   | 'quick_replies'
   | 'info';

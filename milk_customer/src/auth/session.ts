@@ -104,7 +104,7 @@ export async function loginLocal(subject = 'customer') {
 async function finishCognitoLogin(tokens: AuthResult['AuthenticationResult'], username: string, generation: number, referralCode?: string | null): Promise<void> {
   if (!tokens?.IdToken || !tokens.AccessToken || !tokens.RefreshToken) throw new AuthError('UNSUPPORTED_CHALLENGE');
   const code = referralCode === null ? undefined : (referralCode?.trim().toUpperCase() || await AsyncStorage.getItem(referralKey(username)) || undefined);
-  if (code && !/^[A-F0-9]{16}$/.test(code)) throw new Error('Enter a valid 16-character referral code.');
+  if (code && !/^(?:[A-F0-9]{16}|INV-[A-F0-9]{32})$/.test(code)) throw new Error('Enter a valid referral code.');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
   try {
@@ -205,7 +205,7 @@ export async function completePasswordChange(password: string, attributes: Parti
 export async function signUp(email: string, password: string, name: string, referralCode?:string) {
   if (mode() !== 'cognito') throw new Error('Registration is not available for local test accounts.');
   const code = referralCode?.trim().toUpperCase();
-  if (code && !/^[A-F0-9]{16}$/.test(code)) throw new Error('Enter a valid 16-character referral code.');
+  if (code && !/^(?:[A-F0-9]{16}|INV-[A-F0-9]{32})$/.test(code)) throw new Error('Enter a valid referral code.');
   const key = referralKey(email);
   const previous = await AsyncStorage.getItem(key);
   if (code) await AsyncStorage.setItem(key, code);

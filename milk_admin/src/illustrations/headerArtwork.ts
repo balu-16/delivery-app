@@ -11,7 +11,6 @@ export const headerArtwork = {
   payments: asset('payments'),
   payouts: asset('payouts'),
   offers: asset('offers-v2'),
-  subscriptions: asset('subscriptions'),
   support: asset('support'),
   reports: asset('reports'),
   approvals: asset('approvals'),

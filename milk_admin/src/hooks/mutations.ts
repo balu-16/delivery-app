@@ -12,7 +12,8 @@ import * as apiPeople from '@/api/people'
 import * as apiPayments from '@/api/payments'
 import * as apiPayouts from '@/api/payouts'
 import * as apiOffers from '@/api/offers'
-import * as apiSubs from '@/api/subscriptions'
+import * as apiAppContent from '@/api/app-content'
+import * as apiNotificationTemplates from '@/api/notification-templates'
 import * as apiSupport from '@/api/support'
 import * as apiReports from '@/api/reports'
 import type { ReportKind } from '@/types'
@@ -144,9 +145,15 @@ export function useProductActions() {
     updateVariant: makeAction<[string, apiCatalog.VariantInput, string?], { id: string }>(([id, input]) => apiCatalog.updateVariant(id, input), ([, , label]) => (label ? `${label} updated` : 'Variant updated')),
     deleteVariant: makeAction<[string, string], unknown>(([id]) => apiCatalog.deleteVariant(id), ([, sku]) => `Variant ${sku} deleted`),
     addAssortment: makeAction<[string, string], unknown>(([storeId, variantId]) => apiCatalog.addAssortment(storeId, variantId), () => 'Variant listed at store'),
-    setPrice: makeAction<[string, string, number, number], { approvalId?: string }>(([storeId, variantId, selling, mrp]) => apiCatalog.setPrice({
-      storeId, variantId, sellingPaise: rupeesToPaise(selling), mrpPaise: rupeesToPaise(mrp),
+    setAssortmentActive: makeAction<[string, string, boolean], unknown>(([storeId, variantId, active]) => apiCatalog.addAssortment(storeId, variantId, active), ([, , active]) => (active ? 'Variant listed at store' : 'Variant withdrawn from store')),
+    /** Price write takes exact decimal-string rupees; zero is accepted. */
+    setPrice: makeAction<[string, string, string, string], { approvalId?: string }>(([storeId, variantId, selling, mrp]) => apiCatalog.setPrice({
+      storeId, variantId, sellingPaise: selling, mrpPaise: mrp,
     }), () => 'Price saved'),
+    replaceProductImages: makeAction<[string, string[], string], { items: { mediaId: string; url: string; position: number }[]; revision: string }>(
+      ([productId, mediaIds, expectedRevision]) => apiCatalog.replaceProductImages(productId, mediaIds, expectedRevision),
+      () => 'Product photos saved'),
+    setSynonym: makeAction<[string, string | null], unknown>(([term, expansion]) => apiCatalog.setSynonym(term, expansion), () => 'Search synonym saved'),
     approveCatalogChange: makeAction<[string], unknown>(([approvalId]) => apiCatalog.approveCatalogChange(approvalId), () => 'Catalog change approved'),
     createCatalogImport: makeAction<[string, string, boolean], { id: string }>(([mediaId, storeId, dryRun]) => apiCatalog.createCatalogImport(mediaId, storeId, dryRun), ([, , dryRun]) => (dryRun ? 'Dry run started' : 'Import started')),
     approveCatalogImport: makeAction<[string], unknown>(([approvalId]) => apiCatalog.approveCatalogImport(approvalId), () => 'Import approved — applying'),
@@ -220,6 +227,7 @@ export function usePeopleActions() {
     void qc.invalidateQueries({ queryKey: ['users'] })
     void qc.invalidateQueries({ queryKey: ['workforce'] })
     void qc.invalidateQueries({ queryKey: ['rider-applications'] })
+    void qc.invalidateQueries({ queryKey: ['rider-application'] })
     void qc.invalidateQueries({ queryKey: ['approvals'] })
     void qc.invalidateQueries({ queryKey: ['store-operations'] })
   }
@@ -231,6 +239,7 @@ export function usePeopleActions() {
     assignStore: makeAction<[string, string, boolean], unknown>(([userId, storeId, grant]) => apiPeople.assignUserStore(userId, storeId, grant), ([, , grant]) => (grant ? 'Store assigned' : 'Store unassigned')),
     requestRoleChange: makeAction<[string, string, 'RIDER' | 'STORE_MANAGER' | 'SUPPORT_AGENT' | 'SUPER_ADMIN', boolean], { requestId: string }>(([userId, , role, grant]) => apiPeople.requestRoleChange(userId, role, grant), ([, name]) => `Role change for ${name} submitted as approval request`),
     approveRoleChange: makeAction<[string], unknown>(([requestId]) => apiPeople.approveRoleChange(requestId), () => 'Role change approved'),
+    reviewRiderDocument: makeAction<[string, boolean, string], { reviewed: true }>(([documentId, approved, reason]) => apiPeople.reviewRiderDocument(documentId, { approved, reason }), ([, approved]) => (approved ? 'Document approved' : 'Document rejected')),
   }
 }
 
@@ -325,6 +334,7 @@ export function useOfferActions() {
   const inv = () => {
     void qc.invalidateQueries({ queryKey: ['coupons'] })
     void qc.invalidateQueries({ queryKey: ['campaigns'] })
+    void qc.invalidateQueries({ queryKey: ['campaign-detail'] })
     void qc.invalidateQueries({ queryKey: ['inbox'] })
     void qc.invalidateQueries({ queryKey: ['unread-count'] })
   }
@@ -338,46 +348,49 @@ export function useOfferActions() {
       const key = newIdempotencyKey()
       return apiOffers.updateCoupon(key, id, patch)
     }, ([, , code]) => (code ? `Coupon ${code} updated` : 'Coupon updated')),
-    addCampaign: makeAction<[apiOffers.CampaignCreateInput], { id: string }>(([input]) => {
-      const key = newIdempotencyKey()
-      return apiOffers.createCampaign(key, input)
+    // §3E C9: the idempotency key is bound to the prepared send intent and
+    // reused verbatim when an ambiguous result is retried — never re-minted.
+    addCampaign: makeAction<[apiOffers.CampaignCreateInput, string?], { id: string }>(([input, key]) => {
+      return apiOffers.createCampaign(key ?? newIdempotencyKey(), input)
     }, ([i]) => `Campaign "${i.title}" created`),
     markNotificationRead: makeAction<[string?], unknown>(([id]) => (id ? apiOffers.markNotificationRead(id) : apiOffers.markAllNotificationsRead()), () => 'Notifications updated'),
   }
 }
 
-// ── §10 Subscriptions ────────────────────────────────────────────────────────
-export function useSubscriptionAdminActions() {
+/**
+ * Stable idempotency-key helper (customize2 §3E C9): one key per prepared
+ * send attempt, reused on an ambiguous retry. Callers prepare the key once
+ * (e.g. when the send is armed) and pass it through every retry.
+ */
+export function campaignAttemptKey(): string {
+  return newIdempotencyKey()
+}
+
+// ── §9b App content & notification templates ─────────────────────────────────
+export function useAppContentActions() {
   const qc = useQueryClient()
   const inv = () => {
-    void qc.invalidateQueries({ queryKey: ['sub-plans'] })
-    void qc.invalidateQueries({ queryKey: ['sub-slots'] })
-    void qc.invalidateQueries({ queryKey: ['sub-holidays'] })
-    void qc.invalidateQueries({ queryKey: ['sub-runs'] })
-    void qc.invalidateQueries({ queryKey: ['approvals'] })
+    void qc.invalidateQueries({ queryKey: ['app-content'] })
+    void qc.invalidateQueries({ queryKey: ['app-content-history'] })
+    void qc.invalidateQueries({ queryKey: ['notification-templates'] })
+    void qc.invalidateQueries({ queryKey: ['notification-template-history'] })
   }
   const { makeAction } = useActionRunner(inv)
   return {
-    savePlan: makeAction<[string, boolean], unknown>(([variantId, active]) => {
-      const key = newIdempotencyKey()
-      return apiSubs.saveSubscriptionPlan(key, variantId, active)
-    }, () => 'Subscription plan updated'),
-    saveSlot: makeAction<[apiSubs.SlotInput], unknown>(([slot]) => {
-      const key = newIdempotencyKey()
-      return apiSubs.saveSubscriptionSlot(key, slot)
-    }, () => 'Delivery slot saved'),
-    saveHoliday: makeAction<[string, string, string | null], unknown>(([storeId, date, reason]) => {
-      const key = newIdempotencyKey()
-      return apiSubs.saveSubscriptionHoliday(key, storeId, date, reason)
-    }, () => 'Holiday saved'),
-    deleteHoliday: makeAction<[string, string], unknown>(([storeId, date]) => {
-      const key = newIdempotencyKey()
-      return apiSubs.deleteSubscriptionHoliday(key, storeId, date)
-    }, () => 'Holiday removed'),
-    retryRun: makeAction<[string], unknown>(([runId]) => {
-      const key = newIdempotencyKey()
-      return apiSubs.retrySubscriptionRun(key, runId)
-    }, () => 'Retry queued for failed generations'),
+    writeContent: makeAction<
+      [apiAppContent.AppContentSlot, apiAppContent.AppContentLocale, apiAppContent.AppContentWriteInput],
+      apiAppContent.AppContentRecord
+    >(
+      ([slot, locale, input]) => apiAppContent.writeAppContent(slot, locale, input),
+      () => 'App content saved',
+    ),
+    writeTemplate: makeAction<
+      [string, string, string, apiNotificationTemplates.NotificationTemplateWriteInput],
+      apiNotificationTemplates.NotificationTemplateEntry
+    >(
+      ([templateKey, locale, channel, input]) => apiNotificationTemplates.writeNotificationTemplate(templateKey, locale, channel, input),
+      () => 'Template copy saved',
+    ),
   }
 }
 

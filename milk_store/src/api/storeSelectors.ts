@@ -12,6 +12,9 @@ export interface StoreDashboardSummary {
   storeName: string
   storeCode: string
   storeNote?: string
+  storeCanPause: boolean
+  storeCanResume: boolean
+  storeRestrictionReason: 'STORE_NOT_ONLINE' | 'STORE_NOT_PAUSED' | 'PAUSE_MANAGED_BY_ADMIN' | null
   lowStock: Array<{ variantName: string; qty: number; reorderLevel: number }>
   expiringStock: Array<{ variantName: string; qty: number; expiryDate: string; daysLeft: number }>
   hourly: Array<{ label: string; completed: number; open: number }>

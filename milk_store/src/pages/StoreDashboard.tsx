@@ -235,7 +235,16 @@ export function StoreDashboard() {
                   {paused ? 'Store is paused.' : d?.storeStatus === 'offline' ? 'Store is offline.' : 'Store is currently accepting orders.'}
                   {d?.storeCode && <span className="ml-1 font-semibold text-foreground/70">({d.storeCode})</span>}
                 </p>
-                {paused ? (
+                {d && paused && !d.storeCanResume ? (
+                  <div className="space-y-2">
+                    <Button variant="success" size="pill" className="w-full" disabled aria-label="Resume unavailable">
+                      <Play className="h-4 w-4" /> Resume Store
+                    </Button>
+                    {d?.storeRestrictionReason === 'PAUSE_MANAGED_BY_ADMIN' && (
+                      <p className="text-[11.5px] text-muted-foreground">This pause is managed by the admin or the system and cannot be resumed here.</p>
+                    )}
+                  </div>
+                ) : paused ? (
                   <Button
                     variant="success"
                     size="pill"
@@ -250,6 +259,7 @@ export function StoreDashboard() {
                     variant="outline"
                     size="pill"
                     className="w-full"
+                    disabled={d ? !d.storeCanPause : false}
                     onClick={() => { setReason(''); setDetails(''); setPauseOpen(true) }}
                     aria-label="Pause store"
                   >

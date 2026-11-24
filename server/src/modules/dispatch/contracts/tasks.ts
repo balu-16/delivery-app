@@ -87,6 +87,33 @@ export interface RiderTaskHistoryItem {
   status: string;
   totalPaise: string | null;
 }
+
+export interface RiderTaskHistoryEarnings {
+  totalPaise: string | null;
+  basePaise: string | null;
+  distancePaise: string | null;
+  incentivePaise: string | null;
+  tipPaise: string | null;
+  distanceMetres: number | null;
+  distancePending: boolean;
+  computedAt: string | null;
+}
+
+export interface RiderTaskHistoryDetail {
+  id: string;
+  taskId: string;
+  orderId: string;
+  orderNumber: string;
+  attemptNo: number;
+  assignedAt: string;
+  status: string;
+  pickupAt: string | null;
+  arrivedStoreAt: string | null;
+  arrivedCustomerAt: string | null;
+  deliveredAt: string | null;
+  failureReason: string | null;
+  earnings: RiderTaskHistoryEarnings;
+}
 export const RIDER_TASK_READS = Symbol('RIDER_TASK_READS');
 export interface RiderTaskReadPort {
   active(riderId: string): Promise<{ items: RiderActiveTask[]; nextCursor: null }>;
@@ -95,6 +122,11 @@ export interface RiderTaskReadPort {
     riderId: string,
     before?: string,
   ): Promise<{ items: RiderTaskHistoryItem[]; nextCursor: string | null }>;
+  historyDetail(
+    riderId: string,
+    taskId: string,
+    attemptNo?: number,
+  ): Promise<RiderTaskHistoryDetail>;
   dashboard(riderId: string): Promise<{ todayDeliveries: number; todayEarningsPaise: string }>;
 }
 

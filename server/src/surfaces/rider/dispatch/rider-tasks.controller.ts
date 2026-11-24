@@ -156,6 +156,22 @@ export class RiderTasksController {
     return scope === 'history' ? this.reads.history(p.userId, cursor) : this.reads.active(p.userId);
   }
 
+  @Get('task-history/:id')
+  @ApiOperation({ operationId: 'riderTaskHistoryDetail' })
+  @ApiQuery({ name: 'attemptNo', required: false, type: Number })
+  detailTaskHistory(
+    @CurrentPrincipal() p: Principal,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('attemptNo') attemptNoQuery?: string,
+  ) {
+    let attemptNo: number | undefined;
+    if (attemptNoQuery !== undefined && attemptNoQuery !== '') {
+      attemptNo = Number(attemptNoQuery);
+      if (!Number.isInteger(attemptNo) || attemptNo < 0) throw new Error('INVALID_INPUT');
+    }
+    return this.reads.historyDetail(p.userId, id, attemptNo);
+  }
+
   @Get('tasks/:id')
   @ApiOperation({ operationId: 'riderTaskDetail' })
   @ApiOkResponse({ type: RiderActiveTaskView })

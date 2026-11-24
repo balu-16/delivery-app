@@ -138,13 +138,13 @@ export class PostgresSupport implements Support {
       return id;
     });
   }
-  async list(actorId: string, isStaff: boolean, cursor?: string, limit = 50) {
+  async list(actorId: string, isStaff: boolean, cursor?: string, limit = 50, category?: string) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INVALID_INPUT');
     return transactionWithRetry(this.db, async (tx) => {
       if (isStaff && !(await staff(tx, actorId))) throw new Error('FORBIDDEN');
       const rows = await sql<{
         id: string;
-      }>`SELECT id,order_id,category,status,assignee_id,created_at FROM support_tickets WHERE (${isStaff} OR owner_id=${actorId}::uuid) AND (${cursor ?? null}::uuid IS NULL OR id<${cursor ?? null}::uuid) ORDER BY id DESC LIMIT ${limit + 1}`.execute(
+      }>`SELECT id,order_id,category,status,assignee_id,created_at FROM support_tickets WHERE (${isStaff} OR owner_id=${actorId}::uuid) AND (${category ?? null}::text IS NULL OR category=${category ?? null}) AND (${cursor ?? null}::uuid IS NULL OR id<${cursor ?? null}::uuid) ORDER BY id DESC LIMIT ${limit + 1}`.execute(
         tx,
       );
       const page = rows.rows.slice(0, limit);
@@ -160,12 +160,13 @@ export class PostgresSupport implements Support {
     isStaff: boolean,
     cursor?: string,
     limit = 50,
+    category?: string,
   ): Promise<unknown> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INVALID_INPUT');
     return transactionWithRetry(this.db, async (tx) => {
       if (isStaff && !(await staff(tx, actorId))) throw new Error('FORBIDDEN');
       const rows =
-        await sql`SELECT id,owner_id,order_id,category,status,assignee_id,created_at,updated_at FROM support_tickets WHERE id=${id}::uuid AND (${isStaff} OR owner_id=${actorId}::uuid)`.execute(
+        await sql`SELECT id,owner_id,order_id,category,status,assignee_id,created_at,updated_at FROM support_tickets WHERE id=${id}::uuid AND (${isStaff} OR owner_id=${actorId}::uuid) AND (${category ?? null}::text IS NULL OR category=${category ?? null})`.execute(
           tx,
         );
       if (!rows.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
@@ -264,7 +265,14 @@ export class PostgresSupport implements Support {
   async message(
     actorId: string,
     id: string,
-    input: { body: string; internal?: boolean; mediaIds?: string[]; reference?: string },
+    input: {
+      body: string;
+      internal?: boolean;
+      mediaIds?: string[];
+      reference?: string;
+      category?: string;
+    },
+    guard?: { beforeMessage(tx: TransactionContext): Promise<void> },
   ): Promise<string> {
     const body = clean(input.body, await this.config.get('supportMessageMaxLength')),
       ids = input.mediaIds ?? [];
@@ -282,10 +290,16 @@ export class PostgresSupport implements Support {
       const ticket = await sql<{
         owner_id: string;
         status: string;
-      }>`SELECT owner_id,status FROM support_tickets WHERE id=${id}::uuid FOR UPDATE`.execute(tx);
+        category: string;
+      }>`SELECT owner_id,status,category FROM support_tickets WHERE id=${id}::uuid FOR UPDATE`.execute(
+        tx,
+      );
       if (!ticket.rows[0]) throw new Error('RESOURCE_NOT_FOUND');
       const privileged = await staff(tx, actorId);
       if (!privileged && ticket.rows[0].owner_id !== actorId) throw new Error('RESOURCE_NOT_FOUND');
+      if (input.category !== undefined && ticket.rows[0].category !== input.category)
+        throw new Error('RESOURCE_NOT_FOUND');
+      await guard?.beforeMessage(tx);
       if (input.internal && !privileged) throw new Error('FORBIDDEN');
       if (ticket.rows[0].status === 'CLOSED') throw new Error('TICKET_CLOSED');
       const message = uuidV7();

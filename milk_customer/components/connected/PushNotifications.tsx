@@ -10,23 +10,40 @@ import { useCustomer } from '@/src/store/customer';
 import { customerDetailsApi } from '@/src/api/customer';
 import { accessToken } from '@/src/auth/session';
 import { assistantNotificationTarget } from '@/src/agent/notification-target';
+import { resolveCustomerNotification, shouldNavigateCustomer } from '@/src/notifications/resolver';
 import { Card, shared } from './Shared';
 
 export function PushCoordinator() {
   const userId = useCustomer(state => state.status === 'signedIn' ? state.profile?.userId : undefined);
   useEffect(() => {
     if (!userId) return;
-    return startPushSession(userId, () => {void useCustomer.getState().loadAccount();}, (data) => {
-      void useCustomer.getState().loadAccount();
+    return startPushSession(userId, () => {void useCustomer.getState().loadNotifications();}, (data) => {
+      void useCustomer.getState().loadNotifications();
+      // Typed resolver: validate audience/UUID/allowlist, dedupe, warm/cold handling.
+      const resolved = resolveCustomerNotification(data);
+      if (resolved) {
+        const route = resolved.route;
+        // Deduplicated read update via existing notification ID when present.
+        const notificationId = typeof data.notificationId === 'string' && /^[\da-f-]{36}$/i.test(data.notificationId)
+          ? data.notificationId as string
+          : null;
+        if (notificationId) {
+          void accessToken().then(token => customerDetailsApi.readNotification(token, notificationId)).then(() => useCustomer.getState().loadNotifications()).catch(() => undefined);
+        }
+        if (shouldNavigateCustomer(route)) {
+          router.push(route as Href);
+        }
+        return;
+      }
       const target = assistantNotificationTarget(data);
       if (target) {
         if (target.nudgeName && typeof data.notificationId === 'string' && /^[\da-f-]{36}$/i.test(data.notificationId)) {
-          void accessToken().then(token => customerDetailsApi.readNotification(token, data.notificationId as string)).then(() => useCustomer.getState().loadAccount()).catch(() => undefined);
+          void accessToken().then(token => customerDetailsApi.readNotification(token, data.notificationId as string)).then(() => useCustomer.getState().loadNotifications()).catch(() => undefined);
         }
         router.push({ pathname: '/agent', params: target } as Href);
         return;
       }
-      router.push({pathname:'/profile',params:{open:'notifications'}});
+      router.push({pathname:'/notifications'});
     });
   }, [userId]);
   return null;

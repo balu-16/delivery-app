@@ -245,6 +245,9 @@ export interface BackendStoreDetails {
   hourlyCapacity: number
   lastOrderBufferMinutes: number
   hours: Array<{ weekday: number; startMinute: number; endMinute: number }>
+  canPause?: boolean
+  canResume?: boolean
+  restrictionReason?: 'STORE_NOT_ONLINE' | 'STORE_NOT_PAUSED' | 'PAUSE_MANAGED_BY_ADMIN' | null
 }
 export interface BackendStatusHistoryEntry {
   version: string

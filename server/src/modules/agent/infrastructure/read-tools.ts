@@ -567,7 +567,7 @@ export function createReadTools(
     ),
     kit.define(
       'get_policy_text',
-      'Answer questions about delivery fees, refunds, cancellation, timings, wallet, subscriptions or contacting support from the configured policy.',
+      'Answer questions about delivery fees, refunds, cancellation, timings, wallet, recurring deliveries or contacting support from the configured policy.',
       z.object({
         topic: z
           .enum([

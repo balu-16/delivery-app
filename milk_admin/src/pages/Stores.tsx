@@ -92,10 +92,14 @@ function StoreFormDialog({ open, onOpenChange, initial, cities, entities, server
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
           <Field label="Store name" required error={errors.name?.message}><Input {...register('name')} placeholder="e.g. Khar West Store" /></Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="City" required error={errors.cityId?.message}>
-              <Controller control={control} name="cityId" render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange} options={cities.map((c) => ({ value: c.id, label: c.name }))} placeholder="Pick city" />
-              )} />
+            <Field label="City" required error={errors.cityId?.message} hint={initial ? 'Fixed after creation (server rule)' : 'New stores start offline'}>
+              {initial ? (
+                <Input value={cities.find((c) => c.id === initial.cityId)?.name ?? initial.cityId} disabled aria-readonly />
+              ) : (
+                <Controller control={control} name="cityId" render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange} options={cities.map((c) => ({ value: c.id, label: c.name }))} placeholder="Pick city" />
+                )} />
+              )}
             </Field>
             <Field label="Legal entity" required error={errors.legalEntityId?.message}>
               <Controller control={control} name="legalEntityId" render={({ field }) => (
@@ -196,6 +200,50 @@ function ZoneFormDialog({ open, onOpenChange, initial, stores, serverError, onSu
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="secondary" size="md" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" variant="primary" size="md"><Save className="h-4 w-4" /> {initial ? 'Save zone' : 'Create zone'}</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/* ── City add/edit dialog (GeoJSON polygon bounds) ───────── */
+const citySchema = z.object({ name: z.string().min(2, 'City name is required') })
+
+function CityFormDialog({ open, onOpenChange, initial, serverError, onSubmit }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  initial: City | null
+  serverError: string | null
+  onSubmit: (values: { name: string }, bounds: object) => void
+}) {
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<{ name: string }>({
+    resolver: zodResolver(citySchema),
+    defaultValues: { name: '' },
+  })
+  useEffect(() => { if (open) reset(initial ? { name: initial.name } : { name: '' }) }, [open, initial, reset])
+  const defaultPoints: [number, number][] = [[19.03, 72.85], [19.03, 72.9], [19.1, 72.9], [19.1, 72.85]]
+  const [points, setPoints] = useState<[number, number][]>(
+    initial ? polygonToPoints(initial.bounds as never) : defaultPoints,
+  )
+  useEffect(() => {
+    if (open) setPoints(initial ? polygonToPoints(initial.bounds as never) : defaultPoints)
+  }, [open, initial])
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent title={initial ? `Edit ${initial.name}` : 'Add city'} description="City bounds are a GeoJSON polygon — zones must sit inside them" wide>
+        <form onSubmit={handleSubmit((v) => onSubmit(v, zoneGeometryFromPoints(points)))} className="space-y-3">
+          <Field label="City name" required error={errors.name?.message}><Input {...register('name')} placeholder="e.g. Mumbai" /></Field>
+          <div className="rounded-xl border border-border">
+            <div className="h-[300px] w-full">
+              <PolygonEditor center={centroid(points)} initialPoints={points} color="#0EA5E9" onSave={(p) => setPoints(p)} />
+            </div>
+            <p className="border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground">Drag the vertex handles — the polygon is saved as the city bounds.</p>
+          </div>
+          {serverError && <p className="rounded-lg bg-destructive-soft px-3 py-2 text-xs font-semibold text-destructive">{serverError}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="secondary" size="md" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" variant="primary" size="md"><Save className="h-4 w-4" /> {initial ? 'Save city' : 'Create city'}</Button>
           </div>
         </form>
       </DialogContent>
@@ -461,6 +509,11 @@ export function Stores() {
   const [zoneDeleteTarget, setZoneDeleteTarget] = useState<Zone | null>(null)
   const [boundaryZoneId, setBoundaryZoneId] = useState<string | null>(null)
 
+  // city UI state
+  const [cityFormOpen, setCityFormOpen] = useState(false)
+  const [editingCity, setEditingCity] = useState<City | null>(null)
+  const [cityDeleteTarget, setCityDeleteTarget] = useState<City | null>(null)
+
   // entity UI state
   const [entityFormOpen, setEntityFormOpen] = useState(false)
   const [editingEntity, setEditingEntity] = useState<LegalEntity | null>(null)
@@ -600,7 +653,10 @@ export function Stores() {
               <Card className="p-5">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="flex items-center gap-2 text-[15px] font-bold tracking-tight"><MapIcon className="h-4 w-4 text-brand-600" /> Cities & zones</h3>
-                  <Button size="sm" variant="primary" onClick={() => { setEditingZone(null); setZoneFormOpen(true) }}><Plus className="h-3.5 w-3.5" /> Add zone</Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => { setEditingCity(null); setCityFormOpen(true) }}><Plus className="h-3.5 w-3.5" /> Add city</Button>
+                    <Button size="sm" variant="primary" onClick={() => { setEditingZone(null); setZoneFormOpen(true) }}><Plus className="h-3.5 w-3.5" /> Add zone</Button>
+                  </div>
                 </div>
                 {citiesQ.isLoading || zonesQ.isLoading ? (
                   <div className="space-y-2 py-2" role="status" aria-label="Loading service zones">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-16 rounded-xl" />)}</div>
@@ -611,13 +667,17 @@ export function Stores() {
                 ) : (
                   <div className="space-y-4">
                     {cities.map((city) => {
-                      const cityZones = zones.filter((z) => z.active)
-                      if (cityZones.length === 0) return null
+                      const cityZones = zones.filter((z) => z.active && stores.find((s) => s.id === z.storeId)?.cityId === city.id)
                       return (
                         <div key={city.id}>
-                          <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                            <MapPin className="h-3 w-3 text-brand-600" /> {city.name}
-                          </p>
+                          <div className="mb-1.5 flex items-center gap-2">
+                            <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                              <MapPin className="h-3 w-3 text-brand-600" /> {city.name}
+                            </p>
+                            <Button size="sm" variant="ghost" onClick={() => { setEditingCity(city); setCityFormOpen(true) }}><Pencil className="h-3 w-3" /> Edit</Button>
+                            <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setCityDeleteTarget(city)}><Trash2 className="h-3 w-3" /> Delete</Button>
+                          </div>
+                          {cityZones.length === 0 && <p className="mb-2 text-[11px] text-muted-foreground">No zones in this city yet.</p>}
                           <div className="space-y-1.5">
                             {cityZones.map((z) => {
                               const store = stores.find((s) => s.id === z.storeId)
@@ -804,6 +864,33 @@ export function Stores() {
         confirmLabel="Delete zone"
         destructive
         onConfirm={() => { if (zoneDeleteTarget) actions.deleteZone(zoneDeleteTarget.id, zoneDeleteTarget.version, zoneDeleteTarget.name).mutate(undefined, { onError: (e) => setServerError(e.message) }); setZoneDeleteTarget(null) }}
+      />
+
+      {/* ── City add/edit/delete ── */}
+      <CityFormDialog
+        open={cityFormOpen}
+        onOpenChange={setCityFormOpen}
+        initial={editingCity}
+        serverError={serverError}
+        onSubmit={(v, bounds) => {
+          if (editingCity) actions.updateCity(editingCity.id, v.name, bounds).mutate(undefined, {
+            onError: (e) => setServerError(e.message),
+            onSuccess: () => { setServerError(null); setCityFormOpen(false) },
+          })
+          else actions.addCity(v.name, bounds).mutate(undefined, {
+            onError: (e) => setServerError(e.message),
+            onSuccess: () => { setServerError(null); setCityFormOpen(false) },
+          })
+        }}
+      />
+      <ConfirmDialog
+        open={!!cityDeleteTarget}
+        onOpenChange={(v) => { if (!v) setCityDeleteTarget(null) }}
+        title={`Delete city ${cityDeleteTarget?.name}?`}
+        description="Cities used by stores cannot be deleted — the server reports the dependency."
+        confirmLabel="Delete city"
+        destructive
+        onConfirm={() => { if (cityDeleteTarget) actions.deleteCity(cityDeleteTarget.id, cityDeleteTarget.name).mutate(undefined, { onError: (e) => setServerError(`Could not delete city: ${e.message}`) }); setCityDeleteTarget(null) }}
       />
 
       {/* ── Entity add/edit/delete ── */}

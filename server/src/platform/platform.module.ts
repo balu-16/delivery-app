@@ -24,11 +24,14 @@ import {
 } from './contracts/runtime.js';
 import { PLATFORM_RATE_LIMITER } from './contracts/rate-limit.js';
 import { createDatabase, type DatabaseHandle } from './database/database.js';
+import { checkRuntimeSchema } from './database/runtime-schema.js';
 import { READINESS_PROBES, type ReadinessProbe } from './health/contracts.js';
+import { dependencyErrorCode } from './health/dependency-error.js';
 import type { DurableQueue } from './queue/queue.js';
 import type { ConcernQueues } from './queue/concern-queues.js';
 import { SqsEventQueue } from './queue/sqs-event-queue.js';
 import { SqsConcernQueues } from './queue/sqs-concern-queues.js';
+import { SqsOperationError } from './queue/sqs-operation-error.js';
 import { SQS_LANES, SqsTransport, type SqsQueueUrls } from './queue/sqs-transport.js';
 import { createRedis, createIamRedis } from './redis/redis.js';
 import { RedisRateLimiter } from './redis/rate-limiter.js';
@@ -49,7 +52,9 @@ class PlatformLifecycle implements OnApplicationShutdown, OnApplicationBootstrap
     @Inject('PLATFORM_OUTBOX_POLL_INTERVAL') private readonly pollInterval: number,
   ) {}
   onApplicationBootstrap(): void {
-    if (this.worker) this.queue.startRecovery(this.pollInterval);
+    if (!this.worker) return;
+    if (this.concerns instanceof SqsConcernQueues) this.concerns.startRelay();
+    this.queue.startRecovery(this.pollInterval);
   }
   async onApplicationShutdown(): Promise<void> {
     try {
@@ -158,6 +163,68 @@ export class PlatformModule {
   static forRoot(env: Env): DynamicModule {
     const logger = createLogger(env.LOG_LEVEL);
     const worker = env.APP_ROLE === 'all' || env.APP_ROLE === 'worker';
+    const checkDatabase = async (database: DatabaseHandle): Promise<void> => {
+      try {
+        await checkRuntimeSchema(database.db, env.QUEUE_TRANSPORT === 'sqs');
+      } catch (error) {
+        const code = dependencyErrorCode(error);
+        const message =
+          code === '42P01' || code === '42703'
+            ? 'Database schema is behind the application. Apply pending migrations.'
+            : code === '42501'
+              ? 'Runtime database grants are missing. Run grant:runtime as the migration owner.'
+              : 'Database schema check failed. Check the database connection and configuration.';
+        logger.error({ dependency: 'postgres', operation: 'schema-check', code }, message);
+        throw new Error(message, { cause: error });
+      }
+    };
+    const queueError = (transport: Env['QUEUE_TRANSPORT'], queue: string, error: Error): void => {
+      const fields =
+        error instanceof SqsOperationError
+          ? {
+              dependency: error.dependency,
+              operation: error.operation,
+              lane: error.lane,
+              failure: error.message,
+              code: dependencyErrorCode(error.cause),
+            }
+          : { code: dependencyErrorCode(error) };
+      logger.error({ transport, queue, ...fields }, 'Queue operation failed');
+    };
+    const cache = async (connection: string): Promise<Redis> => {
+      const report = (error: unknown): void => {
+        logger.warn(
+          { dependency: 'redis', connection, code: dependencyErrorCode(error) },
+          'Redis connection failed',
+        );
+      };
+      try {
+        const redis =
+          env.CACHE_AUTH === 'elasticache-iam'
+            ? await createIamRedis({
+                url: env.CACHE_URL,
+                cacheName: env.CACHE_IAM_NAME,
+                username: env.CACHE_IAM_USER,
+                region: env.AWS_REGION,
+                connectTimeoutMs: env.CACHE_CONNECT_TIMEOUT_MS,
+                commandTimeoutMs: env.CACHE_COMMAND_TIMEOUT_MS,
+              })
+            : createRedis(env.REDIS_URL);
+        redis.on('error', report);
+        return redis;
+      } catch (error) {
+        report(error);
+        throw new Error('Redis initialization failed', { cause: error });
+      }
+    };
+    const queueReadiness = async (queue: string, check: () => Promise<void>): Promise<void> => {
+      try {
+        await check();
+      } catch (error) {
+        if (error instanceof Error) queueError(env.QUEUE_TRANSPORT, queue, error);
+        throw error;
+      }
+    };
     return {
       module: PlatformModule,
       imports: [MetricsModule],
@@ -185,8 +252,8 @@ export class PlatformModule {
         {
           provide: PLATFORM_DATABASE,
           inject: [HttpMetrics],
-          useFactory: (metrics: HttpMetrics) =>
-            createDatabase(
+          useFactory: async (metrics: HttpMetrics) => {
+            const database = createDatabase(
               env.DATABASE_URL,
               env.DATABASE_POOL_MAX,
               env.DATABASE_STATEMENT_TIMEOUT_MS,
@@ -194,43 +261,23 @@ export class PlatformModule {
               env.DB_ACQUIRE_TIMEOUT_MS,
               env.DATABASE_AUTH === 'iam' ? env.AWS_REGION : undefined,
               metrics,
-            ),
+            );
+            try {
+              await checkDatabase(database);
+              return database;
+            } catch (error) {
+              await database.close();
+              throw error;
+            }
+          },
         },
         {
           provide: PLATFORM_REDIS,
-          useFactory: async () => {
-            const redis =
-              env.CACHE_AUTH === 'elasticache-iam'
-                ? await createIamRedis({
-                    url: env.CACHE_URL,
-                    cacheName: env.CACHE_IAM_NAME,
-                    username: env.CACHE_IAM_USER,
-                    region: env.AWS_REGION,
-                    connectTimeoutMs: env.CACHE_CONNECT_TIMEOUT_MS,
-                    commandTimeoutMs: env.CACHE_COMMAND_TIMEOUT_MS,
-                  })
-                : createRedis(env.REDIS_URL);
-            redis.on('error', () => undefined);
-            return redis;
-          },
+          useFactory: () => cache('commands'),
         },
         {
           provide: PLATFORM_REALTIME_REDIS,
-          useFactory: async () => {
-            const redis =
-              env.CACHE_AUTH === 'elasticache-iam'
-                ? await createIamRedis({
-                    url: env.CACHE_URL,
-                    cacheName: env.CACHE_IAM_NAME,
-                    username: env.CACHE_IAM_USER,
-                    region: env.AWS_REGION,
-                    connectTimeoutMs: env.CACHE_CONNECT_TIMEOUT_MS,
-                    commandTimeoutMs: env.CACHE_COMMAND_TIMEOUT_MS,
-                  })
-                : createRedis(env.REDIS_URL);
-            redis.on('error', () => undefined);
-            return redis;
-          },
+          useFactory: () => cache('tracking'),
         },
         {
           provide: PLATFORM_RATE_LIMITER,
@@ -253,7 +300,7 @@ export class PlatformModule {
                 transport: sqs.transport,
                 consume: worker,
                 concurrency: env.QUEUE_CONCURRENCY,
-                onError: () => logger.error('Concern queue operation failed'),
+                onError: (error) => queueError('sqs', 'concerns', error),
               });
             const { ConcernQueues } = await import('./queue/concern-queues.js');
             return new ConcernQueues({
@@ -261,7 +308,7 @@ export class PlatformModule {
               prefix: runtimeQueuePrefix(env),
               consume: worker,
               concurrency: env.QUEUE_CONCURRENCY,
-              onError: () => logger.error('Concern queue operation failed'),
+              onError: (error) => queueError('bullmq', 'concerns', error),
             });
           },
         },
@@ -278,7 +325,7 @@ export class PlatformModule {
                 transport: sqs.transport,
                 consume: worker,
                 concurrency: env.QUEUE_CONCURRENCY,
-                onError: () => logger.error('Event queue operation failed'),
+                onError: (error) => queueError('sqs', 'events', error),
               });
             const { DurableQueue } = await import('./queue/queue.js');
             const queue = new DurableQueue({
@@ -288,7 +335,7 @@ export class PlatformModule {
               consume: worker,
               concurrency: env.QUEUE_CONCURRENCY,
               autorun: false,
-              onError: () => logger.error('Queue operation failed'),
+              onError: (error) => queueError('bullmq', 'events', error),
             });
             return queue;
           },
@@ -305,15 +352,18 @@ export class PlatformModule {
             const s3 =
               env.STORAGE_PROVIDER === 's3' ? createS3Client(new ConfigService(env)) : null;
             return [
-              { name: 'database', check: () => database.ping() },
+              { name: 'database', check: () => checkDatabase(database) },
               {
                 name: 'redis',
                 check: async () => {
                   if ((await redis.ping()) !== 'PONG') throw new Error('Redis unavailable');
                 },
               },
-              { name: 'queue', check: () => queue.ping() },
-              { name: 'concern-queues', check: () => concerns.ping() },
+              { name: 'queue', check: () => queueReadiness('events', () => queue.ping()) },
+              {
+                name: 'concern-queues',
+                check: () => queueReadiness('concerns', () => concerns.ping()),
+              },
               ...(s3
                 ? [
                     {

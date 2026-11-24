@@ -35,7 +35,10 @@ export class CatalogImportWorker {
     return this.reports.recoverOne(jobId);
   }
   async runOne(jobId?: string): Promise<boolean> {
-    await sql`UPDATE catalog_import_jobs j SET approval_id=NULL,updated_at=clock_timestamp() FROM maker_checker_requests a WHERE j.status='AWAITING_APPROVAL' AND j.approval_id=a.id AND (a.status IN ('REJECTED','EXPIRED') OR (a.status='PENDING' AND a.expires_at<=clock_timestamp())) AND (j.lease_until IS NULL OR j.lease_until<clock_timestamp())`.execute(
+    // Expiry recovery for UNDECIDED requests only: an explicitly REJECTED
+    // approval is terminal (the job is FAILED with a rejection_reason set in
+    // the reject transaction) and must never re-request approval.
+    await sql`UPDATE catalog_import_jobs j SET approval_id=NULL,updated_at=clock_timestamp() FROM maker_checker_requests a WHERE j.status='AWAITING_APPROVAL' AND j.approval_id=a.id AND (a.status='EXPIRED' OR (a.status='PENDING' AND a.expires_at<=clock_timestamp())) AND (j.lease_until IS NULL OR j.lease_until<clock_timestamp())`.execute(
       this.db,
     );
     const token = uuidV7();

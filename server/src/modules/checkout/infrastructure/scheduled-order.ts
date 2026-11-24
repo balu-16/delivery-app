@@ -283,6 +283,7 @@ export class ScheduledOrderService {
         lines: [{ storeId: input.storeId, variantId: input.variantId, quantity: input.quantity }],
         targetDeliveryAt: input.slotStart,
         ttlSeconds: await c.get('paymentWindowSeconds', tx),
+        requireListed: true,
       },
       tx,
     );

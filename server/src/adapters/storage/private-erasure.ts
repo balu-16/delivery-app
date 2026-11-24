@@ -9,6 +9,10 @@ export async function fencePrivateMedia(
   uploadTtl: number,
   readTtl: number,
 ): Promise<void> {
+  await sql`UPDATE customer_profiles SET cover_media_id=NULL,cover_preset_id=NULL,cover_version=cover_version+1
+    WHERE user_id=${userId}::uuid AND (cover_media_id IS NOT NULL OR cover_preset_id IS NOT NULL)`.execute(
+    tx,
+  );
   const media = await sql<{
     id: string;
     file_key: string | null;

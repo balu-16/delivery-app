@@ -23,7 +23,6 @@ const REPORT_TABS = [
   { value: 'financial', label: 'Financial' },
   { value: 'picking', label: 'Picking' },
   { value: 'rider', label: 'Rider activity' },
-  { value: 'subscription', label: 'Subscriptions' },
   { value: 'support', label: 'Support' },
 ] as const
 

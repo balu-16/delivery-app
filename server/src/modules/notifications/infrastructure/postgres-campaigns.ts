@@ -57,13 +57,20 @@ function validateMessage(input: CampaignInput): void {
     }
   }
   if (input.imageUrl) {
-    try {
-      const u = new URL(input.imageUrl);
-      if (u.protocol !== 'https:' || u.username || u.password) throw new Error();
-    } catch {
-      throw new Error('INVALID_INPUT');
+    // Registered content images are stored as /media/<uuid> (074); legacy
+    // external images stay absolute https.
+    const registered = /^\/media\/([0-9a-f-]{36})(\?\S*)?$/.exec(input.imageUrl);
+    if (!registered) {
+      try {
+        const u = new URL(input.imageUrl);
+        if (u.protocol !== 'https:' || u.username || u.password) throw new Error();
+      } catch {
+        throw new Error('INVALID_INPUT');
+      }
     }
   }
+  if (input.imageMediaId && !/^[0-9a-f-]{36}$/i.test(input.imageMediaId))
+    throw new Error('INVALID_INPUT');
   const entries = Object.entries(input.data ?? {});
   if (
     entries.length > 10 ||
@@ -140,6 +147,16 @@ export class PostgresPushCampaigns implements PushCampaigns {
           tx,
         );
       if (!allowed.rows.length) throw new Error('FORBIDDEN');
+      // Registered content image must exist (074); never a product
+      // publication requirement, but the reference itself is validated.
+      if (input.imageMediaId) {
+        const media =
+          await sql`SELECT id FROM catalog_media WHERE id=${input.imageMediaId}::uuid AND purpose='CONTENT_IMAGE' AND state='REGISTERED'`.execute(
+            tx,
+          );
+        if (!media.rows.length) throw new Error('INVALID_INPUT');
+      }
+      const imageFromMedia = input.imageMediaId ? `/media/${input.imageMediaId}` : null;
       const rows = await devices(tx, input);
       if (!rows.length) throw new Error('INVALID_INPUT');
       const id = uuidV7();
@@ -177,7 +194,8 @@ export class PostgresPushCampaigns implements PushCampaigns {
           title: input.title,
           body: input.body,
           deepLink: input.clickAction ?? null,
-          imageUrl: input.imageUrl ?? null,
+          imageUrl: input.imageUrl ?? imageFromMedia,
+          imageMediaId: input.imageMediaId ?? null,
           data: input.data ?? {},
           pushPriority: 'NORMAL',
         };
@@ -216,12 +234,31 @@ export class PostgresPushCampaigns implements PushCampaigns {
   }
   async list(cursor?: string) {
     if (cursor && !/^[0-9a-f-]{36}$/i.test(cursor)) throw new Error('INVALID_INPUT');
-    const rows =
-      await sql`SELECT id,created_by,created_at,target FROM push_campaigns WHERE (${cursor ?? null}::uuid IS NULL OR id<${cursor ?? null}::uuid) ORDER BY id DESC LIMIT 51`.execute(
-        this.db,
-      );
+    // §3E C10: project real title/kind/recipients from the stored payload
+    // (written at create) instead of leaving the client to fake them.
+    const rows = await sql<{
+      id: string;
+      created_by: string;
+      created_at: string;
+      target: unknown;
+      title: string;
+      body: string;
+      kind: string;
+      recipients: string;
+    }>`SELECT id,created_by,created_at::text AS created_at,target,payload->>'title' AS title,payload->>'body' AS body,payload->>'kind' AS kind,(SELECT count(*)::text FROM push_campaign_targets t WHERE t.campaign_id=push_campaigns.id) AS recipients FROM push_campaigns WHERE (${cursor ?? null}::uuid IS NULL OR id<${cursor ?? null}::uuid) ORDER BY id DESC LIMIT 51`.execute(
+      this.db,
+    );
     return {
-      items: rows.rows.slice(0, 50),
+      items: rows.rows.slice(0, 50).map((row) => ({
+        id: row.id,
+        created_by: row.created_by,
+        created_at: row.created_at,
+        target: row.target,
+        title: row.title ?? '',
+        body: row.body ?? '',
+        kind: row.kind ?? 'PROMOTIONAL',
+        recipients: Number(row.recipients ?? 0),
+      })),
       nextCursor: rows.rows.length > 50 ? (rows.rows[49] as { id: string }).id : null,
     };
   }

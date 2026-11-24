@@ -8,6 +8,8 @@ test('maps the plan table exactly and never appends a reference', () => {
   expect(customerErrorMessage(new AuthError('EXPIRED_CODE'))).toBe('Request a new verification code.');
   expect(customerErrorMessage(new ApiError(409, 'PRICE_CHANGED', 't-1'))).toBe('Price changed. Review your cart.');
   expect(customerErrorMessage(new ApiError(409, 'ADDRESS_NOT_SERVICEABLE'))).toBe('Delivery isn’t available here.');
+  expect(customerErrorMessage(new ApiError(409, 'QUOTE_CONSUMED'))).toBe('This checkout was already used. Check My Dairy for your order.');
+  expect(customerErrorMessage(new ApiError(409, 'CART_INTENT_CONSUMED'))).toBe('This checkout was already used. Check My Dairy for your order.');
   expect(customerErrorMessage(new ApiError(409, 'CUTOFF_PASSED'))).toBe('The change deadline has passed.');
   expect(customerErrorMessage(new ApiError(429, 'AGENT_DAILY_LIMIT'))).toBe('Daily limit reached. Resets at 12 AM IST.');
 });

@@ -36,7 +36,7 @@ export class AdminInventoryApprovalController {
   @ApiOperation({
     operationId: 'adminInventoryApproveAdjustment',
     description:
-      'Checker also needs a current STORE_MANAGER assignment at the affected store and must differ from the maker.',
+      'Executes a gated INVENTORY_COUNT approval. The maker must hold a current STORE_MANAGER assignment at the affected store; the checker must be an active SUPER_ADMIN independent of store assignment.',
   })
   @InventoryIdempotencyHeader()
   @ApiResponse({ status: 201, description: 'Approval executed or replayed; empty response' })

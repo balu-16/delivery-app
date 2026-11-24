@@ -113,7 +113,8 @@ test('verified applications converge, sync a pending rider role, and require all
   );
 
   const uploads = {
-    createTarget: async () => ({ mediaId: '', url: '', fields: {} }),
+    createTarget: async () => ({ mediaId: '', url: '', fields: {}, expiresAt: '' }),
+    prepareOwnedUpload: async () => ({ commit: async () => {}, release: async () => {} }),
     assertOwnedRegistered: async () => undefined,
     signedRead: async () => '',
   };
@@ -126,25 +127,50 @@ test('verified applications converge, sync a pending rider role, and require all
   const application = await applications.get(rider);
   expect(application.status).toBe('UNDER_REVIEW');
   expect(application.homeStoreId).toBe(store);
-  await expect(applications.getForStore(outsider, rider)).rejects.toThrow('FORBIDDEN');
-  await expect(onboarding.review(outsider, application.documents[0]!.id, true, '')).rejects.toThrow(
-    'FORBIDDEN',
+  await sql`UPDATE rider_profiles SET vehicle_no=NULL WHERE user_id=${rider}::uuid`.execute(db.db);
+  await expect(
+    onboarding.review(reviewer, application.documents[0]!.id, true, '', { role: 'STORE_MANAGER' }),
+  ).rejects.toThrow('DOCUMENT_STATE_INVALID');
+  await sql`UPDATE rider_profiles SET vehicle_no='KA01ABC' WHERE user_id=${rider}::uuid`.execute(
+    db.db,
   );
+  await sql`UPDATE rider_profiles SET review_required_documents=array_append(review_required_documents,'missing-doc')
+    WHERE user_id=${rider}::uuid`.execute(db.db);
+  await expect(
+    onboarding.review(reviewer, application.documents[0]!.id, true, '', { role: 'STORE_MANAGER' }),
+  ).rejects.toThrow('DOCUMENT_STATE_INVALID');
+  await sql`UPDATE rider_profiles SET review_required_documents=array_remove(review_required_documents,'missing-doc')
+    WHERE user_id=${rider}::uuid`.execute(db.db);
+  await expect(applications.getForStore(outsider, rider)).rejects.toThrow('FORBIDDEN');
+  await expect(
+    onboarding.review(outsider, application.documents[0]!.id, true, '', {
+      role: 'STORE_MANAGER',
+    }),
+  ).rejects.toThrow('FORBIDDEN');
   expect(
     (await applications.listForStore(reviewer, store, undefined, 'UNDER_REVIEW')).items.some(
       (entry) => entry.userId === rider,
     ),
   ).toBe(true);
   await expect(applications.selectStore(rider, otherStore)).rejects.toThrow('RIDER_STATE_INVALID');
-  await onboarding.review(reviewer, application.documents[0]!.id, true, '');
+  await onboarding.review(reviewer, application.documents[0]!.id, true, '', {
+    role: 'STORE_MANAGER',
+  });
   expect((await applications.get(rider)).status).toBe('UNDER_REVIEW');
   await onboarding.review(
     reviewer,
     application.documents[1]!.id,
     false,
     'Please upload a clearer image',
+    {
+      role: 'STORE_MANAGER',
+    },
   );
-  expect((await applications.get(rider)).status).toBe('REJECTED');
+  const rejected = await applications.get(rider);
+  expect(rejected.status).toBe('REJECTED');
+  expect(
+    rejected.documents.find((document) => document.id === application.documents[1]!.id)?.reason,
+  ).toBe('Please upload a clearer image');
   await applications.selectStore(rider, otherStore);
   const moved = await applications.get(rider);
   expect(
@@ -156,7 +182,7 @@ test('verified applications converge, sync a pending rider role, and require all
   const resubmitted = await applications.get(rider);
   expect(resubmitted.status).toBe('UNDER_REVIEW');
   for (const document of resubmitted.documents.filter((item) => item.status === 'PENDING'))
-    await onboarding.review(outsider, document.id, true, '');
+    await onboarding.review(outsider, document.id, true, '', { role: 'STORE_MANAGER' });
   expect((await applications.get(rider)).status).toBe('APPROVED');
   expect((await service.authorize(access, 'rider')).userId).toBe(rider);
   expect(
@@ -192,6 +218,55 @@ test('bootstrap rejects unverified email, blocked identities and workforce email
   await expect(
     applications.bootstrap({ ...identity, sub: uuidV7(), emailVerified: true }),
   ).rejects.toThrow('RIDER_ENROLLMENT_REQUIRES_REVIEW');
+  await sql`UPDATE users SET normalized_email=${`archived-${first.userId}@example.invalid`}
+    WHERE id=${first.userId}::uuid`.execute(db.db);
+  const replacement = await applications.bootstrap({
+    ...identity,
+    sub: uuidV7(),
+    emailVerified: true,
+    groups: ['RIDER'],
+  });
+  expect(replacement.userId).not.toBe(first.userId);
+  expect(await applications.get(replacement.userId)).toMatchObject({
+    status: 'PENDING',
+    homeStoreId: null,
+    vehicleType: null,
+    documents: [],
+  });
+});
+
+test('a verified rider group starts a blank draft and repairs only its own rider profile', async () => {
+  const applications = new PostgresRiderApplications(db.db, new ConfigService(db.db));
+  const sub = uuidV7();
+  const identity = {
+    pool: 'WORKFORCE' as const,
+    tokenUse: 'id' as const,
+    sub,
+    email: `${sub}@example.test`,
+    emailVerified: true,
+    groups: ['RIDER'],
+    expiresAt: 9999999999,
+  };
+  const first = await applications.bootstrap(identity);
+  expect(first).toMatchObject({ status: 'PENDING', groupPending: false });
+  expect(await applications.get(first.userId)).toMatchObject({
+    homeStoreId: null,
+    vehicleType: null,
+    vehicleNo: null,
+    documents: [],
+  });
+  const sync =
+    await sql`SELECT 1 FROM identity_sync_operations WHERE user_id=${first.userId}::uuid`.execute(
+      db.db,
+    );
+  expect(sync.rows).toHaveLength(0);
+
+  await sql`DELETE FROM rider_profiles WHERE user_id=${first.userId}::uuid`.execute(db.db);
+  await expect(applications.bootstrap(identity)).resolves.toEqual(first);
+  await sql`UPDATE user_roles SET role='SUPPORT_AGENT' WHERE user_id=${first.userId}::uuid`.execute(
+    db.db,
+  );
+  await expect(applications.bootstrap(identity)).rejects.toThrow('ROLE_CONFLICT');
 });
 
 test('concurrent customer and rider enrollment cannot create two roles for one subject', async () => {
@@ -253,4 +328,189 @@ test('one administrator can approve an action once, but support cannot approve i
   expect(audit.rows[0]?.single).toBe(true);
   const supportId = await approvals.request(support, 'support', {});
   await expect(approvals.approve(support, supportId)).rejects.toThrow('APPROVAL_INVALID');
+});
+
+const REVIEW_DOC_TYPES = ['licence', 'vehicle_rc', 'id_proof', 'bank_proof'];
+
+async function seedReviewUsers() {
+  const admin = uuidV7(),
+    manager = uuidV7(),
+    outsider = uuidV7(),
+    impostor = uuidV7(),
+    entity = uuidV7(),
+    city = uuidV7(),
+    store = uuidV7(),
+    otherStore = uuidV7();
+  await sql`INSERT INTO users(id,pool,cognito_sub,normalized_email,name) VALUES
+    (${admin}::uuid,'WORKFORCE',${admin},${`${admin}@example.test`},'Admin'),
+    (${manager}::uuid,'WORKFORCE',${manager},${`${manager}@example.test`},'Manager'),
+    (${outsider}::uuid,'WORKFORCE',${outsider},${`${outsider}@example.test`},'Outsider'),
+    (${impostor}::uuid,'WORKFORCE',${impostor},${`${impostor}@example.test`},'Impostor')`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO user_roles(user_id,role) VALUES(${admin}::uuid,'SUPER_ADMIN'),(${manager}::uuid,'STORE_MANAGER'),(${outsider}::uuid,'STORE_MANAGER'),(${impostor}::uuid,'RIDER')`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO legal_entities(id,name) VALUES(${entity}::uuid,'Review entity')`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO cities(id,name,bounds) VALUES(${city}::uuid,'Review city',ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))',4326))`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO stores(id,legal_entity_id,city_id,name,location,status,hourly_capacity) VALUES
+    (${store}::uuid,${entity}::uuid,${city}::uuid,'Review store',ST_GeogFromText('POINT(0.5 0.5)'),'ONLINE',100),
+    (${otherStore}::uuid,${entity}::uuid,${city}::uuid,'Other review store',ST_GeogFromText('POINT(0.5 0.5)'),'ONLINE',100)`.execute(
+    db.db,
+  );
+  await sql`INSERT INTO store_staff(user_id,store_id,role) VALUES(${manager}::uuid,${store}::uuid,'STORE_MANAGER'),(${outsider}::uuid,${otherStore}::uuid,'STORE_MANAGER')`.execute(
+    db.db,
+  );
+  return { admin, manager, outsider, impostor, store, otherStore };
+}
+
+async function bootstrapUnderReview(sub: string, store: string) {
+  const identity = {
+    pool: 'WORKFORCE' as const,
+    tokenUse: 'id' as const,
+    sub,
+    email: `${sub}@example.test`,
+    name: 'Review rider',
+    emailVerified: true,
+    groups: [],
+    expiresAt: 9999999999,
+  };
+  await sql`INSERT INTO local_identity_directory(pool,username,sub,email,name,email_verified)
+    VALUES('WORKFORCE',${sub},${sub},${identity.email},'Review rider',true)`.execute(db.db);
+  const config = new ConfigService(db.db);
+  const applications = new PostgresRiderApplications(db.db, config);
+  const { userId: rider } = await applications.bootstrap(identity);
+  const onboarding = new RiderOnboarding(
+    db.db,
+    {
+      createTarget: async () => ({ mediaId: '', url: '', fields: {}, expiresAt: '' }),
+      async prepareOwnedUpload() {
+        return { commit: async () => undefined, release: async () => undefined };
+      },
+      assertOwnedRegistered: async () => undefined,
+      signedRead: async () => 'https://signed.test/rider-doc/read',
+    },
+    config,
+  );
+  await new RiderProfileService(db.db, config).profile(rider, 'bike', 'KA01ABC');
+  for (const type of REVIEW_DOC_TYPES) await onboarding.registerDocument(rider, type, uuidV7());
+  await applications.selectStore(rider, store);
+  return { rider, applications, onboarding, config };
+}
+
+test('admin and manager approve different documents on the same application and either can finish independently', async () => {
+  const { admin, manager, outsider, impostor, store, otherStore } = await seedReviewUsers();
+  const first = await bootstrapUnderReview(uuidV7(), store);
+  const second = await bootstrapUnderReview(uuidV7(), otherStore);
+  expect((await first.applications.get(first.rider)).status).toBe('UNDER_REVIEW');
+  const snapshot = await sql<{
+    status: string;
+    review_required_documents: string[] | null;
+  }>`SELECT status,review_required_documents FROM rider_profiles WHERE user_id=${first.rider}::uuid`.execute(
+    db.db,
+  );
+  expect(snapshot.rows[0]).toEqual({
+    status: 'UNDER_REVIEW',
+    review_required_documents: REVIEW_DOC_TYPES,
+  });
+  const documents = (await first.applications.get(first.rider)).documents;
+  expect(documents.map((doc) => doc.type).sort()).toEqual([...REVIEW_DOC_TYPES].sort());
+
+  // Admin read-url works; outsider manager and non-admin are denied.
+  await expect(
+    first.onboarding.reviewUrl(admin, documents[0]!.id, { role: 'SUPER_ADMIN' }),
+  ).resolves.toBe('https://signed.test/rider-doc/read');
+  await expect(
+    first.onboarding.reviewUrl(outsider, documents[0]!.id, { role: 'STORE_MANAGER' }),
+  ).rejects.toThrow('FORBIDDEN');
+  await expect(
+    first.onboarding.reviewUrl(impostor, documents[0]!.id, { role: 'SUPER_ADMIN' }),
+  ).rejects.toThrow('FORBIDDEN');
+  // A reviewer cannot review their own application, even with admin scope.
+  await sql`UPDATE user_roles SET role='SUPER_ADMIN' WHERE user_id=${first.rider}::uuid`.execute(
+    db.db,
+  );
+  await expect(
+    first.onboarding.review(first.rider, documents[0]!.id, true, '', { role: 'SUPER_ADMIN' }),
+  ).rejects.toThrow('FORBIDDEN');
+  await expect(
+    first.onboarding.reviewUrl(first.rider, documents[0]!.id, { role: 'SUPER_ADMIN' }),
+  ).rejects.toThrow('DOCUMENT_NOT_FOUND');
+  await sql`UPDATE user_roles SET role='RIDER' WHERE user_id=${first.rider}::uuid`.execute(db.db);
+
+  // Manager and admin approve different documents on the same application.
+  await first.onboarding.review(manager, documents[0]!.id, true, '', { role: 'STORE_MANAGER' });
+  await first.onboarding.review(admin, documents[1]!.id, true, '', { role: 'SUPER_ADMIN' });
+  expect((await first.applications.get(first.rider)).status).toBe('UNDER_REVIEW');
+  await first.onboarding.review(admin, documents[2]!.id, true, '', { role: 'SUPER_ADMIN' });
+  await first.onboarding.review(manager, documents[3]!.id, true, '', { role: 'STORE_MANAGER' });
+  expect((await first.applications.get(first.rider)).status).toBe('APPROVED');
+
+  // The second application finishes independently under its own store manager.
+  const secondDocs = (await second.applications.get(second.rider)).documents;
+  for (const doc of secondDocs)
+    await second.onboarding.review(outsider, doc.id, true, '', { role: 'STORE_MANAGER' });
+  expect((await second.applications.get(second.rider)).status).toBe('APPROVED');
+});
+
+test('a config change mid-review cannot move the checklist until a rejection re-entry', async () => {
+  const { admin, store } = await seedReviewUsers();
+  const entry = await bootstrapUnderReview(uuidV7(), store);
+  const { rider, applications, onboarding, config } = entry;
+  try {
+    expect((await applications.get(rider)).requiredDocuments).toEqual(REVIEW_DOC_TYPES);
+    const byType = async (type: string) =>
+      (await applications.get(rider)).documents.find((doc) => doc.type === type)!;
+    // Narrow the live policy: the in-review checklist must not move.
+    await config.update(admin, 'requiredRiderDocuments', ['licence', 'vehicle_rc']);
+    expect((await applications.get(rider)).requiredDocuments).toEqual(REVIEW_DOC_TYPES);
+    // Approving only the two live-required documents does not approve the app.
+    await onboarding.review(admin, (await byType('licence')).id, true, '', {
+      role: 'SUPER_ADMIN',
+    });
+    await onboarding.review(admin, (await byType('vehicle_rc')).id, true, '', {
+      role: 'SUPER_ADMIN',
+    });
+    expect((await applications.get(rider)).status).toBe('UNDER_REVIEW');
+    // A stale decision on an already-decided document conflicts.
+    await expect(
+      onboarding.review(admin, (await byType('licence')).id, true, '', {
+        role: 'SUPER_ADMIN',
+      }),
+    ).rejects.toThrow('DOCUMENT_STATE_INVALID');
+    // Reject a pending document from the original checklist and resubmit
+    // a document from the narrowed policy to enter review again.
+    await onboarding.review(admin, (await byType('bank_proof')).id, false, 'Illegible scan', {
+      role: 'SUPER_ADMIN',
+    });
+    expect((await applications.get(rider)).status).toBe('REJECTED');
+    await onboarding.registerDocument(rider, 'licence', uuidV7());
+    const resubmitted = await applications.get(rider);
+    expect(resubmitted.status).toBe('UNDER_REVIEW');
+    expect(resubmitted.requiredDocuments).toEqual(['licence', 'vehicle_rc']);
+    const resubmittedSnapshot = await sql<{
+      review_required_documents: string[] | null;
+    }>`SELECT review_required_documents FROM rider_profiles WHERE user_id=${rider}::uuid`.execute(
+      db.db,
+    );
+    expect(resubmittedSnapshot.rows[0]?.review_required_documents).toEqual([
+      'licence',
+      'vehicle_rc',
+    ]);
+    // The refreshed snapshot decides completion using the two live-required documents.
+    await onboarding.review(
+      admin,
+      resubmitted.documents.find((doc) => doc.type === 'licence' && doc.status === 'PENDING')!.id,
+      true,
+      '',
+      { role: 'SUPER_ADMIN' },
+    );
+    expect((await applications.get(rider)).status).toBe('APPROVED');
+  } finally {
+    await config.update(admin, 'requiredRiderDocuments', REVIEW_DOC_TYPES);
+  }
 });

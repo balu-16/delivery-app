@@ -8,6 +8,7 @@ import {
 import type { IdentityAccess } from '../../identity/contracts/identity.js';
 import type { AppConfig } from '../../app-config/contracts/config.js';
 import { decodePage, pageResult } from '../domain/page.js';
+import { subscriptionsRetired } from '../retirement.js';
 import { addDays } from '../domain/schedule.js';
 import type { SubscriptionAdmin } from '../contracts/subscriptions.js';
 export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
@@ -23,6 +24,12 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
     return outer ? fn(outer) : transactionWithRetry(this.db, fn);
   }
   async plans(limit?: number, cursor?: string) {
+    // Compat phase: admin plan reads stay registered but empty.
+    if (subscriptionsRetired()) {
+      const page = decodePage(cursor, 'plans', limit);
+      if (page.after && !/^[0-9a-f-]{36}$/i.test(page.after)) throw new Error('INVALID_PAGE');
+      return { items: [], nextCursor: null };
+    }
     const page = decodePage(cursor, 'plans', limit);
     if (page.after && !/^[0-9a-f-]{36}$/i.test(page.after)) throw new Error('INVALID_PAGE');
     const rows = await sql<{
@@ -38,6 +45,7 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
     );
   }
   async savePlan(actor: string, variantId: string, active: boolean, outer?: TransactionContext) {
+    if (subscriptionsRetired()) throw new Error('SUBSCRIPTIONS_RETIRED');
     return this.run(outer, async (tx) => {
       if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const result = await sql<{
@@ -51,6 +59,12 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
     });
   }
   async slots(storeId: string, limit?: number, cursor?: string) {
+    if (subscriptionsRetired()) {
+      const scope = `slots:${storeId}`,
+        page = decodePage(cursor, scope, limit);
+      if (page.after && !/^[0-9a-f-]{36}$/i.test(page.after)) throw new Error('INVALID_PAGE');
+      return { items: [], nextCursor: null };
+    }
     const scope = `slots:${storeId}`,
       page = decodePage(cursor, scope, limit);
     if (page.after && !/^[0-9a-f-]{36}$/i.test(page.after)) throw new Error('INVALID_PAGE');
@@ -73,6 +87,7 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
     },
     outer?: TransactionContext,
   ) {
+    if (subscriptionsRetired()) throw new Error('SUBSCRIPTIONS_RETIRED');
     if (
       !input.name.trim() ||
       input.name.length > 100 ||
@@ -103,6 +118,12 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
     });
   }
   async holidays(storeId: string, limit?: number, cursor?: string) {
+    if (subscriptionsRetired()) {
+      const scope = `holidays:${storeId}`,
+        page = decodePage(cursor, scope, limit);
+      if (page.after && !/^\d{4}-\d{2}-\d{2}$/.test(page.after)) throw new Error('INVALID_PAGE');
+      return { items: [], nextCursor: null };
+    }
     const scope = `holidays:${storeId}`,
       page = decodePage(cursor, scope, limit);
     if (page.after && !/^\d{4}-\d{2}-\d{2}$/.test(page.after)) throw new Error('INVALID_PAGE');
@@ -121,6 +142,7 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
     remove: boolean,
     outer?: TransactionContext,
   ) {
+    if (subscriptionsRetired()) throw new Error('SUBSCRIPTIONS_RETIRED');
     addDays(date, 0);
     if (reason && reason.length > 200) throw new Error('INVALID_INPUT');
     return this.run(outer, async (tx) => {
@@ -138,6 +160,12 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
     });
   }
   async runs(storeId?: string, limit?: number, cursor?: string) {
+    if (subscriptionsRetired()) {
+      const scope = `runs:${storeId ?? ''}`,
+        page = decodePage(cursor, scope, limit);
+      if (page.after && !/^[0-9a-f-]{36}$/i.test(page.after)) throw new Error('INVALID_PAGE');
+      return { items: [], nextCursor: null };
+    }
     const scope = `runs:${storeId ?? ''}`,
       page = decodePage(cursor, scope, limit);
     if (page.after && !/^[0-9a-f-]{36}$/i.test(page.after)) throw new Error('INVALID_PAGE');
@@ -149,6 +177,7 @@ export class PostgresSubscriptionAdmin implements SubscriptionAdmin {
     return pageResult(rows.rows, page.limit, scope, (r) => r.id);
   }
   async retryRun(actor: string, id: string, outer?: TransactionContext) {
+    if (subscriptionsRetired()) throw new Error('SUBSCRIPTIONS_RETIRED');
     return this.run(outer, async (tx) => {
       if (!(await this.identity.hasRole(actor, ['SUPER_ADMIN'], tx))) throw new Error('FORBIDDEN');
       const run =

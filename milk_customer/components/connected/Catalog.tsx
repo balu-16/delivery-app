@@ -14,17 +14,16 @@ import { BottomSheet } from '@/components/ui/BottomSheet';
 import { Screen } from '@/components/ui/Screen';
 import { images } from '@/constants/assets';
 import { colors, fonts } from '@/constants/theme';
-import { customerApi, customerDetailsApi, type CatalogItem, type CatalogPreviewItem } from '@/src/api/customer';
+import { customerApi, type AppContentItem, type CatalogItem, type CatalogPreviewItem } from '@/src/api/customer';
+import { apiBaseUrl } from '@/src/api/client';
 import { accessToken } from '@/src/auth/session';
 import { useCustomer } from '@/src/store/customer';
 import { fetchCatalogPage, getCachedCatalogPage, isCatalogPageFresh, sameCatalogItems, type CatalogKind } from '@/src/store/catalog-cache';
 import { AddressPanel } from './AddressPanel';
 import { Card, ErrorBanner, Heading, formatPaise, shared } from './Shared';
 import { useProductPhoto } from './useProductPhoto';
-import { PushSettings } from './PushNotifications';
 import { agentClient } from '@/src/agent/client';
 import { agentStrings } from '@/src/agent/strings';
-import { assistantNotificationTarget } from '@/src/agent/notification-target';
 import { useRefresh } from '@/hooks/useRefresh';
 
 type DisplayItem = CatalogItem | CatalogPreviewItem;
@@ -65,10 +64,22 @@ const ProductTile = memo(function ProductTile({ item, select }: { item: DisplayI
 });
 export function Catalog({ home = false }: { home?: boolean }) {
   const insets = useSafeAreaInsets();
-  const { profile, addresses, selectedAddress: savedAddressId, products, cursor, loadCatalog, pendingPlacement, notifications, loadAccount, readNotifications, favorites, favoriteError, retryFavorites, catalogLoad, accountLoad, error } = useCustomer();
+  const profile = useCustomer(s => s.profile);
+  const addresses = useCustomer(s => s.addresses);
+  const savedAddressId = useCustomer(s => s.selectedAddress);
+  const products = useCustomer(s => s.products);
+  const cursor = useCustomer(s => s.cursor);
+  const loadCatalog = useCustomer(s => s.loadCatalog);
+  const pendingPlacement = useCustomer(s => s.pendingPlacement);
+  const loadNotifications = useCustomer(s => s.loadNotifications);
+  const favorites = useCustomer(s => s.favorites);
+  const favoriteError = useCustomer(s => s.favoriteError);
+  const retryFavorites = useCustomer(s => s.retryFavorites);
+  const catalogLoad = useCustomer(s => s.catalogLoad);
+  const error = useCustomer(s => s.error);
   const selectedAddressValue = addresses.find(x => x.id === savedAddressId);
   const selectedAddress = selectedAddressValue ? savedAddressId : null;
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  // Inbox is a full page (/notifications); no duplicate sheet per plan3 §4.
   const [assistantAvailability, setAssistantAvailability] = useState<{ userId: string; enabled: boolean } | null>(null);
   const assistantEnabled = !!profile?.userId && assistantAvailability?.userId === profile.userId && assistantAvailability.enabled;
   const [addressOpen, setAddressOpen] = useState(false), [selection, setSelection] = useState<ProductSelection | null>(null), [query, setQuery] = useState(''), [results, setResults] = useState<{addressId: string; items: CatalogItem[]; kind:'search' | 'category' | 'favorites'; key:string; nextCursor:string | null} | null>(null), [searchError, setSearchError] = useState(''), [searching, setSearching] = useState(false);
@@ -84,6 +95,34 @@ export function Catalog({ home = false }: { home?: boolean }) {
   const previewLoading = previewState?.attempt !== previewAttempt;
   const previewError = !previewLoading && !!previewState?.error;
   const requestNumber = useRef(0);
+  // App content (customize2 §3E): entry + foreground + pull-to-refresh.
+  // Prior view is kept during refresh; first-load failure keeps bundled copy.
+  const [content, setContent] = useState<AppContentItem[] | null>(null);
+  const contentLocale = profile?.locale === 'hi' || profile?.locale === 'te' ? profile.locale : 'en';
+  const fetchContent = useCallback(async () => {
+    if (!home) return;
+    try {
+      const token = await accessToken();
+      const items = await customerApi.appContent(token, contentLocale);
+      setContent(items);
+    } catch { /* keep prior view / bundled defaults */ }
+  }, [home, contentLocale]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchContent();
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') void fetchContent(); });
+    return () => { subscription.remove(); };
+  }, [fetchContent]);
+  const bannerItem = content?.find(item => item.slot === 'CUSTOMER_HOME_BANNER');
+  const offerItem = content?.find(item => item.slot === 'CUSTOMER_OFFERS_CARD');
+  const mapDestination = (destination: string | null): Href | null => {
+    if (!destination) return null;
+    if (destination.startsWith('/cart')) return '/cart' as Href;
+    if (destination.startsWith('/support')) return '/support' as Href;
+    if (destination.startsWith('/offers')) return '/cart' as Href;
+    if (destination.startsWith('/products')) return null;
+    return null;
+  };
   useEffect(() => {
     if (!home || !profile?.userId) return;
     let active = true;
@@ -167,11 +206,12 @@ export function Catalog({ home = false }: { home?: boolean }) {
   // with a forced network read, the addressed catalogue, or the preview.
   // Existing content stays visible and duplicate pulls share one refresh.
   const { refreshing: catalogRefreshing, onRefresh: onCatalogRefresh } = useRefresh(async () => {
+    void fetchContent();
     if (currentResults) await browse(currentResults.kind, currentResults.key, undefined, { force: true });
     else if (selectedAddress) await loadCatalog(undefined, { force: true });
     else setPreviewAttempt(value => value + 1);
   });
-  const { refreshing: noticesRefreshing, onRefresh: onNoticesRefresh } = useRefresh(() => loadAccount());
+  // Notifications now have a dedicated page; no sheet refresh needed.
   const productRefresh = useRefresh(async () => {
     if (!selection) return;
     const { productId, variantId } = selection.item;
@@ -206,12 +246,19 @@ export function Catalog({ home = false }: { home?: boolean }) {
     contentContainerStyle={[shared.scroll, { paddingTop: insets.top + 12, flexGrow: 1 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
     refreshControl={<RefreshControl refreshing={catalogRefreshing} onRefresh={() => void onCatalogRefresh()} tintColor={colors.green} />}
     ListHeaderComponent={<View style={{gap:12}}>
-    <View style={styles.header}><PressableScale onPress={() => setAddressOpen(true)} style={styles.location}><Ionicons name="location" color={colors.green} size={17} /><AppText style={styles.locationText} numberOfLines={1}>{selectedAddressValue?.line1 ?? 'Select delivery address'}</AppText><Ionicons name="chevron-down" color={colors.green} size={15} /></PressableScale><View style={shared.row}>{home && assistantEnabled && <Pressable onPress={() => router.push('/agent' as Href)} accessibilityRole="button" accessibilityLabel={agentStrings(profile?.locale).title} hitSlop={10}><Ionicons name="chatbubble-ellipses-outline" size={24} color={colors.brownDark} /></Pressable>}<Pressable onPress={() => {setNotificationsOpen(true);void loadAccount();}} accessibilityRole="button" accessibilityLabel="Notifications"><Ionicons name="notifications-outline" size={24} color={colors.brownDark} /></Pressable><Pressable onPress={() => router.push('/profile')} accessibilityRole="button" accessibilityLabel="Profile"><Ionicons name="person-circle-outline" size={27} color={colors.brownDark} /></Pressable></View></View>
+    <View style={styles.header}><PressableScale onPress={() => setAddressOpen(true)} style={styles.location}><Ionicons name="location" color={colors.green} size={17} /><AppText style={styles.locationText} numberOfLines={1}>{selectedAddressValue?.line1 ?? 'Select delivery address'}</AppText><Ionicons name="chevron-down" color={colors.green} size={15} /></PressableScale><View style={shared.row}>{home && assistantEnabled && <Pressable onPress={() => router.push('/agent' as Href)} accessibilityRole="button" accessibilityLabel={agentStrings(profile?.locale).title} hitSlop={10}><Ionicons name="chatbubble-ellipses-outline" size={24} color={colors.brownDark} /></Pressable>}<Pressable onPress={() => {void loadNotifications(); router.push('/notifications');}} accessibilityRole="button" accessibilityLabel="Notifications"><Ionicons name="notifications-outline" size={24} color={colors.brownDark} /></Pressable><Pressable onPress={() => router.push('/profile')} accessibilityRole="button" accessibilityLabel="Profile"><Ionicons name="person-circle-outline" size={27} color={colors.brownDark} /></Pressable></View></View>
     <ErrorBanner />
     {error?.includes('Price changed. Review your cart.') && <Button label="Go to cart" size="sm" variant="soft" onPress={() => router.push('/cart')} />}
     {error?.includes('Price changed. Review your cart.') && <Button label="Refresh products" size="sm" variant="soft" onPress={() => {showAll();setPreviewAttempt(value => value+1);if (selectedAddress) void loadCatalog();}} />}
     {pendingPlacement && <View style={{gap:8}}><AppText style={shared.muted}>Check your pending order before adding more items.</AppText><Button label="Go to cart" size="sm" variant="soft" onPress={() => router.push('/cart')} /></View>}
-    {home ? <><Heading title={`Hello${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}`} sub="Fresh dairy for your day" /><View style={styles.hero}><Image source={images.homeHero} style={StyleSheet.absoluteFill} contentFit="cover" /><LinearGradient pointerEvents="none" colors={['rgba(255,248,235,0.98)','rgba(255,248,235,0.82)','rgba(255,248,235,0)']} start={{x:0,y:0.5}} end={{x:1,y:0.5}} style={StyleSheet.absoluteFill} /><View style={styles.heroText}><AppText style={styles.heroTitle}>Freshness at your door</AppText><AppText style={shared.body}>Find fresh dairy for your cart.</AppText></View></View><Pressable onPress={() => router.push('/cart')} accessibilityRole="button" accessibilityLabel="View offers for your cart"><LinearGradient colors={['#FBE6CC','#F5CF9E']} start={{x:0,y:0}} end={{x:1,y:1}} style={styles.offer}><Ionicons name="pricetag-outline" size={24} color={colors.brown} /><View style={{flex:1}}><AppText style={shared.label}>Offers for your cart</AppText><AppText style={shared.muted}>Check available savings at checkout</AppText></View><Ionicons name="arrow-forward" color={colors.brown} size={18} /></LinearGradient></Pressable></> : <Heading title="Products" sub="Fresh dairy for your cart" />}
+    {home ? <><Heading title={`Hello${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}`} sub="Fresh dairy for your day" />
+    {bannerItem?.state === 'VISIBLE' ? <Pressable onPress={() => { const href = mapDestination(bannerItem.destination); if (href) router.push(href); }} accessibilityRole="button" accessibilityLabel={bannerItem.title ?? 'Announcement'}><View style={styles.hero}>{bannerItem.imageUrl ? <Image source={{ uri: `${apiBaseUrl()}${bannerItem.imageUrl}` }} style={StyleSheet.absoluteFill} contentFit="cover" /> : <Image source={images.homeHero} style={StyleSheet.absoluteFill} contentFit="cover" />}<LinearGradient pointerEvents="none" colors={['rgba(255,248,235,0.98)','rgba(255,248,235,0.82)','rgba(255,248,235,0)']} start={{x:0,y:0.5}} end={{x:1,y:0.5}} style={StyleSheet.absoluteFill} /><View style={styles.heroText}>{bannerItem.title ? <AppText style={styles.heroTitle}>{bannerItem.title}</AppText> : null}{bannerItem.body ? <AppText style={shared.body}>{bannerItem.body}</AppText> : null}</View></View></Pressable>
+    : bannerItem?.state === 'DISABLED' || bannerItem?.state === 'INACTIVE' ? null
+    : <View style={styles.hero}><Image source={images.homeHero} style={StyleSheet.absoluteFill} contentFit="cover" /><LinearGradient pointerEvents="none" colors={['rgba(255,248,235,0.98)','rgba(255,248,235,0.82)','rgba(255,248,235,0)']} start={{x:0,y:0.5}} end={{x:1,y:0.5}} style={StyleSheet.absoluteFill} /><View style={styles.heroText}><AppText style={styles.heroTitle}>Freshness at your door</AppText><AppText style={shared.body}>Find fresh dairy for your cart.</AppText></View></View>}
+    {offerItem?.state === 'VISIBLE' ? <Pressable onPress={() => { const href = mapDestination(offerItem.destination) ?? '/cart' as Href; router.push(href); }} accessibilityRole="button" accessibilityLabel={offerItem.title ?? 'Offers for your cart'}><LinearGradient colors={['#FBE6CC','#F5CF9E']} start={{x:0,y:0}} end={{x:1,y:1}} style={styles.offer}><Ionicons name="pricetag-outline" size={24} color={colors.brown} /><View style={{flex:1}}>{offerItem.title ? <AppText style={shared.label}>{offerItem.title}</AppText> : null}{offerItem.body ? <AppText style={shared.muted}>{offerItem.body}</AppText> : null}</View><Ionicons name="arrow-forward" color={colors.brown} size={18} /></LinearGradient></Pressable>
+    : offerItem?.state === 'DISABLED' || offerItem?.state === 'INACTIVE' ? null
+    : <Pressable onPress={() => router.push('/cart')} accessibilityRole="button" accessibilityLabel="View offers for your cart"><LinearGradient colors={['#FBE6CC','#F5CF9E']} start={{x:0,y:0}} end={{x:1,y:1}} style={styles.offer}><Ionicons name="pricetag-outline" size={24} color={colors.brown} /><View style={{flex:1}}><AppText style={shared.label}>Offers for your cart</AppText><AppText style={shared.muted}>Check available savings at checkout</AppText></View><Ionicons name="arrow-forward" color={colors.brown} size={18} /></LinearGradient></Pressable>}
+    </> : <Heading title="Products" sub="Fresh dairy for your cart" />}
     {!home && <View style={shared.row}><TextInput style={[shared.input, { flex: 1 }]} value={query} onChangeText={text => { setQuery(text); if (!text) {showAll();setPreviewSearch('');} }} placeholder="Search products" accessibilityLabel="Search products" onSubmitEditing={search} /><Button label="Search" size="sm" variant="soft" onPress={search} disabled={searching} /></View>}
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8}}><Button label="All" size="sm" variant={selectedAddress ? !currentResults ? 'primary' : 'soft' : previewFilter === 'all' ? 'primary' : 'soft'} onPress={showAll} /><Button label="Favorites" icon="heart-outline" size="sm" variant={(selectedAddress ? currentResults?.kind === 'favorites' : previewFilter === 'favorites') ? 'primary' : 'soft'} onPress={() => activate('favorites','favorites')} />{(selectedAddress && categories?.addressId === selectedAddress ? categories.items : previewCategories).map(category => <Button key={category.id} label={category.name} size="sm" variant={(selectedAddress ? currentResults?.kind === 'category' && currentResults.key === category.id : previewFilter === category.id) ? 'primary' : 'soft'} onPress={() => activate('category',category.id)} />)}</ScrollView>
     {!!favoriteError && <View style={shared.row}><AppText style={[shared.muted,{flex:1}]}>{favoriteError}</AppText><Button label="Retry" size="sm" variant="soft" onPress={() => void retryFavorites?.()} /></View>}
@@ -225,19 +272,7 @@ export function Catalog({ home = false }: { home?: boolean }) {
       : browseFailedKind && currentResults?.kind === browseFailedKind ? <View style={{gap:8}}><AppText style={shared.muted}>{searchError || 'Couldn’t load products.'}</AppText><Button label="Try again" variant="soft" size="sm" onPress={() => void browse(currentResults.kind, currentResults.key)} /></View>
       : <AppText style={shared.muted}>{!selectedAddress && previewError ? 'Couldn’t load the product preview.' : !selectedAddress && previewSearch ? 'No matching products in the preview.' : currentResults?.kind === 'favorites' ? 'No favorites available at this address yet.' : 'No products available here right now.'}</AppText>}
     ListFooterComponent={selectedAddress && (currentResults?.nextCursor ? <Button label="Load more" variant="soft" loading={searching} onPress={() => void browse(currentResults.kind,currentResults.key,currentResults.nextCursor ?? undefined)} /> : !currentResults && cursor ? <Button label="Load more" variant="soft" onPress={() => void loadCatalog(cursor)} /> : <></>) || <></>}
-  /><AddressPanel visible={addressOpen} onClose={() => setAddressOpen(false)} /><BottomSheet visible={notificationsOpen} onClose={() => setNotificationsOpen(false)} title="Notifications" refreshControl={<RefreshControl refreshing={noticesRefreshing} onRefresh={() => void onNoticesRefresh()} tintColor={colors.green} />}><View style={{gap:10}}><ErrorBanner />
-    {accountLoad?.notifications === 'idle' || accountLoad?.notifications === 'loading' ? <CardListSkeleton label="Loading notifications" count={2} />
-      : accountLoad?.notifications === 'error' ? <><AppText style={shared.muted}>Couldn’t load notifications.</AppText><Button label="Try again" size="sm" variant="soft" onPress={() => void loadAccount()} /></>
-      : <>{notifications.length > 0 && <Button label="Mark all as read" size="sm" variant="soft" onPress={() => void readNotifications()} />}{notifications.length ? notifications.map(item => {
-        const data = item.payload?.data && typeof item.payload.data === 'object' && !Array.isArray(item.payload.data) ? item.payload.data as Record<string, unknown> : {};
-        const target = assistantNotificationTarget({ ...data, deepLink: item.payload?.deepLink });
-        const content = <Card><AppText style={shared.label}>{item.title}</AppText><AppText style={shared.body}>{item.body}</AppText>{!item.readAt && <AppText style={shared.muted}>Unread</AppText>}</Card>;
-        return target ? <Pressable key={item.id} accessibilityRole="button" onPress={() => {
-          void accessToken().then(token => customerDetailsApi.readNotification(token, item.id)).then(() => loadAccount()).catch(() => undefined);
-          setNotificationsOpen(false); router.push({ pathname: '/agent', params: target } as Href);
-        }}>{content}</Pressable> : <View key={item.id}>{content}</View>;
-      }) : <AppText style={shared.muted}>You have no notifications.</AppText>}</>}
-    <PushSettings /></View></BottomSheet><BottomSheet visible={!!selected} onClose={() => setSelection(null)} title={selected?.name} subtitle={selected?.variantName} refreshControl={
+  /><AddressPanel visible={addressOpen} onClose={() => setAddressOpen(false)} /><BottomSheet visible={!!selected} onClose={() => setSelection(null)} title={selected?.name} subtitle={selected?.variantName} refreshControl={
       <RefreshControl refreshing={productRefresh.refreshing} onRefresh={() => void productRefresh.onRefresh()} tintColor={colors.green} />
     }>{selected && <View style={{gap:12}}>
       {!!selection?.error && <AppText accessibilityLiveRegion="polite" style={shared.muted}>{selection.error}</AppText>}
@@ -248,6 +283,12 @@ export function Catalog({ home = false }: { home?: boolean }) {
           void useCustomer.getState().updateCart(selected.variantId, 1, selected);
           setSelection(null);
         }} disabled={('availability' in selected && selected.availability === 'OUT_OF_STOCK') || !!pendingPlacement} fullWidth />
+        <Button label="View details" variant="soft" fullWidth onPress={() => {
+          const prodId = selected.productId;
+          const varId = selected.variantId;
+          setSelection(null);
+          router.push({ pathname: '/product/[id]', params: { id: prodId, variantId: varId } });
+        }} />
       </>}
     </View>}</BottomSheet></Screen>;
 }

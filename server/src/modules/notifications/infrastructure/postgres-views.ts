@@ -30,6 +30,8 @@ interface Row {
   created_at: Date;
   cursor_created_at: string;
   sent_at: Date | null;
+  rendered_title: string | null;
+  rendered_body: string | null;
 }
 
 /** Inbox reads; ownership is filtered inside every SQL statement (IDOR-safe). */
@@ -43,10 +45,10 @@ export class PostgresNotificationViews implements NotificationViews {
       throw new Error('INVALID_INPUT');
     const decoded = cursor ? decodeCursorExact(cursor) : null;
     const rows = decoded
-      ? await sql<Row>`SELECT id,channel,template_key,locale,category,class,payload,status,read_at,created_at,created_at::text AS cursor_created_at,sent_at FROM notifications WHERE user_id=${userId}::uuid AND channel='INBOX' AND status='SENT' AND (created_at, id) < (${decoded.timestamp}::timestamptz, ${decoded.id}::uuid) ORDER BY created_at DESC, id DESC LIMIT ${size + 1}`.execute(
+      ? await sql<Row>`SELECT id,channel,template_key,locale,category,class,payload,status,read_at,created_at,created_at::text AS cursor_created_at,sent_at,rendered_title,rendered_body FROM notifications WHERE user_id=${userId}::uuid AND channel='INBOX' AND status='SENT' AND (created_at, id) < (${decoded.timestamp}::timestamptz, ${decoded.id}::uuid) ORDER BY created_at DESC, id DESC LIMIT ${size + 1}`.execute(
           this.db,
         )
-      : await sql<Row>`SELECT id,channel,template_key,locale,category,class,payload,status,read_at,created_at,created_at::text AS cursor_created_at,sent_at FROM notifications WHERE user_id=${userId}::uuid AND channel='INBOX' AND status='SENT' ORDER BY created_at DESC, id DESC LIMIT ${size + 1}`.execute(
+      : await sql<Row>`SELECT id,channel,template_key,locale,category,class,payload,status,read_at,created_at,created_at::text AS cursor_created_at,sent_at,rendered_title,rendered_body FROM notifications WHERE user_id=${userId}::uuid AND channel='INBOX' AND status='SENT' ORDER BY created_at DESC, id DESC LIMIT ${size + 1}`.execute(
           this.db,
         );
     const page = rows.rows.slice(0, size);
@@ -56,6 +58,15 @@ export class PostgresNotificationViews implements NotificationViews {
     ]);
     return {
       items: page.map((row) => {
+        // §3E: stored text when present (frozen at creation); legacy rows
+        // without stored text render from the live template.
+        if (row.rendered_title !== null && row.rendered_body !== null) {
+          return {
+            ...viewOf(row),
+            title: row.rendered_title,
+            body: row.rendered_body,
+          };
+        }
         const template = selectTemplate(templates, row.template_key, 'INBOX', row.locale);
         const data = (row.payload['data'] ?? {}) as Record<string, string>;
         return {

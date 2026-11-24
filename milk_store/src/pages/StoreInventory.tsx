@@ -11,7 +11,7 @@ import {
 import { useStagger, useDebouncedValue } from '@dairydirect/shared/hooks/misc'
 import {
   useActiveStoreId, useStoreStock, useLowStock, useExpiringStock, useStoreAdjustments,
-  useCountSessions, useBinLocations,
+  useCountSessions, useBinLocations, useInventoryApprovalUnits,
 } from '@/api/storeQueries'
 import { useStoreInventoryActions } from '@/api/storeMutations'
 import { exportInventory, type StockRow } from '@/api/storeApi'
@@ -62,11 +62,12 @@ function daysLeft(expiryDate: string) {
 interface BatchOption { batchId: string; variantId: string; label: string; version: string }
 
 /* ── Record adjustment dialog (shared by stock-row ⋮ and adjustments tab) ── */
-function AdjustDialog({ open, onOpenChange, options, defaultBatchId, onConfirm }: {
+function AdjustDialog({ open, onOpenChange, options, defaultBatchId, approvalUnits, onConfirm }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   options: BatchOption[]
   defaultBatchId?: string
+  approvalUnits: number | null
   onConfirm: (option: BatchOption, delta: number, reason: string) => void
 }) {
   const [batchId, setBatchId] = useState(defaultBatchId ?? '')
@@ -79,7 +80,9 @@ function AdjustDialog({ open, onOpenChange, options, defaultBatchId, onConfirm }
 
   const option = options.find((o) => o.batchId === batchId) ?? null
   const numDelta = Number(delta)
-  const needsApproval = Number.isFinite(numDelta) && Math.abs(numDelta) >= 20
+  // The server's threshold is the authority at submit; this preview mirrors
+  // it strictly (larger than the threshold, not greater-or-equal).
+  const needsApproval = approvalUnits !== null && Number.isFinite(numDelta) && Math.abs(numDelta) > approvalUnits
   const valid = !!option && delta !== '' && Number.isFinite(numDelta) && numDelta !== 0 && reason.trim().length >= MIN_REASON
 
   return (
@@ -108,7 +111,9 @@ function AdjustDialog({ open, onOpenChange, options, defaultBatchId, onConfirm }
             'rounded-lg px-3 py-2 text-[11.5px] font-medium',
             needsApproval ? 'bg-warning-soft text-amber-700 dark:text-amber-300' : 'bg-muted text-muted-foreground',
           )}>
-            Large (≥ 20 units) adjustments are sent to the admin for approval.
+            {approvalUnits !== null
+              ? `Adjustments larger than ${approvalUnits} units are sent to the admin for approval.`
+              : 'Large adjustments are sent to the admin for approval.'}
           </p>
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="secondary" size="md" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -156,6 +161,7 @@ export function StoreInventory() {
   const adjQ = useStoreAdjustments(storeId)
   const sessionsQ = useCountSessions(storeId)
   const binsQ = useBinLocations(storeId)
+  const approvalUnitsQ = useInventoryApprovalUnits(storeId)
   const allStock = stockQ.data ?? []
   const lowRows = lowQ.data ?? []
   const expiringRows = expQ.data ?? []
@@ -276,7 +282,16 @@ export function StoreInventory() {
 
   const submitAdjustment = (option: BatchOption, delta: number, reason: string) => {
     if (!storeId) return
+    // The server result decides: a returned approvalId means the adjustment
+    // is pending admin approval; no approvalId means it applied immediately.
     void invActions.createAdjustment(storeId, option.variantId, option.batchId, delta, option.version, reason)
+      .then((result) => {
+        if (result && typeof result === 'object' && 'approvalId' in result && result.approvalId) {
+          toast.info('Adjustment sent for admin approval')
+        } else if (result) {
+          toast.success('Adjustment applied')
+        }
+      })
   }
 
   const exportCsv = () => {
@@ -825,6 +840,7 @@ export function StoreInventory() {
         onOpenChange={setAdjustOpen}
         options={batchOptions}
         defaultBatchId={adjustBatchId}
+        approvalUnits={approvalUnitsQ.data ?? null}
         onConfirm={submitAdjustment}
       />
     </motion.div>

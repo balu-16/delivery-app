@@ -6,6 +6,7 @@ import { consumeOnce, failDeliveryAttempt } from '../events/consume.js';
 import { OutboxStore, type EventEnvelope } from '../outbox/outbox.js';
 import type { EventHandler } from './queue.js';
 import { SqsBatchWorker } from './sqs-batch-worker.js';
+import { SqsOperationError } from './sqs-operation-error.js';
 import type { SqsJobPointer, SqsTransport } from './sqs-transport.js';
 
 interface EventRow {
@@ -149,16 +150,27 @@ export class SqsEventQueue {
         while (!failed) {
           const delivery = deliveries[next++];
           if (!delivery) return;
+          let sent = false;
           try {
             await this.options.transport.send(
               'platform-events',
               eventPointer(delivery.event.eventId, delivery.consumer),
             );
+            sent = true;
             await this.outbox.acknowledge(delivery);
             unresolved.delete(delivery);
-          } catch {
+          } catch (cause) {
             failed = true;
             this.relayFailures++;
+            this.onError(
+              new SqsOperationError(
+                'SQS_EVENT_RELAY_FAILED',
+                sent ? 'postgres' : 'sqs',
+                sent ? 'record-send' : 'send',
+                'platform-events',
+                cause,
+              ),
+            );
           }
         }
       });
@@ -182,7 +194,17 @@ export class SqsEventQueue {
       if (this.recovery) return;
       this.recovery = this.recoverOnce()
         .then(() => undefined)
-        .catch(() => this.onError(new Error('SQS_EVENT_RELAY_FAILED')))
+        .catch((cause) =>
+          this.onError(
+            new SqsOperationError(
+              'SQS_EVENT_RELAY_FAILED',
+              'postgres',
+              'relay',
+              'platform-events',
+              cause,
+            ),
+          ),
+        )
         .finally(() => {
           this.recovery = undefined;
         });
@@ -196,9 +218,17 @@ export class SqsEventQueue {
         const result = await this.worker.runOnce('platform-events', this.abort.signal);
         this.jobsCompleted += result.completed;
         this.jobsFailed += result.failed + result.malformed;
-      } catch {
+      } catch (cause) {
         if (!this.abort.signal.aborted) {
-          this.onError(new Error('SQS_EVENT_POLL_FAILED'));
+          this.onError(
+            new SqsOperationError(
+              'SQS_EVENT_POLL_FAILED',
+              'sqs',
+              'receive',
+              'platform-events',
+              cause,
+            ),
+          );
           await delay(1000);
         }
       }

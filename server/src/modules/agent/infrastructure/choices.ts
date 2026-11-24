@@ -223,7 +223,12 @@ export async function saveChoiceAnswer(
 export async function commitChoice(
   deps: ChoiceDeps,
   tx: TransactionContext,
-  input: ChoiceRef & { variantId: string; quantity: number; maxQuantity: number },
+  input: ChoiceRef & {
+    variantId: string;
+    quantity: number;
+    maxQuantity: number;
+    answeredInMessage?: true;
+  },
 ): Promise<{ result: Json; replayed: boolean }> {
   if (
     !Number.isSafeInteger(input.quantity) ||
@@ -269,7 +274,11 @@ export async function commitChoice(
     `choice:${row.id}`,
     { tx },
   );
-  const selection = { variantId: input.variantId, quantity: input.quantity };
+  const selection = {
+    variantId: input.variantId,
+    quantity: input.quantity,
+    ...(input.answeredInMessage ? { answeredInMessage: true } : {}),
+  };
   await sql`UPDATE agent_cart_choices SET status='committed',selection=${JSON.stringify(selection)}::jsonb,
     result=${JSON.stringify(result)}::jsonb,updated_at=clock_timestamp() WHERE id=${row.id}::uuid`.execute(
     tx,
