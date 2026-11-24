@@ -54,26 +54,6 @@ export default defineConfig(({ mode }) => ({
   build: {
     manifest: true,
     chunkSizeWarningLimit: 120,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return undefined
-          if (/[\\/]react-dom[\\/]|[\\/]node_modules[\\/]react[\\/]|scheduler/.test(id)) return 'react'
-          if (id.includes('react-router') || id.includes('@remix-run')) return 'router'
-          if (id.includes('motion-dom') || id.includes('motion-utils') || id.includes('motion-design') || id.includes('motion-player')) return 'motion'
-          if (id.includes('tslib')) return 'motion'
-          if (id.includes('workbox') || id.includes('vite-plugin-pwa')) return 'pwa'
-          if (id.includes('@tanstack')) return 'query'
-          if (id.includes('recharts') || id.includes('d3-') || id.includes('react-smooth') || id.includes('victory') || id.includes('lodash') || /[\\/]prop-types[\\/]|[\\/]react-is[\\/]/.test(id)) return 'charts'
-          if (id.includes('leaflet')) return 'maps'
-          if (id.includes('framer-motion')) return 'motion'
-          if (id.includes('zod') || id.includes('react-hook-form') || id.includes('@hookform')) return 'forms'
-          if (id.includes('sonner')) return 'toasts'
-          if (id.includes('@radix-ui') || id.includes('lucide-react') || id.includes('clsx') || id.includes('tailwind-merge') || id.includes('class-variance-authority') || id.includes('react-remove-scroll') || id.includes('use-sidecar') || id.includes('use-callback-ref') || id.includes('react-style-singleton') || id.includes('@floating-ui')) return 'ui'
-          return 'vendor'
-        },
-      },
-    },
   },
   server: {
     port: 5173,
